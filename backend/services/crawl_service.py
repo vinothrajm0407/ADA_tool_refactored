@@ -47,6 +47,21 @@ def inmemory_get_pages(crawl_id: str) -> list[dict]:
     return list(_inmemory_pages.get(crawl_id, []))
 
 
+def inmemory_get_status(crawl_id: str) -> str | None:
+    return _inmemory_crawls.get(crawl_id, {}).get("status")
+
+
+def cancel_crawl_job(crawl_id: str) -> bool:
+    """Mark a running/pending crawl as cancelled. Returns True if the job existed."""
+    record = _inmemory_crawls.get(crawl_id) or db.get_crawl_job(crawl_id)
+    if not record:
+        return False
+    ended_at = _utcnow_iso()
+    db.update_crawl_job_status(crawl_id, "cancelled", ended_at=ended_at)
+    inmemory_update_crawl(crawl_id, status="cancelled", ended_at=ended_at)
+    return True
+
+
 # ── Service functions ────────────────────────────────────────────────────────
 
 def create_crawl_job(root_url: str, options: dict | None = None) -> dict:

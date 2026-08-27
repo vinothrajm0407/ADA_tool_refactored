@@ -11,7 +11,6 @@ const defaultSettings = {
   notifications: {
     emailReports: false,
     slackAlerts: false,
-    weeklyDigest: false,
   },
   scheduled: {
     autoScan: false,
@@ -164,12 +163,6 @@ export default function SettingsPage() {
               description="Post notifications to your Slack workspace"
               checked={settings.notifications.slackAlerts}
               onChange={(v) => setNested('notifications', 'slackAlerts', v)}
-            />
-            <ToggleRow
-              label="Weekly Digest"
-              description="Summary of accessibility findings every week"
-              checked={settings.notifications.weeklyDigest}
-              onChange={(v) => setNested('notifications', 'weeklyDigest', v)}
             />
           </SettingsCard>
 

@@ -38,3 +38,29 @@ class Config:
     SMTP_PASS = os.getenv("SMTP_PASS", "")
     SMTP_FROM = os.getenv("SMTP_FROM", "")
     APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:5000")
+    # Phase 3 — AI summary (Feature 2)
+    ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    AI_SUMMARY_ENABLED = bool(os.getenv("ANTHROPIC_API_KEY", ""))
+    AI_SUMMARY_MODEL = os.getenv("AI_SUMMARY_MODEL", "claude-sonnet-4-6")
+    # Phase 3 — Alert thresholds (Feature 3)
+    ALERT_SCORE_DROP_THRESHOLD = int(os.getenv("ALERT_SCORE_DROP_THRESHOLD", "5"))
+    ALERT_VIOLATION_INCREASE_THRESHOLD = int(os.getenv("ALERT_VIOLATION_INCREASE_THRESHOLD", "10"))
+    ALERT_EMAIL = os.getenv("ALERT_EMAIL", "")  # defaults to notify_email of the job
+    # Phase 3 — Scheduler (Feature 1)
+    SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() in ("1", "true", "yes")
+    SCHEDULER_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60"))
+    # Auth
+    JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production-use-a-long-random-string")
+    if IS_PRODUCTION and JWT_SECRET == "change-me-in-production-use-a-long-random-string":
+        raise RuntimeError(
+            "JWT_SECRET must be set to a strong random value in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
+    EMAIL_VERIFY_EXPIRE_HOURS = int(os.getenv("EMAIL_VERIFY_EXPIRE_HOURS", "24"))
+    PASSWORD_RESET_EXPIRE_HOURS = int(os.getenv("PASSWORD_RESET_EXPIRE_HOURS", "1"))
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+    # Slack integration (OAuth bot token flow)
+    SLACK_CLIENT_ID     = os.getenv("SLACK_CLIENT_ID", "")
+    SLACK_CLIENT_SECRET = os.getenv("SLACK_CLIENT_SECRET", "")
+    SLACK_ENABLED       = bool(os.getenv("SLACK_CLIENT_ID", ""))

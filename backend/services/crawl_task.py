@@ -2,6 +2,7 @@
 RQ task: BFS site crawl with per-page axe accessibility scan.
 One Playwright browser is opened for the entire crawl session.
 """
+import json
 import logging
 from collections import deque
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from backend.services.crawl_service import (
     inmemory_update_crawl,
     inmemory_append_page,
     inmemory_update_page,
+    inmemory_get_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,7 @@ def crawl_site_task(
     total_scanned = 0
     total_failed = 0
     axe = Axe()
+    was_cancelled = False
 
     try:
         with sync_playwright() as p:
@@ -74,6 +77,11 @@ def crawl_site_task(
             pw_page = context.new_page()
 
             while queue and (total_scanned + total_failed) < max_pages:
+                # Check for stop signal between pages (thread-pool: in-memory; RQ: DB fallback)
+                current_status = inmemory_get_status(crawl_id) or db.get_crawl_job_status(crawl_id)
+                if current_status == "cancelled":
+                    was_cancelled = True
+                    break
                 url, parent_url, depth = queue.popleft()
                 norm_url = normalize_url(url)
 
@@ -135,7 +143,6 @@ def crawl_site_task(
                         "includeBestPractices": False,
                         "usedFallback": False,
                     }
-                    history_id = db.save_scan_history(scan_result)
 
                     db.update_crawl_page(
                         page_id,
@@ -143,7 +150,7 @@ def crawl_site_task(
                         passes=pcount,
                         violations=vcount,
                         pass_rate=pass_rate,
-                        scan_history_id=history_id,
+                        result_payload=json.dumps(scan_result),
                         scanned_at=scanned_at,
                     )
                     inmemory_update_page(
@@ -207,6 +214,10 @@ def crawl_site_task(
         )
         raise
 
+    if was_cancelled:
+        logger.info("Crawl cancelled | crawl_id=%s scanned=%d", crawl_id, total_scanned)
+        return {"crawl_id": crawl_id, "status": "cancelled", "total_scanned": total_scanned}
+
     completed_at = _utcnow_iso()
     duration = _duration(started_at, completed_at)
     db.update_crawl_job_status(
@@ -220,6 +231,11 @@ def crawl_site_task(
         ended_at=completed_at,
         duration_seconds=duration,
     )
+
+    # Compute aggregate metrics and persist to CrawlJob.Metadata
+    summary = db.finalize_crawl_summary(crawl_id)
+    inmemory_update_crawl(crawl_id, **summary)
+
     logger.info(
         "Crawl completed | crawl_id=%s scanned=%d failed=%d duration=%.1fs",
         crawl_id, total_scanned, total_failed, duration or 0,
@@ -237,6 +253,22 @@ def crawl_site_task(
             )
     else:
         logger.info("Email skipped — notify_email is empty/None")
+
+    # Phase 3 — AI summary (non-blocking, best-effort)
+    try:
+        from backend.services.ai_summary_service import generate_and_store_summary
+        generate_and_store_summary(crawl_id)
+    except Exception as _ai_exc:
+        logger.warning("AI summary failed | crawl_id=%s error=%s", crawl_id, _ai_exc)
+
+    # Phase 3 — Alert evaluation (non-blocking, best-effort)
+    try:
+        from backend.services.alert_service import evaluate_and_create_alerts
+        alert_ids = evaluate_and_create_alerts(crawl_id)
+        if alert_ids:
+            logger.info("Alerts created | crawl_id=%s alert_ids=%s", crawl_id, alert_ids)
+    except Exception as _alert_exc:
+        logger.warning("Alert evaluation failed | crawl_id=%s error=%s", crawl_id, _alert_exc)
 
     return {
         "crawl_id": crawl_id,

@@ -25,14 +25,28 @@ echo "[start] Starting RQ worker..."
 REDIS_URL=redis://localhost:6379 env/bin/python workers/run_worker.py &
 WORKER_PID=$!
 
+# Start Vite frontend dev server in background (calls Windows npm via WSL interop)
+echo "[start] Starting frontend (npm run dev)..."
+npm run dev &
+FRONTEND_PID=$!
+
+# Start browser extension watch build in background
+echo "[start] Starting extension build (watch mode)..."
+(cd "$PROJECT_ROOT/extension" && npm run dev) &
+EXTENSION_PID=$!
+
 echo ""
-echo "  Flask  PID: $FLASK_PID"
-echo "  Worker PID: $WORKER_PID"
+echo "  Flask     PID: $FLASK_PID"
+echo "  Worker    PID: $WORKER_PID"
+echo "  Frontend  PID: $FRONTEND_PID"
+echo "  Extension PID: $EXTENSION_PID"
 echo ""
-echo "  Open http://localhost:5000"
-echo "  Press Ctrl+C to stop both."
+echo "  Backend:   http://localhost:5000"
+echo "  Frontend:  http://localhost:5173"
+echo "  Extension: reload unpacked extension in chrome://extensions after each rebuild"
+echo "  Press Ctrl+C to stop all."
 echo ""
 
-# Wait and forward Ctrl+C to both processes
-trap "echo ''; echo '[start] Stopping...'; kill $FLASK_PID $WORKER_PID 2>/dev/null; exit 0" INT TERM
-wait $FLASK_PID $WORKER_PID
+# Wait and forward Ctrl+C to all processes
+trap "echo ''; echo '[start] Stopping...'; kill $FLASK_PID $WORKER_PID $FRONTEND_PID $EXTENSION_PID 2>/dev/null; exit 0" INT TERM
+wait $FLASK_PID $WORKER_PID $FRONTEND_PID $EXTENSION_PID

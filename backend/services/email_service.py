@@ -18,6 +18,154 @@ logger = logging.getLogger(__name__)
 # Public API
 # ---------------------------------------------------------------------------
 
+def send_verification_email(user: dict, token: str, expiry_hours: int = 24) -> bool:
+    """
+    Send an email-verification link to *user['email']*.
+
+    Returns True on success, False on any failure (never raises).
+    """
+    try:
+        if not Config.SMTP_ENABLED:
+            logger.debug("send_verification_email: SMTP disabled — skipping.")
+            return False
+        if not Config.SMTP_HOST:
+            logger.warning("send_verification_email: SMTP_HOST not configured — skipping.")
+            return False
+
+        verify_url = f"{Config.APP_BASE_URL}/verify-email?token={token}"
+        first_name = user.get("firstName", "there")
+        subject    = "Verify your ADA account email"
+        html_body  = _build_verification_html(first_name, verify_url, expiry_hours)
+
+        return _send_email(
+            to=user["email"],
+            subject=subject,
+            html_body=html_body,
+        )
+    except Exception:
+        logger.exception("send_verification_email: unexpected error for user_id=%s", user.get("id"))
+        return False
+
+
+def send_password_reset_email(user: dict, token: str, expiry_hours: int = 1) -> bool:
+    """
+    Send a password-reset link to *user['email']*.
+
+    Returns True on success, False on any failure (never raises).
+    """
+    try:
+        if not Config.SMTP_ENABLED:
+            logger.debug("send_password_reset_email: SMTP disabled — skipping.")
+            return False
+        if not Config.SMTP_HOST:
+            logger.warning("send_password_reset_email: SMTP_HOST not configured — skipping.")
+            return False
+
+        reset_url  = f"{Config.APP_BASE_URL}/reset-password?token={token}"
+        first_name = user.get("firstName", "there")
+        subject    = "Reset your ADA account password"
+        html_body  = _build_reset_password_html(first_name, reset_url, expiry_hours)
+
+        return _send_email(
+            to=user["email"],
+            subject=subject,
+            html_body=html_body,
+        )
+    except Exception:
+        logger.exception("send_password_reset_email: unexpected error for user_id=%s", user.get("id"))
+        return False
+
+
+def _build_reset_password_html(first_name: str, reset_url: str, expiry_hours: int) -> str:
+    s_body   = "margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;"
+    s_wrap   = "max-width:520px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);"
+    s_header = "background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);padding:32px 40px;text-align:center;"
+    s_title  = "margin:0;font-size:24px;font-weight:700;color:#ffffff;"
+    s_body_p = "padding:32px 40px;"
+    s_p      = "font-size:15px;color:#374151;line-height:1.6;margin:0 0 16px;"
+    s_btn    = ("display:inline-block;background:#0d9488;color:#ffffff;text-decoration:none;"
+                "padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:0.3px;")
+    s_note   = "font-size:12px;color:#9ca3af;margin:24px 0 0;"
+    s_footer = "background:#f8f9fa;border-top:1px solid #e5e7eb;padding:16px 40px;text-align:center;"
+    s_ft_p   = "margin:4px 0;font-size:11px;color:#aaaaaa;"
+
+    expiry_label = f"{expiry_hours} hour{'s' if expiry_hours != 1 else ''}"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Reset your password</title></head>
+<body style="{s_body}">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table cellpadding="0" cellspacing="0" style="{s_wrap}">
+      <tr><td style="{s_header}">
+        <h1 style="{s_title}">ADA Accessibility Tool</h1>
+      </td></tr>
+      <tr><td style="{s_body_p}">
+        <p style="{s_p}">Hi {first_name},</p>
+        <p style="{s_p}">We received a request to reset your password. Click the button below to choose a new one.</p>
+        <p style="text-align:center;margin:28px 0;">
+          <a href="{reset_url}" style="{s_btn}">Reset Password</a>
+        </p>
+        <p style="{s_p}">If the button doesn't work, copy and paste this link into your browser:</p>
+        <p style="font-size:12px;color:#6b7280;word-break:break-all;margin:0 0 16px;">{reset_url}</p>
+        <p style="{s_note}">This link expires in {expiry_label}. If you didn't request a password reset, you can safely ignore this email.</p>
+      </td></tr>
+      <tr><td style="{s_footer}">
+        <p style="{s_ft_p}">ADA Accessibility Tool &mdash; automated message</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+
+
+def _build_verification_html(first_name: str, verify_url: str, expiry_hours: int) -> str:
+    s_body   = "margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;"
+    s_wrap   = "max-width:520px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);"
+    s_header = "background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);padding:32px 40px;text-align:center;"
+    s_title  = "margin:0;font-size:24px;font-weight:700;color:#ffffff;"
+    s_body_p = "padding:32px 40px;"
+    s_p      = "font-size:15px;color:#374151;line-height:1.6;margin:0 0 16px;"
+    s_btn    = ("display:inline-block;background:#0d9488;color:#ffffff;text-decoration:none;"
+                "padding:14px 32px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:0.3px;")
+    s_note   = "font-size:12px;color:#9ca3af;margin:24px 0 0;"
+    s_footer = "background:#f8f9fa;border-top:1px solid #e5e7eb;padding:16px 40px;text-align:center;"
+    s_ft_p   = "margin:4px 0;font-size:11px;color:#aaaaaa;"
+
+    expiry_label = f"{expiry_hours} hour{'s' if expiry_hours != 1 else ''}"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Verify your email</title></head>
+<body style="{s_body}">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table cellpadding="0" cellspacing="0" style="{s_wrap}">
+      <tr><td style="{s_header}">
+        <h1 style="{s_title}">ADA Accessibility Tool</h1>
+      </td></tr>
+      <tr><td style="{s_body_p}">
+        <p style="{s_p}">Hi {first_name},</p>
+        <p style="{s_p}">Thanks for creating an account. Please verify your email address by clicking the button below.</p>
+        <p style="text-align:center;margin:28px 0;">
+          <a href="{verify_url}" style="{s_btn}">Verify Email Address</a>
+        </p>
+        <p style="{s_p}">If the button doesn't work, copy and paste this link into your browser:</p>
+        <p style="font-size:12px;color:#6b7280;word-break:break-all;margin:0 0 16px;">{verify_url}</p>
+        <p style="{s_note}">This link expires in {expiry_label}. If you didn't create an account, you can safely ignore this email.</p>
+      </td></tr>
+      <tr><td style="{s_footer}">
+        <p style="{s_ft_p}">ADA Accessibility Tool &mdash; automated message</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+
+
 def send_crawl_report(crawl_id: str, recipient_email: str) -> bool:
     """
     Send an HTML crawl completion report to *recipient_email*.

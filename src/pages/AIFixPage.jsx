@@ -1,3 +1,4 @@
+import { apiFetch } from '../utils/api';
 import { useState, useEffect, useCallback } from 'react';
 import { Wand2, Bot, Copy, Check, AlertCircle, RefreshCw } from 'lucide-react';
 import { StatusPill } from '../components/ui/StatusBadge';
@@ -40,7 +41,7 @@ export default function AIFixPage() {
     const fetchViolations = async () => {
       setHistoryLoading(true);
       try {
-        const res = await fetch('/api/history?limit=5');
+        const res = await apiFetch('/api/history?limit=5');
         const data = await res.json();
         if (!data.ok || !Array.isArray(data.items)) {
           setHistoryLoading(false);
@@ -59,7 +60,7 @@ export default function AIFixPage() {
             violations = item.result.violations;
           } else if (item.id) {
             try {
-              const detailRes = await fetch(`/api/history/${item.id}`);
+              const detailRes = await apiFetch(`/api/history/${item.id}`);
               const detailData = await detailRes.json();
               if (detailData.ok && detailData.result && Array.isArray(detailData.result.violations)) {
                 violations = detailData.result.violations;
@@ -94,7 +95,7 @@ export default function AIFixPage() {
     setResult(null);
     setError('');
     try {
-      const res = await fetch('/api/ai-fix', {
+      const res = await apiFetch('/api/ai-fix', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ violation: selectedViolation, framework }),

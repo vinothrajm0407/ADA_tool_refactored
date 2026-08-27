@@ -1,5 +1,7 @@
+import { apiFetch } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { Globe, BarChart2, TrendingUp, TrendingDown, Minus, Network, Activity, AlertTriangle } from 'lucide-react';
+import { formatUrl, formatShortDate, formatDuration } from '../utils/format';
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -124,11 +126,11 @@ export default function DashboardPage() {
         const fallback = { ok: false };
         const safeJson = (res) => res.json().catch(() => fallback);
         const [histJson, trendJson, weekJson, crawlJson, trend60Json] = await Promise.all([
-          fetch('/api/history').then(safeJson).catch(() => fallback),
-          fetch('/api/trends?days=30').then(safeJson).catch(() => fallback),
-          fetch('/api/trends?days=7').then(safeJson).catch(() => fallback),
-          fetch('/api/crawls').then(safeJson).catch(() => fallback),
-          fetch('/api/trends?days=60').then(safeJson).catch(() => fallback),
+          apiFetch('/api/history').then(safeJson).catch(() => fallback),
+          apiFetch('/api/trends?days=30').then(safeJson).catch(() => fallback),
+          apiFetch('/api/trends?days=7').then(safeJson).catch(() => fallback),
+          apiFetch('/api/crawls').then(safeJson).catch(() => fallback),
+          apiFetch('/api/trends?days=60').then(safeJson).catch(() => fallback),
         ]);
 
         if (histJson.ok && Array.isArray(histJson.items)) {
@@ -163,7 +165,7 @@ export default function DashboardPage() {
     (async () => {
       setIntelLoading(true);
       try {
-        const res  = await fetch('/api/violations/summary?limit=25');
+        const res  = await apiFetch('/api/violations/summary?limit=25');
         const json = await res.json().catch(() => ({ ok: false }));
         if (json.ok && json.available) {
           setViolationIntel(json);
@@ -231,29 +233,6 @@ export default function DashboardPage() {
   const topUrls = [...historyItems]
     .sort((a, b) => (b.violations ?? 0) - (a.violations ?? 0))
     .slice(0, 5);
-
-  const formatUrl = (url) => {
-    try {
-      const u = new URL(url);
-      return u.hostname + (u.pathname !== '/' ? u.pathname : '');
-    } catch {
-      return url;
-    }
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return '';
-    try { return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
-    catch { return ''; }
-  };
-
-  const formatDuration = (secs) => {
-    if (secs == null) return '—';
-    if (secs < 60) return `${Math.round(secs)}s`;
-    const m = Math.floor(secs / 60);
-    const s = Math.round(secs % 60);
-    return s > 0 ? `${m}m ${s}s` : `${m}m`;
-  };
 
   const getStatusValue = (item) => (item.passRate ?? 0) >= 70 ? 'Passed' : 'Needs review';
 
@@ -369,7 +348,7 @@ export default function DashboardPage() {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ background: '#1F2937', border: 'none', borderRadius: 10, color: '#F8F6F1', fontSize: 12 }}
@@ -399,7 +378,7 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={trendData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ background: '#1F2937', border: 'none', borderRadius: 10, color: '#F8F6F1', fontSize: 12 }}
@@ -420,7 +399,7 @@ export default function DashboardPage() {
           {/* Recent Scans */}
           <div className="lg:col-span-2 bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center justify-between">
-              <p className="font-heading font-semibold text-base text-ink dark:text-white">Recent Scans</p>
+              <span className="font-heading font-semibold text-base text-ink dark:text-white">Recent Scans</span>
               <span className="text-xs text-body dark:text-gray-500">{totalScans} total</span>
             </div>
 
@@ -462,7 +441,7 @@ export default function DashboardPage() {
                       </p>
                       <p className="text-xs text-body dark:text-gray-500 mt-0.5">
                         {item.violations ?? 0} violation{(item.violations ?? 0) !== 1 ? 's' : ''}
-                        {item.timestamp ? ` · ${formatDate(item.timestamp)}` : ''}
+                        {item.timestamp ? ` · ${formatShortDate(item.timestamp)}` : ''}
                       </p>
                     </div>
                     <StatusBadge status={getStatusValue(item)} />
@@ -532,9 +511,9 @@ export default function DashboardPage() {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-body dark:text-gray-500" />
-            <p className="font-heading font-semibold text-sm uppercase tracking-wider text-body dark:text-gray-400 leading-none">
+            <span className="font-heading font-semibold text-sm uppercase tracking-wider text-body dark:text-gray-400 leading-none">
               Violation Intelligence
-            </p>
+            </span>
           </div>
 
           <div className="grid lg:grid-cols-2 gap-5">
@@ -648,7 +627,7 @@ export default function DashboardPage() {
           <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-coral flex-shrink-0" />
-              <p className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Needs Attention</p>
+              <span className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Needs Attention</span>
             </div>
             {intelLoading ? (
               <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
@@ -703,7 +682,7 @@ export default function DashboardPage() {
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Network className="w-4 h-4 text-body dark:text-gray-500" />
-                <p className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Recent Crawls</p>
+                <span className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Recent Crawls</span>
               </div>
               <span className="text-xs text-body dark:text-gray-500">{crawlsTotal} total</span>
             </div>
@@ -748,7 +727,7 @@ export default function DashboardPage() {
                         {formatDuration(c.duration_seconds)}
                       </p>
                       <p className="text-xs text-body dark:text-gray-500 mt-0.5">
-                        {formatDate(c.created_at)}
+                        {formatShortDate(c.created_at)}
                       </p>
                     </div>
                   </div>

@@ -30,6 +30,7 @@ export default {
         coral:      '#E76F51',
         night:      '#161616',
         charcoal:   '#1F1F1F',
+        'brand-blue': '#2563EB',
       },
       fontFamily: {
         heading: ['"Space Grotesk"', 'sans-serif'],

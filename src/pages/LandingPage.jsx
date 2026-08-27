@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Globe, BarChart2, Keyboard, Wand2, TrendingUp, ShieldCheck,
   Sun, Moon,
   Sparkles, ArrowRight, ChevronDown,
   Link2, Search, Zap,
   Terminal, Code, Mail, GitBranch, FileCode, Monitor, Clock,
-  Check, Circle,
+  Check,
 } from 'lucide-react';
+import BrandLogo from '../components/ui/BrandLogo';
+import { useApp } from '../context/AppContext';
 import HeroMockup from '../components/ui/HeroMockup';
 import CrawlPreview from '../components/ui/CrawlPreview';
 import AIFixPreview from '../components/ui/AIFixPreview';
@@ -83,27 +85,6 @@ const INTEGRATIONS = [
   { icon: Clock,     label: 'Scheduled Scans',  desc: 'Daily and weekly auto-monitoring',     available: false },
 ];
 
-const ROADMAP_NOW = [
-  'Accessibility Scanning',
-  'Multi-page Crawling',
-  'Trend Analytics',
-  'AI Remediation',
-  'Keyboard Testing',
-  'Email Reports',
-  'Scan History',
-  'Crawl Reports',
-];
-
-const ROADMAP_SOON = [
-  'GitHub Integration',
-  'Multi-Viewport Scanning',
-  'WCAG PDF Reports',
-  'Scheduled Monitoring',
-  'SARIF Export',
-  'VS Code Extension',
-  'Single Sign-On',
-  'API Webhooks v2',
-];
 
 /* ─────────────────────────────────────────────
    Sub-components
@@ -160,7 +141,48 @@ function SpotlightBullet({ text }) {
 /* ─────────────────────────────────────────────
    Page
 ───────────────────────────────────────────── */
+function AuthRequiredModal({ onLogin, onSignup, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={onClose}>
+      <div
+        className="bg-white dark:bg-charcoal rounded-2xl shadow-2xl p-8 w-full max-w-sm text-center"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="w-12 h-12 rounded-full bg-teal/10 flex items-center justify-center mx-auto mb-4">
+          <ShieldCheck className="w-6 h-6 text-teal" />
+        </div>
+        <h2 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Sign in to continue</h2>
+        <p className="text-sm text-body dark:text-gray-400 mb-7">
+          Please sign in or create an account to access ADA.
+        </p>
+        <div className="flex flex-col gap-3">
+          <button onClick={onLogin} className="btn-primary w-full py-3">Sign In</button>
+          <button
+            onClick={onSignup}
+            className="w-full py-3 rounded-xl border border-gray-200 dark:border-white/10 text-sm font-semibold text-ink dark:text-white hover:bg-ivory dark:hover:bg-white/5 transition-colors"
+          >
+            Create Account
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LandingPage({ onOpenApp, dark, toggleDark }) {
+  const { navigate, isAuthenticated, setPostAuthRedirect } = useApp();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  function handleProtectedCta(destination) {
+    if (isAuthenticated) {
+      if (destination === 'scan') navigate('new-scan');
+      else navigate('dashboard');
+    } else {
+      setPostAuthRedirect(destination === 'scan' ? 'new-scan' : null);
+      setShowAuthModal(true);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-white dark:bg-night font-body">
 
@@ -176,12 +198,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
       <header
         className="sticky top-0 z-50 bg-white/90 dark:bg-night/90 backdrop-blur-md border-b border-gray-100 dark:border-white/5 px-8 h-[4.5rem] flex items-center justify-between"
       >
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg bg-teal flex items-center justify-center" aria-hidden="true">
-            <span className="font-heading font-bold text-white text-sm">A</span>
-          </div>
-          <span className="font-heading font-bold text-ink dark:text-white text-xl tracking-tight">ADA</span>
-        </div>
+        <BrandLogo variant="landing" />
 
         <nav aria-label="Main navigation" className="hidden sm:flex items-center gap-7">
           {[
@@ -201,7 +218,19 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
             className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal">
             {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-          <button onClick={onOpenApp} className="btn-primary">Launch App</button>
+          {isAuthenticated ? (
+            <button onClick={() => navigate('dashboard')} className="btn-primary">Launch App</button>
+          ) : (
+            <>
+              <button
+                onClick={() => navigate('login')}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-ink dark:text-white border border-gray-200 dark:border-white/10 hover:bg-ivory dark:hover:bg-white/5 transition-colors"
+              >
+                Login
+              </button>
+              <button onClick={() => navigate('signup')} className="btn-primary">Sign Up</button>
+            </>
+          )}
         </div>
       </header>
 
@@ -235,9 +264,9 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 mt-8">
-                <button onClick={onOpenApp}
+                <button onClick={() => handleProtectedCta('scan')}
                   className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0 shadow-glow focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2">
-                  Scan My Site <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                  Start Scan <ArrowRight className="w-4 h-4" aria-hidden="true" />
                 </button>
                 <a href="#how-it-works"
                   className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl border border-gray-200 dark:border-white/10 bg-transparent text-ink dark:text-white font-semibold font-heading text-sm hover:bg-ivory dark:hover:bg-white/5 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl">
@@ -425,11 +454,11 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
               ADA scans your entire site, not just one page. Get a full accessibility report, per-page scores, and AI-generated code fixes in minutes.
             </p>
             <div className="flex flex-wrap justify-center gap-3">
-              <button onClick={onOpenApp}
+              <button onClick={() => handleProtectedCta('scan')}
                 className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 focus-visible:ring-offset-ink">
-                Scan My Site <ArrowRight className="w-4 h-4" aria-hidden="true" />
+                Start Scan <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </button>
-              <button onClick={onOpenApp}
+              <button onClick={() => handleProtectedCta('app')}
                 style={{ backgroundColor: 'rgba(255,255,255,0.08)', color: '#ffffff', border: '1px solid rgba(255,255,255,0.2)' }}
                 className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl font-semibold font-heading text-sm cursor-pointer focus:outline-none">
                 Launch App
@@ -474,62 +503,25 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
           </div>
         </section>
 
-        {/* PLATFORM ROADMAP */}
-        <section aria-label="Platform roadmap" className="py-16 bg-white dark:bg-night">
-          <div className="max-w-4xl mx-auto px-8">
-            <div className="text-center mb-10">
-              <span className="text-xs font-semibold uppercase tracking-widest text-teal">Roadmap</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2">Platform roadmap</h2>
-              <p className="text-sm text-body dark:text-gray-400 mt-3 max-w-sm mx-auto leading-relaxed">
-                What ADA can do today, and where it's headed.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="card p-7">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-2 h-2 rounded-full bg-teal" aria-hidden="true" />
-                  <h3 className="font-heading font-semibold text-base text-ink dark:text-white">Available Today</h3>
-                </div>
-                <ul className="flex flex-col gap-2.5">
-                  {ROADMAP_NOW.map((item) => (
-                    <li key={item} className="flex items-center gap-2.5">
-                      <Check className="w-4 h-4 text-teal flex-shrink-0" aria-hidden="true" />
-                      <span className="text-sm text-body dark:text-gray-300">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="card p-7 border-dashed">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
-                  <h3 className="font-heading font-semibold text-base text-ink dark:text-white">On the Roadmap</h3>
-                </div>
-                <ul className="flex flex-col gap-2.5">
-                  {ROADMAP_SOON.map((item) => (
-                    <li key={item} className="flex items-center gap-2.5">
-                      <Circle className="w-4 h-4 text-gray-300 dark:text-gray-600 flex-shrink-0" aria-hidden="true" />
-                      <span className="text-sm text-body dark:text-gray-400">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
 
       </main>
 
       {/* ── FOOTER ── */}
       <footer className="bg-ink text-white py-7 px-8 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-md bg-teal flex items-center justify-center" aria-hidden="true">
-            <span className="font-heading font-bold text-white text-xs">A</span>
-          </div>
+        <div className="flex items-center gap-2.5">
+          <BrandLogo variant="compact" />
           <span className="font-heading font-bold text-white text-base tracking-tight">ADA</span>
         </div>
-        <p className="text-gray-400 text-xs">&copy; {new Date().getFullYear()} ADA Intelligence. All rights reserved.</p>
+        <p className="text-gray-400 text-xs">&copy; {new Date().getFullYear()} United Techno. All rights reserved.</p>
       </footer>
 
+      {showAuthModal && (
+        <AuthRequiredModal
+          onClose={() => setShowAuthModal(false)}
+          onLogin={() => { setShowAuthModal(false); navigate('login'); }}
+          onSignup={() => { setShowAuthModal(false); navigate('signup'); }}
+        />
+      )}
     </div>
   );
 }

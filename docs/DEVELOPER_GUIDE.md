@@ -19,7 +19,7 @@ This guide is for developers who need to **add or change sidebar items**, **head
 
 ```
 UI_Design/
-├── app.py                    # Flask server (serves UI + /api/process)
+├── app.py                    # Flask server (serves UI + REST API routes)
 ├── src/
 │   ├── App.jsx               # Main layout: Header, Sidebar, content column (ContentArea + Footer)
 │   ├── config/
@@ -31,7 +31,7 @@ UI_Design/
 │       ├── ContentArea/      # Main area (URL input + Process)
 │       └── Footer/           # Footer in content column only (uses footerConfig.js)
 ├── services/
-│   └── url_processor.py     # Python logic for /api/process
+│   └── url_processor.py     # Python logic for assisted-test endpoints
 └── docs/
     └── DEVELOPER_GUIDE.md    # This file
 ```
@@ -221,9 +221,9 @@ Update the year or company name as needed.
 
 ## 6. Backend (Flask) and content
 
-- **Flask** serves the built React app and the **`POST /api/process`** endpoint.  
-- The UI sends `{ "url": "..." }` to `/api/process`.  
-- Python logic lives in **`services/url_processor.py`** in `process_url(url)`.  
+- **Flask** serves the built React app and all REST API routes (`/api/scan`, `/api/history`, `/api/crawl`, etc.).
+- The UI sends `{ "url": "..." }` to `POST /api/scan` and polls `GET /api/scan/<jobId>` for results.
+- Assisted-test logic lives in **`services/url_processor.py`**.
 - To add more API routes or call other Python scripts, edit **`app.py`** and/or **`services/url_processor.py`**.
 
 For building and running the app (npm, Flask), see the main **README.md** in the project root.

@@ -171,3 +171,231 @@ export function splitFailureSummary(text) {
     .map((s) => s.trim())
     .filter(Boolean)
 }
+
+// ─── Effort levels ────────────────────────────────────────────────────────────
+const RULE_EFFORT = {
+  'aria-allowed-attr':     'quick',
+  'aria-required-attr':    'quick',
+  'aria-valid-attr':       'quick',
+  'aria-valid-attr-value': 'quick',
+  'autocomplete-valid':    'quick',
+  'button-name':           'quick',
+  'frame-title':           'quick',
+  'html-has-lang':         'quick',
+  'image-alt':             'quick',
+  'link-name':             'quick',
+  'list-item':             'quick',
+  'meta-viewport':         'quick',
+  'color-contrast':        'moderate',
+  'heading-order':         'moderate',
+  'label':                 'moderate',
+  'region':                'moderate',
+}
+
+export function getRuleEffort(ruleId) {
+  return RULE_EFFORT[normalizeRuleId(ruleId)] || 'quick'
+}
+
+// ─── Impacted user groups ─────────────────────────────────────────────────────
+const RULE_IMPACTED_USERS = {
+  'aria-allowed-attr':     ['Screen reader users', 'Keyboard users'],
+  'aria-required-attr':    ['Screen reader users'],
+  'aria-valid-attr':       ['Screen reader users'],
+  'aria-valid-attr-value': ['Screen reader users'],
+  'autocomplete-valid':    ['Screen reader users', 'Motor impaired'],
+  'button-name':           ['Screen reader users', 'Voice control users'],
+  'color-contrast':        ['Low vision users', 'Color blind users'],
+  'frame-title':           ['Screen reader users'],
+  'heading-order':         ['Screen reader users', 'Cognitive'],
+  'html-has-lang':         ['Screen reader users'],
+  'image-alt':             ['Screen reader users', 'Low vision users'],
+  'label':                 ['Screen reader users', 'Voice control users', 'Cognitive'],
+  'link-name':             ['Screen reader users', 'Voice control users'],
+  'list-item':             ['Screen reader users'],
+  'meta-viewport':         ['Low vision users', 'Mobile users'],
+  'region':                ['Screen reader users', 'Keyboard users'],
+}
+
+const IMPACT_USERS_FALLBACK = {
+  critical: ['Screen reader users', 'Keyboard users'],
+  serious:  ['Screen reader users'],
+  moderate: ['Screen reader users', 'Low vision users'],
+  minor:    ['Screen reader users'],
+}
+
+export function getRuleImpactedUsers(ruleId, impact) {
+  return (
+    RULE_IMPACTED_USERS[normalizeRuleId(ruleId)] ||
+    IMPACT_USERS_FALLBACK[(impact || 'minor').toLowerCase()] ||
+    IMPACT_USERS_FALLBACK.minor
+  )
+}
+
+// ─── Before / After code pairs ────────────────────────────────────────────────
+const RULE_CODE_PAIRS = {
+  'aria-allowed-attr': {
+    before: '<div aria-expanded="false" class="menu-toggle">\n  Settings\n</div>',
+    after:  '<button aria-expanded="false" class="menu-toggle">\n  Settings\n</button>',
+  },
+  'aria-required-attr': {
+    before: '<input role="combobox" placeholder="Search cities">',
+    after:  '<input role="combobox"\n       aria-expanded="false"\n       aria-controls="city-list"\n       placeholder="Search cities">',
+  },
+  'aria-valid-attr': {
+    before: '<button aria-lable="Close dialog">×</button>',
+    after:  '<button aria-label="Close dialog">×</button>',
+  },
+  'aria-valid-attr-value': {
+    before: '<button aria-expanded="yes">Filters</button>',
+    after:  '<button aria-expanded="false">Filters</button>',
+  },
+  'autocomplete-valid': {
+    before: '<input type="email" autocomplete="user-email">',
+    after:  '<input type="email" autocomplete="email">',
+  },
+  'button-name': {
+    before: '<button>\n  <svg viewBox="0 0 24 24">...</svg>\n</button>',
+    after:  '<button aria-label="Close dialog">\n  <svg viewBox="0 0 24 24" aria-hidden="true">...</svg>\n</button>',
+  },
+  'color-contrast': {
+    before: '/* ratio: 2.3:1 — fails WCAG AA */\n.hint { color: #aaaaaa; background: #ffffff; }',
+    after:  '/* ratio: 7.0:1 — passes WCAG AA ✓ */\n.hint { color: #595959; background: #ffffff; }',
+  },
+  'frame-title': {
+    before: '<iframe src="/embed/map"></iframe>',
+    after:  '<iframe src="/embed/map" title="Office location map"></iframe>',
+  },
+  'heading-order': {
+    before: '<h1>Site Title</h1>\n<!-- skips h2 -->\n<h3>Section Name</h3>',
+    after:  '<h1>Site Title</h1>\n<h2>Section Name</h2>',
+  },
+  'html-has-lang': {
+    before: '<html>',
+    after:  '<html lang="en">',
+  },
+  'image-alt': {
+    before: '<img src="revenue-chart.png">',
+    after:  '<img src="revenue-chart.png"\n     alt="Q4 revenue chart showing 23% YoY growth">',
+  },
+  'label': {
+    before: '<input type="email" placeholder="Enter email">',
+    after:  '<label for="email">Email address</label>\n<input id="email" type="email"\n       placeholder="you@example.com">',
+  },
+  'link-name': {
+    before: '<a href="/home">\n  <svg>...</svg>\n</a>',
+    after:  '<a href="/home" aria-label="Go to homepage">\n  <svg aria-hidden="true">...</svg>\n</a>',
+  },
+  'list-item': {
+    before: '<div>\n  <li>Step one</li>\n  <li>Step two</li>\n</div>',
+    after:  '<ul>\n  <li>Step one</li>\n  <li>Step two</li>\n</ul>',
+  },
+  'meta-viewport': {
+    before: '<meta name="viewport"\n      content="width=device-width, initial-scale=1, user-scalable=no">',
+    after:  '<meta name="viewport"\n      content="width=device-width, initial-scale=1">',
+  },
+  'region': {
+    before: '<div class="content">\n  <p>Main page content</p>\n</div>',
+    after:  '<main>\n  <p>Main page content</p>\n</main>',
+  },
+}
+
+export function getRuleCodePair(ruleId) {
+  return RULE_CODE_PAIRS[normalizeRuleId(ruleId)] || null
+}
+
+// ─── Post-fix validation checklist ───────────────────────────────────────────
+const RULE_VALIDATION_STEPS = {
+  'aria-allowed-attr': [
+    'Tab to the element — role is announced correctly by screen reader',
+    'Confirm no ARIA attribute warnings in browser accessibility tree',
+    'Re-run axe — rule clears with zero violations',
+  ],
+  'aria-required-attr': [
+    'Open screen reader — interactive component announces state (e.g. "collapsed")',
+    'Verify aria-controls points to an existing element ID',
+    'Re-run axe — rule clears',
+  ],
+  'aria-valid-attr': [
+    'Inspect element in browser — no unknown aria-* attributes in computed accessibility',
+    'Re-run axe — rule clears',
+  ],
+  'aria-valid-attr-value': [
+    'Toggle component — screen reader announces correct state change',
+    'Verify boolean attrs use "true" / "false" strings, not 1/0 or yes/no',
+    'Re-run axe — rule clears',
+  ],
+  'autocomplete-valid': [
+    'Focus the field — browser or password manager suggests saved values',
+    'Verify token matches the W3C autocomplete attribute list',
+    'Re-run axe — rule clears',
+  ],
+  'button-name': [
+    'Tab to button — screen reader announces the label, not just "button"',
+    'Label describes the action clearly without surrounding context',
+    'Voice control users can activate button by saying its label',
+    'Re-run axe — rule clears',
+  ],
+  'color-contrast': [
+    'Check contrast ratio with browser DevTools or Colour Contrast Analyser',
+    'Verify hover, focus, and disabled states independently',
+    'View page in grayscale — text is still legible',
+    'Re-run axe — rule clears',
+  ],
+  'frame-title': [
+    'Tab to iframe — screen reader announces the title before entering',
+    'Title describes the embedded content purpose, not "iframe"',
+    'Re-run axe — rule clears',
+  ],
+  'heading-order': [
+    'Review page heading structure with screen reader heading list',
+    'No heading levels skipped in sequence',
+    'Re-run axe — rule clears',
+  ],
+  'html-has-lang': [
+    'Screen reader uses correct voice/pronunciation profile for the language',
+    'lang attribute uses a valid BCP 47 tag (e.g. en, en-US, fr)',
+    'Re-run axe — rule clears',
+  ],
+  'image-alt': [
+    'Screen reader announces the alt text in place of the image filename',
+    'Decorative images have alt="" and are skipped by screen reader',
+    'Alt text conveys the same information the image provides visually',
+    'Re-run axe — rule clears',
+  ],
+  'label': [
+    'Tab to field — screen reader announces the label before the field type',
+    'Click the label text — browser moves focus to the input',
+    'Voice control: saying the label activates the correct field',
+    'Re-run axe — rule clears',
+  ],
+  'link-name': [
+    'Tab to link — screen reader announces meaningful destination',
+    'Link text makes sense out of context (read in isolation)',
+    'Voice control: saying the link text navigates correctly',
+    'Re-run axe — rule clears',
+  ],
+  'list-item': [
+    'Screen reader announces "list of N items" when entering the list',
+    'Confirm list markup in browser accessibility tree',
+    'Re-run axe — rule clears',
+  ],
+  'meta-viewport': [
+    'Pinch-to-zoom works on mobile device',
+    'Page remains usable at 200% browser zoom',
+    'Re-run axe — rule clears',
+  ],
+  'region': [
+    'Screen reader landmark navigation reaches all key page sections',
+    'Each landmark has a unique label if multiple of the same type exist',
+    'Skip-to-main-content link jumps inside the <main> landmark',
+    'Re-run axe — rule clears',
+  ],
+}
+
+export function getRuleValidationSteps(ruleId) {
+  return RULE_VALIDATION_STEPS[normalizeRuleId(ruleId)] || [
+    'Verify the fix in a screen reader (NVDA, VoiceOver, or JAWS)',
+    'Test keyboard navigation — Tab order is logical',
+    'Re-run axe scan — violation is cleared',
+  ]
+}

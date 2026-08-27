@@ -43,6 +43,9 @@
   --bg-mid:                 #F8F6F1;
   --bg-card:                #FFFFFF;
 
+  /* Brand */
+  --brand-blue:             #2563EB;
+
   /* Accent — primary (teal) */
   --accent-primary:         #0F766E;
   --accent-hover:           #0D6B64;
@@ -288,4 +291,219 @@ input,
 textarea,
 select {
   font-family: inherit;
+}
+
+/* ─── Glow Input — shared across pages ──────────────────── */
+
+.glow-input-wrapper {
+  position: relative;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1.5px solid #d1d5db;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.glow-input-wrapper::before {
+  content: '';
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  right: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #0F766E;
+  border-radius: 50%;
+  filter: blur(16px);
+  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.38);
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.2s ease;
+}
+
+.glow-input-wrapper:focus-within {
+  border-color: #0F766E;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18);
+}
+
+.dark .glow-input-wrapper {
+  background: #1e2a2a;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.dark .glow-input-wrapper::before {
+  background: #14B8A6;
+  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.28);
+}
+
+.dark .glow-input-wrapper:focus-within {
+  border-color: #14B8A6;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
+}
+
+.glow-input {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 10px 44px 10px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 500;
+  color: #1F2937;
+}
+
+.glow-input.has-left-icon {
+  padding-left: 40px;
+}
+
+.dark .glow-input {
+  color: #F9FAFB;
+}
+
+.glow-input::placeholder {
+  color: #9CA3AF;
+  font-weight: 400;
+}
+
+.dark .glow-input::placeholder {
+  color: #6B7280;
+}
+
+.glow-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.glow-input[type="number"]::-webkit-outer-spin-button,
+.glow-input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.glow-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.glow-input-wrapper--large {
+  border-radius: 14px;
+}
+
+.glow-input-wrapper--large::before {
+  width: 68px;
+  height: 68px;
+}
+
+.glow-input--large-text {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  font-size: 15px;
+}
+
+.glow-input--large-text.has-left-icon {
+  padding-left: 52px;
+}
+
+/* ── Crawl status loader ─────────────────────────────────────────────── */
+.crawl-loader {
+  --cl-path: #d1d5db;
+  --cl-dot: #0f766e;
+  --cl-dur: 3s;
+  width: 28px;
+  height: 28px;
+  position: relative;
+  display: inline-block;
+  margin: 0 4px;
+}
+.dark .crawl-loader { --cl-path: #4b5563; }
+
+.crawl-loader::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  position: absolute;
+  display: block;
+  background: var(--cl-dot);
+  top: 24px;
+  left: 12px;
+  transform: translate(-11px, -11px);
+  animation: clDotRect var(--cl-dur) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+}
+
+.crawl-loader svg { display: block; width: 100%; height: 100%; }
+
+.crawl-loader svg rect,
+.crawl-loader svg polygon,
+.crawl-loader svg circle {
+  fill: none;
+  stroke: var(--cl-path);
+  stroke-width: 10px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.crawl-loader svg polygon {
+  stroke-dasharray: 145 76 145 76;
+  stroke-dashoffset: 0;
+  animation: clPathTriangle var(--cl-dur) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+}
+.crawl-loader svg rect {
+  stroke-dasharray: 192 64 192 64;
+  stroke-dashoffset: 0;
+  animation: clPathRect var(--cl-dur) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+}
+.crawl-loader svg circle {
+  stroke-dasharray: 150 50 150 50;
+  stroke-dashoffset: 75;
+  animation: clPathCircle var(--cl-dur) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+}
+
+.crawl-loader-tri { width: 31px; }
+.crawl-loader-tri::before {
+  left: 14px;
+  transform: translate(-6px, -11px);
+  animation: clDotTriangle var(--cl-dur) cubic-bezier(0.785, 0.135, 0.15, 0.86) infinite;
+}
+
+/* completed — static teal shapes, no dot */
+.crawl-loader-done { --cl-path: #0f766e; }
+.crawl-loader-done::before { display: none; }
+.crawl-loader-done svg polygon,
+.crawl-loader-done svg rect,
+.crawl-loader-done svg circle {
+  stroke-dasharray: unset;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+
+@keyframes clPathTriangle {
+  33%  { stroke-dashoffset: 74;  }
+  66%  { stroke-dashoffset: 147; }
+  100% { stroke-dashoffset: 221; }
+}
+@keyframes clDotTriangle {
+  33%  { transform: translate(0, 0);        }
+  66%  { transform: translate(6px, -11px);  }
+  100% { transform: translate(-6px, -11px); }
+}
+@keyframes clPathRect {
+  25%  { stroke-dashoffset: 64;  }
+  50%  { stroke-dashoffset: 128; }
+  75%  { stroke-dashoffset: 192; }
+  100% { stroke-dashoffset: 256; }
+}
+@keyframes clDotRect {
+  25%  { transform: translate(0, 0);         }
+  50%  { transform: translate(11px, -11px);  }
+  75%  { transform: translate(0, -23px);     }
+  100% { transform: translate(-11px, -11px); }
+}
+@keyframes clPathCircle {
+  25%  { stroke-dashoffset: 125; }
+  50%  { stroke-dashoffset: 175; }
+  75%  { stroke-dashoffset: 225; }
+  100% { stroke-dashoffset: 275; }
 }

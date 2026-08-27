@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * popup.css — Extension popup design tokens.
+ * Component classes are copied verbatim from src/index.css so both surfaces
+ * share the same visual language without a shared build pipeline.
+ * Keep in sync with src/index.css when platform styles change.
+ */
+
+/* ── Popup shell ───────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 380px;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  width: 380px;
+  height: 580px;        /* Fixed height so flex children can fill it and scroll */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #F8F6F1;
+}
+
+.dark #root {
+  background: #161616;
+}
+
+/* ── Scrollable content area ───────────────────────────────────────── */
+.popup-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.12) transparent;
+}
+
+.dark .popup-scroll {
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+
+.popup-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.popup-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.popup-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+  border-radius: 4px;
+}
+
+.dark .popup-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+}
+
+/* ── Design tokens (CSS variables) ─────────────────────────────────── */
+:root {
+  --accent-primary: #0F766E;
+  --accent-hover:   #0D6B64;
+  --success:        #6BA368;
+  --warning:        #F59E0B;
+  --critical:       #E76F51;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+/* ── Reusable component classes (mirrors src/index.css exactly) ─────── */
+@layer components {
+  .card {
+    @apply rounded-2xl border border-gray-100 bg-white shadow-soft
+           dark:border-white/[0.06] dark:bg-charcoal;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5
+           rounded-xl bg-teal text-white font-semibold font-heading text-sm
+           hover:bg-teal-700 active:bg-teal-800
+           transition-colors duration-200 cursor-pointer border-0
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5
+           rounded-xl border border-gray-200 bg-white text-ink
+           font-semibold font-heading text-sm
+           hover:bg-ivory transition-colors duration-200 cursor-pointer
+           dark:border-white/10 dark:bg-charcoal dark:text-white
+           dark:hover:bg-white/5
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5
+           rounded-lg text-body dark:text-gray-400 text-sm
+           hover:bg-gray-100 dark:hover:bg-white/10
+           transition-colors cursor-pointer border-0 bg-transparent;
+  }
+
+  .input-base {
+    @apply w-full px-4 py-2.5 rounded-xl
+           border border-gray-300 bg-white text-ink
+           placeholder-gray-400 text-sm
+           focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal
+           transition-all duration-200
+           dark:border-white/20 dark:bg-charcoal dark:text-white
+           dark:placeholder-gray-500
+           disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  /* Impact badge pill */
+  .impact-pill {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1
+           rounded-full text-xs font-semibold font-heading border;
+  }
+
+  /* Violation row */
+  .violation-row {
+    @apply rounded-xl border border-gray-100 dark:border-white/[0.06]
+           bg-white dark:bg-charcoal/60
+           transition-colors;
+  }
+}
+
+/* ── Scan progress bar animation ────────────────────────────────────── */
+@keyframes scanSlide {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+.scan-progress-bar {
+  animation: scanSlide 1.6s ease-in-out infinite;
+}
+
+/* ── Fade-in for result panels ──────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
