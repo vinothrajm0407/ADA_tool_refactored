@@ -365,6 +365,9 @@ def _ensure_table() -> None:
         conn.commit()
         # ── Users schema evolution ─────────────────────────────────────────────
         _user_columns = [
+            ("FirstName",         "NVARCHAR(100) NULL"),
+            ("LastName",          "NVARCHAR(100) NULL"),
+            ("CreatedAtUtc",      "DATETIME2(3) NULL"),
             ("EmailVerified",     "BIT NOT NULL DEFAULT 0"),
             ("EmailVerifiedAt",   "DATETIME2(3) NULL"),
             ("VerifyToken",       "NVARCHAR(128) NULL"),
