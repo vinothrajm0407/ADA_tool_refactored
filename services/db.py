@@ -1,15 +1,14 @@
 """
-Postgres persistence for ADA scan history.
-Requires: psycopg2, env DATABASE_URL (e.g. a free Neon/Supabase connection string).
+MSSQL persistence for ADA scan history.
+Requires: pyodbc, ODBC Driver 18 for SQL Server, env MSSQL_CONN_STR.
 
-If DATABASE_URL is set, the app will automatically create all tables on startup.
-No manual setup needed — the target database itself must already exist (Neon/
-Supabase/Render all pre-provision one), unlike the old MSSQL setup which could
-create its own database via a master-DB connection.
+If MSSQL_CONN_STR is set, the app will automatically create the database and
+ScanHistory table on startup (when running on Azure, AWS, or locally). No manual setup needed.
 """
 import json
 import logging
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -34,101 +33,47 @@ def _load_local_env() -> None:
 
 _load_local_env()
 
-_CONNECTION_STRING = (os.getenv("DATABASE_URL") or "").strip()
+_CONNECTION_STRING = (os.getenv("MSSQL_CONN_STR") or "").strip()
+_DATABASE = os.getenv("MSSQL_DATABASE", "ADA_DB")
 _INIT_DONE = False
 _INIT_ERROR = ""
 
 
-class _Row:
-    """
-    Wraps a psycopg2 dict-row so existing `row.ColumnName` access (a pyodbc
-    feature the whole file relies on) keeps working. Postgres folds unquoted
-    identifiers to lowercase, so lookups are case-insensitive against the
-    original PascalCase names used throughout this file.
-    """
-    __slots__ = ("_data",)
-
-    def __init__(self, data: dict):
-        object.__setattr__(self, "_data", data)
-
-    def __getattr__(self, name):
-        lname = name.lower()
-        for k, v in self._data.items():
-            if k.lower() == lname:
-                return v
-        raise AttributeError(name)
-
-    def __getitem__(self, idx):
-        return list(self._data.values())[idx]
-
-    def __bool__(self):
-        return True
+def _validate_database_name(name: str) -> None:
+    if not re.match(r"^[a-zA-Z0-9_]+$", name):
+        raise ValueError(f"Invalid MSSQL_DATABASE: {name!r}")
 
 
-class _CompatCursor:
-    """
-    Bridges pyodbc-style call sites (`cur.execute(sql, *params)`, positional
-    varargs; `?` placeholders) onto psycopg2 (`cur.execute(sql, params_tuple)`,
-    `%s` placeholders) without touching the ~100 call sites in this file.
-    """
-    __slots__ = ("_cur",)
-
-    def __init__(self, real_cursor):
-        object.__setattr__(self, "_cur", real_cursor)
-
-    def execute(self, sql: str, *params):
-        # pyodbc accepts both execute(sql, a, b, c) and execute(sql, [a, b, c]) —
-        # this file uses both styles, so replicate that here.
-        if len(params) == 1 and isinstance(params[0], (list, tuple)):
-            params = tuple(params[0])
-        translated = sql.replace("?", "%s")
-        self._cur.execute(translated, params or None)
-        return self
-
-    def fetchone(self):
-        row = self._cur.fetchone()
-        return _Row(row) if row is not None else None
-
-    def fetchall(self):
-        return [_Row(row) for row in self._cur.fetchall()]
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._cur.close()
-        return False
-
-    def __getattr__(self, name):
-        return getattr(self._cur, name)
+def _connection_string_to_master() -> str | None:
+    """Build a connection string that targets the master database so we can create ADA_DB."""
+    if not _CONNECTION_STRING:
+        return None
+    s = _CONNECTION_STRING
+    # Replace Database=... or Initial Catalog=... with master (case-insensitive)
+    s = re.sub(r"Database=[^;]*", "Database=master", s, flags=re.IGNORECASE)
+    s = re.sub(r"Initial Catalog=[^;]*", "Initial Catalog=master", s, flags=re.IGNORECASE)
+    if "Database=" not in s and "Initial Catalog=" not in s:
+        s = s.rstrip(";") + ";Database=master"
+    return s
 
 
-class _CompatConnection:
-    """
-    psycopg2's connection object is a C-extension type — its `cursor`
-    attribute can't be monkey-patched, so wrap the whole connection instead
-    of just the cursor factory.
-    """
-    __slots__ = ("_real",)
-
-    def __init__(self, real_conn):
-        object.__setattr__(self, "_real", real_conn)
-
-    def cursor(self, *args, **kwargs):
-        return _CompatCursor(self._real.cursor(*args, **kwargs))
-
-    def __getattr__(self, name):
-        return getattr(self._real, name)
-
-    def __setattr__(self, name, value):
-        setattr(self._real, name, value)
+def _app_connection_string() -> str:
+    """Connection string for the app database (e.g. ADA_DB). Ensures Database= is set."""
+    if not _CONNECTION_STRING:
+        raise RuntimeError("MSSQL_CONN_STR environment variable is not set")
+    s = _CONNECTION_STRING
+    _validate_database_name(_DATABASE)
+    if "Database=" in s or "Initial Catalog=" in s:
+        s = re.sub(r"Database=[^;]*", f"Database={_DATABASE}", s, flags=re.IGNORECASE)
+        s = re.sub(r"Initial Catalog=[^;]*", f"Initial Catalog={_DATABASE}", s, flags=re.IGNORECASE)
+    else:
+        s = s.rstrip(";") + f";Database={_DATABASE}"
+    return s
 
 
 def _conn():
-    import psycopg2
-    import psycopg2.extras
-    real_conn = psycopg2.connect(_CONNECTION_STRING, cursor_factory=psycopg2.extras.RealDictCursor)
-    return _CompatConnection(real_conn)
+    import pyodbc
+    return pyodbc.connect(_app_connection_string())
 
 
 def is_enabled() -> bool:
@@ -146,262 +91,400 @@ def is_ready() -> bool:
     return is_enabled() and not _INIT_ERROR
 
 
+def _ensure_database() -> None:
+    """Create the database if it does not exist (connects to master)."""
+    master_cs = _connection_string_to_master()
+    if not master_cs:
+        return
+    import pyodbc
+    _validate_database_name(_DATABASE)
+    conn = pyodbc.connect(master_cs)
+    try:
+        conn.autocommit = True  # CREATE DATABASE requires autocommit
+        cur = conn.cursor()
+        # Database name cannot be parameterized in T-SQL; we validated _DATABASE above
+        cur.execute(f"IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = N'{_DATABASE}') CREATE DATABASE [{_DATABASE}]")
+    finally:
+        conn.close()
+
+
 def _ensure_table() -> None:
-    """Create required persistence tables (idempotent — IF NOT EXISTS everywhere)."""
+    """Create required persistence tables and add missing columns."""
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS ScanHistory (
-                Id             SERIAL        PRIMARY KEY,
-                Url            VARCHAR(2048) NOT NULL,
-                TimestampUtc   TIMESTAMP     NOT NULL,
-                Passes         INT           NOT NULL,
-                Violations     INT           NOT NULL,
-                PassRate       INT           NOT NULL,
-                UsedFallback   SMALLINT      NOT NULL,
-                IncludeBestPractices SMALLINT NOT NULL DEFAULT 0,
-                ResultPayload  TEXT          NULL
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = N'ScanHistory')
+            CREATE TABLE dbo.ScanHistory (
+                Id             INT IDENTITY(1,1) PRIMARY KEY,
+                Url            NVARCHAR(2048) NOT NULL,
+                TimestampUtc   DATETIME2(3)   NOT NULL,
+                Passes         INT            NOT NULL,
+                Violations     INT            NOT NULL,
+                PassRate       INT            NOT NULL,
+                UsedFallback   BIT            NOT NULL,
+                IncludeBestPractices BIT      NOT NULL DEFAULT 0,
+                ResultPayload  NVARCHAR(MAX)  NULL
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS ScanJobs (
-                JobId           VARCHAR(100)  PRIMARY KEY,
-                Url             VARCHAR(2048) NOT NULL,
-                Status          VARCHAR(50)   NOT NULL,
-                WorkerName      VARCHAR(128)  NULL,
-                Attempt         INT           NOT NULL DEFAULT 0,
-                CreatedAt       TIMESTAMP     NOT NULL,
-                StartedAt       TIMESTAMP     NULL,
-                EndedAt         TIMESTAMP     NULL,
-                DurationSeconds DOUBLE PRECISION NULL,
-                FailureReason   TEXT          NULL,
-                ResultPayload   TEXT          NULL,
-                Metadata        TEXT          NULL
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.tables WHERE name = N'ScanJobs')
+            CREATE TABLE dbo.ScanJobs (
+                JobId           NVARCHAR(100) PRIMARY KEY,
+                Url             NVARCHAR(2048) NOT NULL,
+                Status          NVARCHAR(50)  NOT NULL,
+                WorkerName      NVARCHAR(128) NULL,
+                Attempt         INT            NOT NULL DEFAULT 0,
+                CreatedAt       DATETIME2(3)   NOT NULL,
+                StartedAt       DATETIME2(3)   NULL,
+                EndedAt         DATETIME2(3)   NULL,
+                DurationSeconds FLOAT          NULL,
+                FailureReason   NVARCHAR(MAX)  NULL,
+                ResultPayload   NVARCHAR(MAX)  NULL,
+                Metadata        NVARCHAR(MAX)  NULL
             )
         """)
         conn.commit()
+        # Ensure schema evolution for ScanHistory
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_ScanHistory_TimestampUtc ON ScanHistory(TimestampUtc DESC)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.ScanHistory') AND name = N'ResultPayload'
+            )
+            ALTER TABLE dbo.ScanHistory ADD ResultPayload NVARCHAR(MAX) NULL
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_ScanJobs_Status ON ScanJobs(Status)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.ScanHistory') AND name = N'IncludeBestPractices'
+            )
+            ALTER TABLE dbo.ScanHistory ADD IncludeBestPractices BIT NOT NULL CONSTRAINT DF_ScanHistory_IncludeBestPractices DEFAULT 0
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.ScanHistory') AND name = N'IX_ScanHistory_TimestampUtc'
+            )
+            CREATE INDEX IX_ScanHistory_TimestampUtc ON dbo.ScanHistory(TimestampUtc DESC)
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.ScanJobs') AND name = N'IX_ScanJobs_Status'
+            )
+            CREATE INDEX IX_ScanJobs_Status ON dbo.ScanJobs(Status)
         """)
         conn.commit()
         # ── Crawler tables ────────────────────────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS CrawlJob (
-                CrawlId         VARCHAR(100)  PRIMARY KEY,
-                RQJobId         VARCHAR(100)  NULL,
-                RootUrl         VARCHAR(2048) NOT NULL,
-                Status          VARCHAR(50)   NOT NULL,
-                MaxDepth        INT           NOT NULL DEFAULT 3,
-                MaxPages        INT           NOT NULL DEFAULT 50,
-                TotalDiscovered INT           NOT NULL DEFAULT 0,
-                TotalScanned    INT           NOT NULL DEFAULT 0,
-                TotalFailed     INT           NOT NULL DEFAULT 0,
-                CreatedAt       TIMESTAMP     NOT NULL,
-                StartedAt       TIMESTAMP     NULL,
-                EndedAt         TIMESTAMP     NULL,
-                DurationSeconds DOUBLE PRECISION NULL,
-                FailureReason   TEXT          NULL,
-                Metadata        TEXT          NULL,
-                NotifyEmail     VARCHAR(500)  NULL
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.tables WHERE name = N'CrawlJob')
+            CREATE TABLE dbo.CrawlJob (
+                CrawlId         NVARCHAR(100)  PRIMARY KEY,
+                RQJobId         NVARCHAR(100)  NULL,
+                RootUrl         NVARCHAR(2048) NOT NULL,
+                Status          NVARCHAR(50)   NOT NULL,
+                MaxDepth        INT            NOT NULL DEFAULT 3,
+                MaxPages        INT            NOT NULL DEFAULT 50,
+                TotalDiscovered INT            NOT NULL DEFAULT 0,
+                TotalScanned    INT            NOT NULL DEFAULT 0,
+                TotalFailed     INT            NOT NULL DEFAULT 0,
+                CreatedAt       DATETIME2(3)   NOT NULL,
+                StartedAt       DATETIME2(3)   NULL,
+                EndedAt         DATETIME2(3)   NULL,
+                DurationSeconds FLOAT          NULL,
+                FailureReason   NVARCHAR(MAX)  NULL,
+                Metadata        NVARCHAR(MAX)  NULL
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS CrawlPage (
-                Id              SERIAL        PRIMARY KEY,
-                CrawlId         VARCHAR(100)  NOT NULL,
-                Url             VARCHAR(2048) NOT NULL,
-                NormalizedUrl   VARCHAR(2048) NOT NULL,
-                ParentUrl       VARCHAR(2048) NULL,
-                Depth           INT           NOT NULL DEFAULT 0,
-                Status          VARCHAR(50)   NOT NULL,
-                ScanHistoryId   INT           NULL,
-                Passes          INT           NULL,
-                Violations      INT           NULL,
-                PassRate        INT           NULL,
-                DiscoveredAt    TIMESTAMP     NOT NULL,
-                ScannedAt       TIMESTAMP     NULL,
-                FailureReason   TEXT          NULL,
-                ResultPayload   TEXT          NULL
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlJob') AND name = N'NotifyEmail'
+            )
+            ALTER TABLE dbo.CrawlJob ADD NotifyEmail NVARCHAR(500) NULL
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.tables WHERE name = N'CrawlPage')
+            CREATE TABLE dbo.CrawlPage (
+                Id              INT IDENTITY(1,1) PRIMARY KEY,
+                CrawlId         NVARCHAR(100)  NOT NULL,
+                Url             NVARCHAR(2048) NOT NULL,
+                NormalizedUrl   NVARCHAR(2048) NOT NULL,
+                ParentUrl       NVARCHAR(2048) NULL,
+                Depth           INT            NOT NULL DEFAULT 0,
+                Status          NVARCHAR(50)   NOT NULL,
+                ScanHistoryId   INT            NULL,
+                Passes          INT            NULL,
+                Violations      INT            NULL,
+                PassRate        INT            NULL,
+                DiscoveredAt    DATETIME2(3)   NOT NULL,
+                ScannedAt       DATETIME2(3)   NULL,
+                FailureReason   NVARCHAR(MAX)  NULL
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_CrawlJob_Status ON CrawlJob(Status)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlJob') AND name = N'IX_CrawlJob_Status'
+            )
+            CREATE INDEX IX_CrawlJob_Status ON dbo.CrawlJob(Status)
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_CrawlPage_CrawlId ON CrawlPage(CrawlId)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlPage') AND name = N'IX_CrawlPage_CrawlId'
+            )
+            CREATE INDEX IX_CrawlPage_CrawlId ON dbo.CrawlPage(CrawlId)
         """)
         conn.commit()
         # ── Phase 3 tables ────────────────────────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS CrawlSchedule (
-                Id          SERIAL        PRIMARY KEY,
-                RootUrl     VARCHAR(2048) NOT NULL,
-                Frequency   VARCHAR(20)   NOT NULL DEFAULT 'weekly',
-                Enabled     SMALLINT      NOT NULL DEFAULT 1,
-                LastRunAt   TIMESTAMP     NULL,
-                NextRunAt   TIMESTAMP     NOT NULL,
-                CreatedAt   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                UpdatedAt   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                Name        VARCHAR(120)  NULL,
-                TimeOfDay   TIME          NULL
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'CrawlSchedule')
+            CREATE TABLE dbo.CrawlSchedule (
+                Id          INT IDENTITY(1,1) PRIMARY KEY,
+                RootUrl     NVARCHAR(2048) NOT NULL,
+                Frequency   NVARCHAR(20)   NOT NULL DEFAULT 'weekly',
+                Enabled     BIT            NOT NULL DEFAULT 1,
+                LastRunAt   DATETIME2(3)   NULL,
+                NextRunAt   DATETIME2(3)   NOT NULL,
+                CreatedAt   DATETIME2(3)   NOT NULL DEFAULT GETUTCDATE(),
+                UpdatedAt   DATETIME2(3)   NOT NULL DEFAULT GETUTCDATE()
+            )
+        """)
+        conn.commit()
+        # ── CrawlSchedule schema evolution ─────────────────────────────────────
+        _crawl_schedule_columns = [
+            ("Name",       "NVARCHAR(120) NULL"),
+            ("TimeOfDay",  "TIME NULL"),
+        ]
+        for col, defn in _crawl_schedule_columns:
+            cur.execute(f"""
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.columns
+                    WHERE object_id = OBJECT_ID(N'dbo.CrawlSchedule') AND name = N'{col}'
+                )
+                ALTER TABLE dbo.CrawlSchedule ADD {col} {defn}
+            """)
+            conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'AccessibilityAlert')
+            CREATE TABLE dbo.AccessibilityAlert (
+                Id          INT IDENTITY(1,1) PRIMARY KEY,
+                CrawlId     NVARCHAR(100)  NOT NULL,
+                RootUrl     NVARCHAR(2048) NULL,
+                AlertType   NVARCHAR(50)   NOT NULL,
+                Severity    NVARCHAR(20)   NOT NULL DEFAULT 'moderate',
+                Details     NVARCHAR(MAX)  NULL,
+                Status      NVARCHAR(20)   NOT NULL DEFAULT 'active',
+                CreatedAt   DATETIME2(3)   NOT NULL DEFAULT GETUTCDATE()
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS AccessibilityAlert (
-                Id          SERIAL        PRIMARY KEY,
-                CrawlId     VARCHAR(100)  NOT NULL,
-                RootUrl     VARCHAR(2048) NULL,
-                AlertType   VARCHAR(50)   NOT NULL,
-                Severity    VARCHAR(20)   NOT NULL DEFAULT 'moderate',
-                Details     TEXT          NULL,
-                Status      VARCHAR(20)   NOT NULL DEFAULT 'active',
-                CreatedAt   TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.AccessibilityAlert') AND name = N'IX_Alert_Status'
             )
-        """)
-        conn.commit()
-        cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_Alert_Status ON AccessibilityAlert(Status, CreatedAt DESC)
+            CREATE INDEX IX_Alert_Status ON dbo.AccessibilityAlert(Status, CreatedAt DESC)
         """)
         conn.commit()
         # ── AssistiveScanHistory table ────────────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS AssistiveScanHistory (
-                Id            SERIAL        PRIMARY KEY,
-                ScanType      VARCHAR(50)   NOT NULL,
-                Url           VARCHAR(2048) NOT NULL,
-                TimestampUtc  TIMESTAMP     NOT NULL,
-                Passed        SMALLINT      NOT NULL DEFAULT 0,
-                ResultPayload TEXT          NULL
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'AssistiveScanHistory')
+            CREATE TABLE dbo.AssistiveScanHistory (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
+                ScanType      NVARCHAR(50)   NOT NULL,
+                Url           NVARCHAR(2048) NOT NULL,
+                TimestampUtc  DATETIME2(3)   NOT NULL,
+                Passed        BIT            NOT NULL DEFAULT 0,
+                ResultPayload NVARCHAR(MAX)  NULL
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_AssistiveScan_TimestampUtc
-                ON AssistiveScanHistory(TimestampUtc DESC)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.AssistiveScanHistory')
+                  AND name = N'IX_AssistiveScan_TimestampUtc'
+            )
+            CREATE INDEX IX_AssistiveScan_TimestampUtc
+                ON dbo.AssistiveScanHistory(TimestampUtc DESC)
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_AssistiveScan_ScanType
-                ON AssistiveScanHistory(ScanType, TimestampUtc DESC)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.AssistiveScanHistory')
+                  AND name = N'IX_AssistiveScan_ScanType'
+            )
+            CREATE INDEX IX_AssistiveScan_ScanType
+                ON dbo.AssistiveScanHistory(ScanType, TimestampUtc DESC)
+        """)
+        conn.commit()
+        # ── CrawlPage.ResultPayload — schema evolution ────────────────────────
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlPage') AND name = N'ResultPayload'
+            )
+            ALTER TABLE dbo.CrawlPage ADD ResultPayload NVARCHAR(MAX) NULL
         """)
         conn.commit()
         # ── Users ─────────────────────────────────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS Users (
-                Id                SERIAL        PRIMARY KEY,
-                FirstName         VARCHAR(100)  NOT NULL,
-                LastName          VARCHAR(100)  NOT NULL,
-                Email             VARCHAR(320)  NOT NULL,
-                PasswordHash      VARCHAR(256)  NOT NULL,
-                IsActive          SMALLINT      NOT NULL DEFAULT 1,
-                CreatedAtUtc      TIMESTAMP     NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                EmailVerified     SMALLINT      NOT NULL DEFAULT 0,
-                EmailVerifiedAt   TIMESTAMP     NULL,
-                VerifyToken       VARCHAR(128)  NULL,
-                VerifyTokenExpiry TIMESTAMP     NULL,
-                AuthProvider      VARCHAR(50)   NULL,
-                ProviderUserId    VARCHAR(256)  NULL,
-                ResetToken        VARCHAR(128)  NULL,
-                ResetTokenExpiry  TIMESTAMP     NULL
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Users')
+            CREATE TABLE dbo.Users (
+                Id           INT IDENTITY(1,1) PRIMARY KEY,
+                FirstName    NVARCHAR(100)  NOT NULL,
+                LastName     NVARCHAR(100)  NOT NULL,
+                Email        NVARCHAR(320)  NOT NULL,
+                PasswordHash NVARCHAR(256)  NOT NULL,
+                IsActive     BIT            NOT NULL DEFAULT 1,
+                CreatedAtUtc DATETIME2(3)   NOT NULL DEFAULT GETUTCDATE()
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS UX_Users_Email ON Users(Email)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.Users') AND name = N'UX_Users_Email'
+            )
+            CREATE UNIQUE INDEX UX_Users_Email ON dbo.Users (Email)
         """)
         conn.commit()
+        # ── Users schema evolution ─────────────────────────────────────────────
+        _user_columns = [
+            ("FirstName",         "NVARCHAR(100) NULL"),
+            ("LastName",          "NVARCHAR(100) NULL"),
+            ("CreatedAtUtc",      "DATETIME2(3) NULL"),
+            ("EmailVerified",     "BIT NOT NULL DEFAULT 0"),
+            ("EmailVerifiedAt",   "DATETIME2(3) NULL"),
+            ("VerifyToken",       "NVARCHAR(128) NULL"),
+            ("VerifyTokenExpiry", "DATETIME2(3) NULL"),
+            ("AuthProvider",      "NVARCHAR(50) NULL"),
+            ("ProviderUserId",    "NVARCHAR(256) NULL"),
+            ("ResetToken",        "NVARCHAR(128) NULL"),
+            ("ResetTokenExpiry",  "DATETIME2(3) NULL"),
+        ]
+        for col, defn in _user_columns:
+            cur.execute(f"""
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.columns
+                    WHERE object_id = OBJECT_ID(N'dbo.Users') AND name = N'{col}'
+                )
+                ALTER TABLE dbo.Users ADD {col} {defn}
+            """)
+            conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_Users_VerifyToken ON Users(VerifyToken)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.Users') AND name = N'IX_Users_VerifyToken'
+            )
+            CREATE INDEX IX_Users_VerifyToken ON dbo.Users (VerifyToken)
             WHERE VerifyToken IS NOT NULL
         """)
         conn.commit()
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS IX_Users_ResetToken ON Users(ResetToken)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.Users') AND name = N'IX_Users_ResetToken'
+            )
+            CREATE INDEX IX_Users_ResetToken ON dbo.Users (ResetToken)
             WHERE ResetToken IS NOT NULL
         """)
         conn.commit()
         # ── Integrations (Slack / Teams) ──────────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS Integration (
-                Id            SERIAL         PRIMARY KEY,
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Integration')
+            CREATE TABLE dbo.Integration (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
                 UserId        INT            NOT NULL,
-                Platform      VARCHAR(20)    NOT NULL,
-                WorkspaceId   VARCHAR(200)   NOT NULL,
-                WorkspaceName VARCHAR(200)   NOT NULL,
-                AccessToken   VARCHAR(2000)  NULL,
-                ConnectedAt   TIMESTAMP      NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                Status        VARCHAR(20)    NOT NULL DEFAULT 'active'
+                Platform      NVARCHAR(20)   NOT NULL,
+                WorkspaceId   NVARCHAR(200)  NOT NULL,
+                WorkspaceName NVARCHAR(200)  NOT NULL,
+                AccessToken   NVARCHAR(2000) NULL,
+                ConnectedAt   DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
+                Status        NVARCHAR(20)   NOT NULL DEFAULT 'active'
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS IntegrationChannel (
-                Id              SERIAL         PRIMARY KEY,
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'IntegrationChannel')
+            CREATE TABLE dbo.IntegrationChannel (
+                Id              INT IDENTITY(1,1) PRIMARY KEY,
                 IntegrationId   INT            NOT NULL,
-                ChannelId       VARCHAR(200)   NOT NULL,
-                ChannelName     VARCHAR(200)   NOT NULL,
-                Purpose         VARCHAR(50)    NULL,
-                WebhookUrl      VARCHAR(2000)  NULL,
-                AddedAt         TIMESTAMP      NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+                ChannelId       NVARCHAR(200)  NOT NULL,
+                ChannelName     NVARCHAR(200)  NOT NULL,
+                Purpose         NVARCHAR(50)   NULL,
+                WebhookUrl      NVARCHAR(2000) NULL,
+                AddedAt         DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME()
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS IntegrationDelivery (
-                Id              SERIAL         PRIMARY KEY,
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'IntegrationDelivery')
+            CREATE TABLE dbo.IntegrationDelivery (
+                Id              INT IDENTITY(1,1) PRIMARY KEY,
                 IntegrationId   INT            NOT NULL,
-                ChannelId       VARCHAR(200)   NULL,
-                ChannelName     VARCHAR(200)   NULL,
-                ReportType      VARCHAR(50)    NOT NULL,
-                Status          VARCHAR(20)    NOT NULL,
-                SentAt          TIMESTAMP      NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                ErrorMessage    VARCHAR(500)   NULL,
-                Reference       VARCHAR(200)   NULL
+                ChannelId       NVARCHAR(200)  NULL,
+                ChannelName     NVARCHAR(200)  NULL,
+                ReportType      NVARCHAR(50)   NOT NULL,
+                Status          NVARCHAR(20)   NOT NULL,
+                SentAt          DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
+                ErrorMessage    NVARCHAR(500)  NULL,
+                Reference       NVARCHAR(200)  NULL
             )
         """)
         conn.commit()
         # ── Repo Links (Auto-Fix source repo) ─────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS RepoLink (
-                Id            SERIAL         PRIMARY KEY,
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'RepoLink')
+            CREATE TABLE dbo.RepoLink (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
                 UserId        INT            NOT NULL,
-                Domain        VARCHAR(255)   NOT NULL,
-                SiteUrl       VARCHAR(500)   NOT NULL,
-                RepoUrl       VARCHAR(500)   NOT NULL,
-                DefaultBranch VARCHAR(100)   NOT NULL DEFAULT 'main',
-                Framework     VARCHAR(30)    NOT NULL DEFAULT 'react',
-                AccessToken   VARCHAR(2000)  NULL,
-                ConnectedAt   TIMESTAMP      NOT NULL DEFAULT (now() AT TIME ZONE 'utc'),
-                Status        VARCHAR(20)    NOT NULL DEFAULT 'active'
+                Domain        NVARCHAR(255)  NOT NULL,
+                SiteUrl       NVARCHAR(500)  NOT NULL,
+                RepoUrl       NVARCHAR(500)  NOT NULL,
+                DefaultBranch NVARCHAR(100)  NOT NULL DEFAULT 'main',
+                Framework     NVARCHAR(30)   NOT NULL DEFAULT 'react',
+                AccessToken   NVARCHAR(2000) NULL,
+                ConnectedAt   DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
+                Status        NVARCHAR(20)   NOT NULL DEFAULT 'active'
             )
         """)
         conn.commit()
         cur.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS UX_RepoLink_User_Domain ON RepoLink(UserId, Domain)
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'UX_RepoLink_User_Domain'
+            )
+            CREATE UNIQUE INDEX UX_RepoLink_User_Domain ON dbo.RepoLink (UserId, Domain)
             WHERE Status = 'active'
         """)
         conn.commit()
         # ── Fix attempts (Auto-Fix history) ───────────────────────────────────
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS Fix (
-                Id            SERIAL         PRIMARY KEY,
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Fix')
+            CREATE TABLE dbo.Fix (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
                 UserId        INT            NOT NULL,
-                PageUrl       VARCHAR(1000)  NOT NULL,
-                RuleId        VARCHAR(100)   NOT NULL,
-                Status        VARCHAR(20)    NOT NULL,
-                BranchUrl     VARCHAR(500)   NULL,
-                ErrorMessage  VARCHAR(1000)  NULL,
-                CreatedAt     TIMESTAMP      NOT NULL DEFAULT (now() AT TIME ZONE 'utc')
+                PageUrl       NVARCHAR(1000) NOT NULL,
+                RuleId        NVARCHAR(100)  NOT NULL,
+                Status        NVARCHAR(20)   NOT NULL,
+                BranchUrl     NVARCHAR(500)  NULL,
+                ErrorMessage  NVARCHAR(1000) NULL,
+                CreatedAt     DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME()
             )
         """)
         conn.commit()
@@ -411,22 +494,29 @@ def _ensure_table() -> None:
 
 def init_db() -> None:
     """
-    Create all tables if they do not exist. Call this at app startup.
-    Safe to call multiple times.
+    Create the database and ScanHistory table if they do not exist.
+    Call this at app startup. Safe to call multiple times.
     """
     global _INIT_DONE, _INIT_ERROR
     if not _CONNECTION_STRING:
-        _INIT_ERROR = "DATABASE_URL is not set"
-        logger.warning("DATABASE_URL not set — scan history will not be persisted. Set it to a Postgres connection string to enable persistence.")
+        _INIT_ERROR = "MSSQL_CONN_STR is not set"
+        logger.warning("MSSQL_CONN_STR not set — scan history will not be persisted. Set it to create ADA_DB and table automatically.")
         return
     if _INIT_DONE:
         return
     try:
-        logger.info("Creating tables if needed...")
-        _ensure_table()
+        logger.info("Creating database and table if needed...")
+        try:
+            # Preferred path for existing deployments: connect directly to ADA_DB
+            # and create only the table if it is missing.
+            _ensure_table()
+        except Exception:
+            # Fallback for fresh environments where the database itself does not exist yet.
+            _ensure_database()
+            _ensure_table()
         _INIT_DONE = True
         _INIT_ERROR = ""
-        logger.info("Database and tables ready.")
+        logger.info("Database and table ready.")
         reset_orphaned_jobs()
     except Exception as e:
         _INIT_ERROR = str(e)
@@ -441,9 +531,10 @@ def create_user(first_name: str, last_name: str, email: str, password_hash: str)
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO Users (FirstName, LastName, Email, PasswordHash)
+            INSERT INTO dbo.Users (FirstName, LastName, Email, PasswordHash)
+            OUTPUT INSERTED.Id, INSERTED.FirstName, INSERTED.LastName,
+                   INSERTED.Email, INSERTED.CreatedAtUtc
             VALUES (?, ?, ?, ?)
-            RETURNING Id, FirstName, LastName, Email, CreatedAtUtc
             """,
             first_name, last_name, email, password_hash,
         )
@@ -471,8 +562,8 @@ def get_user_by_email(email: str) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """SELECT Id, FirstName, LastName, Email, PasswordHash, IsActive, CreatedAtUtc,
-                      COALESCE(EmailVerified, 0) AS EmailVerified
-               FROM Users WHERE Email = ?""",
+                      ISNULL(EmailVerified, 0) AS EmailVerified
+               FROM dbo.Users WHERE Email = ?""",
             email,
         )
         row = cur.fetchone()
@@ -498,7 +589,7 @@ def get_user_by_id(user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT Id, FirstName, LastName, Email, IsActive, CreatedAtUtc FROM Users WHERE Id = ?",
+            "SELECT Id, FirstName, LastName, Email, IsActive, CreatedAtUtc FROM dbo.Users WHERE Id = ?",
             user_id,
         )
         row = cur.fetchone()
@@ -522,7 +613,7 @@ def set_verify_token(user_id: int, token: str, expiry_utc) -> None:
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE Users SET VerifyToken = ?, VerifyTokenExpiry = ? WHERE Id = ?",
+            "UPDATE dbo.Users SET VerifyToken = ?, VerifyTokenExpiry = ? WHERE Id = ?",
             token, expiry_utc, user_id,
         )
         conn.commit()
@@ -536,10 +627,10 @@ def get_user_by_verify_token(token: str) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute(
-            """SELECT Id, FirstName, LastName, Email, COALESCE(EmailVerified, 0),
+            """SELECT Id, FirstName, LastName, Email, ISNULL(EmailVerified, 0),
                       VerifyTokenExpiry
-               FROM Users
-               WHERE VerifyToken = ? AND VerifyTokenExpiry > (now() AT TIME ZONE 'utc')""",
+               FROM dbo.Users
+               WHERE VerifyToken = ? AND VerifyTokenExpiry > GETUTCDATE()""",
             token,
         )
         row = cur.fetchone()
@@ -563,9 +654,9 @@ def mark_email_verified(user_id: int) -> None:
     try:
         cur = conn.cursor()
         cur.execute(
-            """UPDATE Users
+            """UPDATE dbo.Users
                SET EmailVerified = 1,
-                   EmailVerifiedAt = (now() AT TIME ZONE 'utc'),
+                   EmailVerifiedAt = GETUTCDATE(),
                    VerifyToken = NULL,
                    VerifyTokenExpiry = NULL
                WHERE Id = ?""",
@@ -582,7 +673,7 @@ def get_verify_token_issued_at(user_id: int):
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT VerifyTokenExpiry FROM Users WHERE Id = ?",
+            "SELECT VerifyTokenExpiry FROM dbo.Users WHERE Id = ?",
             user_id,
         )
         row = cur.fetchone()
@@ -597,7 +688,7 @@ def set_reset_token(user_id: int, token: str, expiry_utc) -> None:
     try:
         cur = conn.cursor()
         cur.execute(
-            "UPDATE Users SET ResetToken = ?, ResetTokenExpiry = ? WHERE Id = ?",
+            "UPDATE dbo.Users SET ResetToken = ?, ResetTokenExpiry = ? WHERE Id = ?",
             token, expiry_utc, user_id,
         )
         conn.commit()
@@ -612,8 +703,8 @@ def get_user_by_reset_token(token: str) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """SELECT Id, FirstName, LastName, Email, ResetTokenExpiry
-               FROM Users
-               WHERE ResetToken = ? AND ResetTokenExpiry > (now() AT TIME ZONE 'utc')""",
+               FROM dbo.Users
+               WHERE ResetToken = ? AND ResetTokenExpiry > GETUTCDATE()""",
             token,
         )
         row = cur.fetchone()
@@ -636,7 +727,7 @@ def reset_user_password(user_id: int, password_hash: str) -> None:
     try:
         cur = conn.cursor()
         cur.execute(
-            """UPDATE Users
+            """UPDATE dbo.Users
                SET PasswordHash = ?,
                    ResetToken = NULL,
                    ResetTokenExpiry = NULL
@@ -654,7 +745,7 @@ def get_reset_token_issued_at(user_id: int):
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT ResetTokenExpiry FROM Users WHERE Id = ?",
+            "SELECT ResetTokenExpiry FROM dbo.Users WHERE Id = ?",
             user_id,
         )
         row = cur.fetchone()
@@ -678,12 +769,12 @@ def reset_orphaned_jobs(stale_seconds: int = 600) -> int:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    UPDATE ScanJobs
+                    UPDATE dbo.ScanJobs
                     SET    Status        = 'failed',
                            FailureReason = 'Worker process crashed or restarted before job completed',
-                           EndedAt       = (now() AT TIME ZONE 'utc')
+                           EndedAt       = GETUTCDATE()
                     WHERE  Status = 'running'
-                      AND  StartedAt < (now() AT TIME ZONE 'utc') + make_interval(secs => ?)
+                      AND  StartedAt < DATEADD(SECOND, ?, GETUTCDATE())
                     """,
                     (-stale_seconds,),
                 )
@@ -736,13 +827,15 @@ def save_scan_job(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO ScanJobs (JobId, Url, Status, WorkerName, Attempt, CreatedAt, Metadata)
+                IF EXISTS (SELECT 1 FROM dbo.ScanJobs WHERE JobId = ?)
+                UPDATE dbo.ScanJobs
+                SET Url = ?, Status = ?, WorkerName = ?, Attempt = ?, CreatedAt = ?, Metadata = ?
+                WHERE JobId = ?
+                ELSE
+                INSERT INTO dbo.ScanJobs (JobId, Url, Status, WorkerName, Attempt, CreatedAt, Metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (JobId) DO UPDATE SET
-                    Url = EXCLUDED.Url, Status = EXCLUDED.Status, WorkerName = EXCLUDED.WorkerName,
-                    Attempt = EXCLUDED.Attempt, CreatedAt = EXCLUDED.CreatedAt, Metadata = EXCLUDED.Metadata
                 """,
-                (job_id, url, status, worker_name, attempt, created_at, metadata_json),
+                (job_id, url, status, worker_name, attempt, created_at, metadata_json, job_id, job_id, url, status, worker_name, attempt, created_at, metadata_json),
             )
         conn.commit()
     finally:
@@ -787,7 +880,7 @@ def update_scan_job_status(
         params.append(attempt)
 
     params.append(job_id)
-    sql = f"UPDATE ScanJobs SET {', '.join(updates)} WHERE JobId = ?"
+    sql = f"UPDATE dbo.ScanJobs SET {', '.join(updates)} WHERE JobId = ?"
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -804,7 +897,7 @@ def get_scan_job(job_id: str) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM ScanJobs WHERE JobId = ?",
+                "SELECT * FROM dbo.ScanJobs WHERE JobId = ?",
                 (job_id,),
             )
             row = cur.fetchone()
@@ -815,7 +908,7 @@ def get_scan_job(job_id: str) -> dict | None:
 
 def save_scan_history(result: dict, limit: int = 500) -> int | None:
     """
-    Insert one row into ScanHistory with full result JSON for later retrieval.
+    Insert one row into dbo.ScanHistory with full result JSON for later retrieval.
     Returns the auto-assigned Id of the inserted row (used by the crawler to link
     CrawlPage.ScanHistoryId). Returns None if persistence is disabled or insert fails.
     result: dict from process_url() with keys axeResult, url, usedFallback.
@@ -836,10 +929,10 @@ def save_scan_history(result: dict, limit: int = 500) -> int | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO ScanHistory
+                INSERT INTO dbo.ScanHistory
                     (Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, ResultPayload)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                RETURNING Id
                 """,
                 (url, timestamp, passes, violations, pass_rate,
                  1 if used_fallback else 0, 1 if include_best_practices else 0, payload_json),
@@ -861,7 +954,7 @@ def get_scan_result(scan_id: int) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT ResultPayload FROM ScanHistory WHERE Id = ?",
+                "SELECT ResultPayload FROM dbo.ScanHistory WHERE Id = ?",
                 (scan_id,),
             )
             row = cur.fetchone()
@@ -876,7 +969,7 @@ def get_scan_result(scan_id: int) -> dict | None:
 
 def get_scan_history(limit: int = 500):
     """
-    Return list of scan summary dicts from ScanHistory, newest first.
+    Return list of scan summary dicts from dbo.ScanHistory, newest first.
     Each dict: id, url, timestamp, passes, violations, passRate, usedFallback.
     """
     conn = _conn()
@@ -884,10 +977,9 @@ def get_scan_history(limit: int = 500):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT Id, Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices
-                FROM ScanHistory
+                SELECT TOP (?) Id, Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices
+                FROM dbo.ScanHistory
                 ORDER BY TimestampUtc DESC
-                LIMIT ?
                 """,
                 (limit,),
             )
@@ -950,11 +1042,10 @@ def get_prev_scan_summary_for_url(url: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT Id, Url, TimestampUtc, Violations, ResultPayload
-                FROM ScanHistory
+                SELECT TOP 2 Id, Url, TimestampUtc, Violations, ResultPayload
+                FROM dbo.ScanHistory
                 WHERE LOWER(Url) IN ({placeholders})
                 ORDER BY TimestampUtc DESC
-                LIMIT 2
                 """,
                 variants,
             )
@@ -995,7 +1086,7 @@ _TREND_SQL: dict[str, str] = {
             AVG(CAST(PassRate AS FLOAT))                  AS AvgPassRate,
             SUM(Violations)                               AS TotalViolations,
             SUM(Passes)                                   AS TotalPasses
-        FROM ScanHistory
+        FROM dbo.ScanHistory
         WHERE TimestampUtc >= ? AND TimestampUtc < ?
         GROUP BY CAST(TimestampUtc AS DATE)
         ORDER BY BucketDate ASC
@@ -1007,22 +1098,22 @@ _TREND_SQL: dict[str, str] = {
             AVG(CAST(PassRate AS FLOAT))                  AS AvgPassRate,
             SUM(Violations)                               AS TotalViolations,
             SUM(Passes)                                   AS TotalPasses
-        FROM ScanHistory
+        FROM dbo.ScanHistory
         WHERE TimestampUtc >= ? AND TimestampUtc < ?
-        GROUP BY date_trunc('week', TimestampUtc)
+        GROUP BY YEAR(TimestampUtc), DATEPART(week, TimestampUtc)
         ORDER BY MIN(CAST(TimestampUtc AS DATE)) ASC
     """,
     "monthly": """
         SELECT
-            CAST(date_trunc('month', TimestampUtc) AS DATE) AS BucketDate,
+            CAST(DATEFROMPARTS(YEAR(TimestampUtc), MONTH(TimestampUtc), 1) AS DATE) AS BucketDate,
             COUNT(*)                                      AS ScanCount,
             AVG(CAST(PassRate AS FLOAT))                  AS AvgPassRate,
             SUM(Violations)                               AS TotalViolations,
             SUM(Passes)                                   AS TotalPasses
-        FROM ScanHistory
+        FROM dbo.ScanHistory
         WHERE TimestampUtc >= ? AND TimestampUtc < ?
-        GROUP BY date_trunc('month', TimestampUtc)
-        ORDER BY date_trunc('month', TimestampUtc) ASC
+        GROUP BY YEAR(TimestampUtc), MONTH(TimestampUtc)
+        ORDER BY YEAR(TimestampUtc) ASC, MONTH(TimestampUtc) ASC
     """,
 }
 
@@ -1032,7 +1123,7 @@ _SUMMARY_SQL = """
         AVG(CAST(PassRate AS FLOAT))  AS AvgPassRate,
         SUM(Violations)               AS TotalViolations,
         SUM(Passes)                   AS TotalPasses
-    FROM ScanHistory
+    FROM dbo.ScanHistory
     WHERE TimestampUtc >= ? AND TimestampUtc < ?
 """
 
@@ -1133,7 +1224,7 @@ def save_crawl_job(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO CrawlJob
+                INSERT INTO dbo.CrawlJob
                     (CrawlId, RQJobId, RootUrl, Status, MaxDepth, MaxPages, CreatedAt, NotifyEmail, Metadata)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -1174,7 +1265,7 @@ def update_crawl_job_status(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE CrawlJob SET {', '.join(updates)} WHERE CrawlId = ?",
+                f"UPDATE dbo.CrawlJob SET {', '.join(updates)} WHERE CrawlId = ?",
                 params,
             )
         conn.commit()
@@ -1188,7 +1279,7 @@ def get_crawl_job_status(crawl_id: str) -> str | None:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT Status FROM CrawlJob WHERE CrawlId = ?", (crawl_id,))
+            cur.execute("SELECT Status FROM dbo.CrawlJob WHERE CrawlId = ?", (crawl_id,))
             row = cur.fetchone()
             return row.Status if row else None
     finally:
@@ -1221,7 +1312,7 @@ def update_crawl_job_progress(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE CrawlJob SET {', '.join(updates)} WHERE CrawlId = ?",
+                f"UPDATE dbo.CrawlJob SET {', '.join(updates)} WHERE CrawlId = ?",
                 params,
             )
         conn.commit()
@@ -1236,7 +1327,7 @@ def get_crawl_job(crawl_id: str) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM CrawlJob WHERE CrawlId = ?",
+                "SELECT * FROM dbo.CrawlJob WHERE CrawlId = ?",
                 (crawl_id,),
             )
             row = cur.fetchone()
@@ -1289,10 +1380,10 @@ def save_crawl_page(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO CrawlPage
+                INSERT INTO dbo.CrawlPage
                     (CrawlId, Url, NormalizedUrl, ParentUrl, Depth, Status, DiscoveredAt)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                RETURNING Id
                 """,
                 (crawl_id, url[:2048], normalized_url[:2048],
                  parent_url[:2048] if parent_url else None,
@@ -1347,7 +1438,7 @@ def update_crawl_page(
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE CrawlPage SET {', '.join(updates)} WHERE Id = ?",
+                f"UPDATE dbo.CrawlPage SET {', '.join(updates)} WHERE Id = ?",
                 params,
             )
         conn.commit()
@@ -1366,7 +1457,7 @@ def get_crawl_pages(crawl_id: str) -> list[dict]:
                 SELECT Id, CrawlId, Url, NormalizedUrl, ParentUrl, Depth, Status,
                        ScanHistoryId, Passes, Violations, PassRate,
                        DiscoveredAt, ScannedAt, FailureReason
-                FROM CrawlPage
+                FROM dbo.CrawlPage
                 WHERE CrawlId = ?
                 ORDER BY Id ASC
                 """,
@@ -1410,12 +1501,11 @@ def get_all_crawl_jobs(limit: int = 25) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT CrawlId, RootUrl, Status,
-                       TotalScanned, TotalFailed,
-                       CreatedAt, EndedAt, DurationSeconds, Metadata
-                FROM CrawlJob
+                SELECT TOP (?) CrawlId, RootUrl, Status,
+                               TotalScanned, TotalFailed,
+                               CreatedAt, EndedAt, DurationSeconds, Metadata
+                FROM dbo.CrawlJob
                 ORDER BY CreatedAt DESC
-                LIMIT ?
                 """,
                 (limit,),
             )
@@ -1463,7 +1553,7 @@ def finalize_crawl_summary(crawl_id: str) -> dict:
             cur.execute(
                 """
                 SELECT AVG(CAST(PassRate AS FLOAT)), SUM(Violations)
-                FROM CrawlPage
+                FROM dbo.CrawlPage
                 WHERE CrawlId = ? AND Status = 'scanned'
                 """,
                 (crawl_id,),
@@ -1477,7 +1567,7 @@ def finalize_crawl_summary(crawl_id: str) -> dict:
                 "site_score": avg_pass_rate,
             }
             cur.execute(
-                "UPDATE CrawlJob SET Metadata = ? WHERE CrawlId = ?",
+                "UPDATE dbo.CrawlJob SET Metadata = ? WHERE CrawlId = ?",
                 (json.dumps(summary), crawl_id),
             )
         conn.commit()
@@ -1515,11 +1605,10 @@ def get_violation_intel(limit: int = 100) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT ResultPayload
-                FROM ScanHistory
+                SELECT TOP (?) ResultPayload
+                FROM dbo.ScanHistory
                 WHERE ResultPayload IS NOT NULL
                 ORDER BY TimestampUtc DESC
-                LIMIT ?
                 """,
                 (limit,),
             )
@@ -1597,8 +1686,8 @@ def get_regression_candidates() -> list[dict]:
                                PARTITION BY Url
                                ORDER BY TimestampUtc DESC
                            ) AS rn
-                    FROM ScanHistory
-                    WHERE Url IS NOT NULL AND Url != ''
+                    FROM dbo.ScanHistory
+                    WHERE Url IS NOT NULL AND Url != N''
                 )
                 SELECT
                     curr.Url,
@@ -1679,15 +1768,15 @@ def get_crawl_violation_intel(crawl_id: str) -> dict:
             cur.execute(
                 """
                 SELECT cp.ResultPayload, cp.Url
-                FROM CrawlPage cp
+                FROM dbo.CrawlPage cp
                 WHERE cp.CrawlId = ? AND cp.Status = 'scanned'
                   AND cp.ResultPayload IS NOT NULL
 
                 UNION ALL
 
                 SELECT sh.ResultPayload, cp.Url
-                FROM CrawlPage cp
-                JOIN ScanHistory sh ON sh.Id = cp.ScanHistoryId
+                FROM dbo.CrawlPage cp
+                JOIN dbo.ScanHistory sh ON sh.Id = cp.ScanHistoryId
                 WHERE cp.CrawlId = ? AND cp.Status = 'scanned'
                   AND cp.ResultPayload IS NULL
                   AND cp.ScanHistoryId IS NOT NULL
@@ -1782,7 +1871,7 @@ def get_crawl_regressions(crawl_id: str) -> dict:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT RootUrl, CreatedAt FROM CrawlJob WHERE CrawlId = ?",
+                "SELECT RootUrl, CreatedAt FROM dbo.CrawlJob WHERE CrawlId = ?",
                 (crawl_id,),
             )
             row = cur.fetchone()
@@ -1792,10 +1881,9 @@ def get_crawl_regressions(crawl_id: str) -> dict:
 
             cur.execute(
                 """
-                SELECT CrawlId, CreatedAt FROM CrawlJob
+                SELECT TOP 1 CrawlId, CreatedAt FROM dbo.CrawlJob
                 WHERE RootUrl = ? AND Status = 'completed' AND CrawlId != ? AND CreatedAt < ?
                 ORDER BY CreatedAt DESC
-                LIMIT 1
                 """,
                 (root_url, crawl_id, created_at),
             )
@@ -1807,9 +1895,9 @@ def get_crawl_regressions(crawl_id: str) -> dict:
 
             cur.execute(
                 """
-                SELECT curr.Url, COALESCE(curr.Violations, 0) AS CurrViol, prev.Violations AS PrevViol
-                FROM CrawlPage curr
-                LEFT JOIN CrawlPage prev
+                SELECT curr.Url, ISNULL(curr.Violations, 0) AS CurrViol, prev.Violations AS PrevViol
+                FROM dbo.CrawlPage curr
+                LEFT JOIN dbo.CrawlPage prev
                     ON curr.NormalizedUrl = prev.NormalizedUrl AND prev.CrawlId = ?
                 WHERE curr.CrawlId = ? AND curr.Status = 'scanned'
                 """,
@@ -1819,11 +1907,11 @@ def get_crawl_regressions(crawl_id: str) -> dict:
 
             cur.execute(
                 """
-                SELECT prev.Url, COALESCE(prev.Violations, 0)
-                FROM CrawlPage prev
+                SELECT prev.Url, ISNULL(prev.Violations, 0)
+                FROM dbo.CrawlPage prev
                 WHERE prev.CrawlId = ? AND prev.Status = 'scanned'
                   AND NOT EXISTS (
-                      SELECT 1 FROM CrawlPage curr
+                      SELECT 1 FROM dbo.CrawlPage curr
                       WHERE curr.CrawlId = ? AND curr.NormalizedUrl = prev.NormalizedUrl
                   )
                 """,
@@ -1877,7 +1965,7 @@ def compare_crawls(crawl_id_a: str, crawl_id_b: str) -> dict | None:
                 """
                 SELECT CrawlId, RootUrl, Status, CreatedAt, TotalScanned, TotalFailed,
                        DurationSeconds, Metadata
-                FROM CrawlJob
+                FROM dbo.CrawlJob
                 WHERE CrawlId IN (?, ?)
                 """,
                 (crawl_id_a, crawl_id_b),
@@ -1910,8 +1998,8 @@ def compare_crawls(crawl_id_a: str, crawl_id_b: str) -> dict | None:
 
             cur.execute(
                 """
-                SELECT CrawlId, NormalizedUrl, Url, COALESCE(Violations, 0), PassRate
-                FROM CrawlPage
+                SELECT CrawlId, NormalizedUrl, Url, ISNULL(Violations, 0), PassRate
+                FROM dbo.CrawlPage
                 WHERE CrawlId IN (?, ?) AND Status = 'scanned'
                 """,
                 (crawl_id_a, crawl_id_b),
@@ -1971,13 +2059,12 @@ def get_crawl_score_timeline(root_url: str, limit: int = 20) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT CrawlId, CreatedAt, TotalScanned, DurationSeconds, Metadata
-                FROM CrawlJob
+                SELECT TOP (?) CrawlId, CreatedAt, TotalScanned, DurationSeconds, Metadata
+                FROM dbo.CrawlJob
                 WHERE RootUrl = ? AND Status = 'completed'
                 ORDER BY CreatedAt ASC
-                LIMIT ?
                 """,
-                (root_url, limit),
+                (limit, root_url),
             )
             rows = cur.fetchall()
         out = []
@@ -2054,9 +2141,9 @@ def create_crawl_schedule(root_url: str, frequency: str = "weekly", name: str | 
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO CrawlSchedule (RootUrl, Frequency, Enabled, NextRunAt, Name, TimeOfDay)
+                INSERT INTO dbo.CrawlSchedule (RootUrl, Frequency, Enabled, NextRunAt, Name, TimeOfDay)
+                OUTPUT INSERTED.Id, INSERTED.CreatedAt
                 VALUES (?, ?, 1, ?, ?, ?)
-                RETURNING Id, CreatedAt
                 """,
                 (root_url, frequency, next_run, name, time_of_day),
             )
@@ -2087,13 +2174,13 @@ def get_crawl_schedules() -> list[dict]:
                 """
                 SELECT s.Id, s.RootUrl, s.Frequency, s.Enabled, s.LastRunAt, s.NextRunAt,
                        s.CreatedAt, s.Name, s.TimeOfDay,
-                       (SELECT COUNT(1) FROM CrawlJob cj
+                       (SELECT COUNT(1) FROM dbo.CrawlJob cj
                         WHERE cj.RootUrl = s.RootUrl AND cj.Status IN ('pending', 'running')) AS ActiveCount,
-                       (SELECT cj2.Status FROM CrawlJob cj2
-                        WHERE cj2.RootUrl = s.RootUrl ORDER BY cj2.CreatedAt DESC LIMIT 1) AS LastRunStatus,
-                       (SELECT cj3.CrawlId FROM CrawlJob cj3
-                        WHERE cj3.RootUrl = s.RootUrl ORDER BY cj3.CreatedAt DESC LIMIT 1) AS LastRunCrawlId
-                FROM CrawlSchedule s
+                       (SELECT TOP 1 cj2.Status FROM dbo.CrawlJob cj2
+                        WHERE cj2.RootUrl = s.RootUrl ORDER BY cj2.CreatedAt DESC) AS LastRunStatus,
+                       (SELECT TOP 1 cj3.CrawlId FROM dbo.CrawlJob cj3
+                        WHERE cj3.RootUrl = s.RootUrl ORDER BY cj3.CreatedAt DESC) AS LastRunCrawlId
+                FROM dbo.CrawlSchedule s
                 ORDER BY s.CreatedAt DESC
                 """
             )
@@ -2127,7 +2214,7 @@ def get_crawl_schedule(schedule_id: int) -> dict | None:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT Id, RootUrl, Frequency, Enabled, Name, TimeOfDay FROM CrawlSchedule WHERE Id = ?",
+                "SELECT Id, RootUrl, Frequency, Enabled, Name, TimeOfDay FROM dbo.CrawlSchedule WHERE Id = ?",
                 (schedule_id,),
             )
             row = cur.fetchone()
@@ -2154,10 +2241,9 @@ def get_active_crawl_id_for_url(root_url: str) -> str | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT CrawlId FROM CrawlJob
+                SELECT TOP 1 CrawlId FROM dbo.CrawlJob
                 WHERE RootUrl = ? AND Status IN ('pending', 'running')
                 ORDER BY CreatedAt DESC
-                LIMIT 1
                 """,
                 (root_url,),
             )
@@ -2176,13 +2262,12 @@ def get_schedule_runs(root_url: str, limit: int = 5) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT CrawlId, Status, TotalScanned, TotalFailed, CreatedAt, EndedAt, DurationSeconds
-                FROM CrawlJob
+                SELECT TOP (?) CrawlId, Status, TotalScanned, TotalFailed, CreatedAt, EndedAt, DurationSeconds
+                FROM dbo.CrawlJob
                 WHERE RootUrl = ?
                 ORDER BY CreatedAt DESC
-                LIMIT ?
                 """,
-                (root_url, limit),
+                (limit, root_url),
             )
             rows = cur.fetchall()
         return [
@@ -2211,8 +2296,8 @@ def get_due_schedules() -> list[dict]:
             cur.execute(
                 """
                 SELECT Id, RootUrl, Frequency, TimeOfDay
-                FROM CrawlSchedule
-                WHERE Enabled = 1 AND NextRunAt <= (now() AT TIME ZONE 'utc')
+                FROM dbo.CrawlSchedule
+                WHERE Enabled = 1 AND NextRunAt <= GETUTCDATE()
                 """
             )
             rows = cur.fetchall()
@@ -2230,8 +2315,8 @@ def mark_schedule_ran(schedule_id: int, frequency: str, time_of_day=None) -> boo
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE CrawlSchedule
-                SET LastRunAt = (now() AT TIME ZONE 'utc'), NextRunAt = ?, UpdatedAt = (now() AT TIME ZONE 'utc')
+                UPDATE dbo.CrawlSchedule
+                SET LastRunAt = GETUTCDATE(), NextRunAt = ?, UpdatedAt = GETUTCDATE()
                 WHERE Id = ?
                 """,
                 (next_run, schedule_id),
@@ -2262,7 +2347,7 @@ def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT Frequency, TimeOfDay FROM CrawlSchedule WHERE Id = ?",
+                    "SELECT Frequency, TimeOfDay FROM dbo.CrawlSchedule WHERE Id = ?",
                     (schedule_id,),
                 )
                 row = cur.fetchone()
@@ -2286,7 +2371,7 @@ def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE CrawlSchedule SET {set_parts}, UpdatedAt = (now() AT TIME ZONE 'utc') WHERE Id = ?",
+                f"UPDATE dbo.CrawlSchedule SET {set_parts}, UpdatedAt = GETUTCDATE() WHERE Id = ?",
                 values,
             )
             conn.commit()
@@ -2304,7 +2389,7 @@ def delete_crawl_schedule(schedule_id: int) -> bool:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM CrawlSchedule WHERE Id = ?", (schedule_id,))
+            cur.execute("DELETE FROM dbo.CrawlSchedule WHERE Id = ?", (schedule_id,))
             conn.commit()
         return True
     except Exception:
@@ -2323,7 +2408,7 @@ def has_active_crawl_for_url(root_url: str) -> bool:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COUNT(1) FROM CrawlJob
+                SELECT COUNT(1) FROM dbo.CrawlJob
                 WHERE RootUrl = ? AND Status IN ('pending', 'running')
                 """,
                 (root_url,),
@@ -2345,7 +2430,7 @@ def get_crawl_ai_summary(crawl_id: str) -> str | None:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT Metadata FROM CrawlJob WHERE CrawlId = ?", (crawl_id,))
+            cur.execute("SELECT Metadata FROM dbo.CrawlJob WHERE CrawlId = ?", (crawl_id,))
             row = cur.fetchone()
         if not row or not row[0]:
             return None
@@ -2364,7 +2449,7 @@ def set_crawl_ai_summary(crawl_id: str, summary_text: str) -> bool:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT Metadata FROM CrawlJob WHERE CrawlId = ?", (crawl_id,))
+            cur.execute("SELECT Metadata FROM dbo.CrawlJob WHERE CrawlId = ?", (crawl_id,))
             row = cur.fetchone()
             meta = {}
             if row and row[0]:
@@ -2374,7 +2459,7 @@ def set_crawl_ai_summary(crawl_id: str, summary_text: str) -> bool:
                     pass
             meta["ai_summary"] = summary_text
             cur.execute(
-                "UPDATE CrawlJob SET Metadata = ? WHERE CrawlId = ?",
+                "UPDATE dbo.CrawlJob SET Metadata = ? WHERE CrawlId = ?",
                 (json.dumps(meta), crawl_id),
             )
             conn.commit()
@@ -2398,9 +2483,9 @@ def create_alert(crawl_id: str, root_url: str, alert_type: str, severity: str, d
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO AccessibilityAlert (CrawlId, RootUrl, AlertType, Severity, Details)
+                INSERT INTO dbo.AccessibilityAlert (CrawlId, RootUrl, AlertType, Severity, Details)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?)
-                RETURNING Id
                 """,
                 (crawl_id, root_url, alert_type, severity, json.dumps(details)),
             )
@@ -2423,16 +2508,16 @@ def get_alerts(status: str | None = None, limit: int = 50) -> list[dict]:
             if status:
                 cur.execute(
                     f"""
-                    SELECT Id, CrawlId, RootUrl, AlertType, Severity, Details, Status, CreatedAt
-                    FROM AccessibilityAlert WHERE Status = ? ORDER BY CreatedAt DESC LIMIT ?
+                    SELECT TOP (?) Id, CrawlId, RootUrl, AlertType, Severity, Details, Status, CreatedAt
+                    FROM dbo.AccessibilityAlert WHERE Status = ? ORDER BY CreatedAt DESC
                     """,
-                    (status, limit),
+                    (limit, status),
                 )
             else:
                 cur.execute(
                     f"""
-                    SELECT Id, CrawlId, RootUrl, AlertType, Severity, Details, Status, CreatedAt
-                    FROM AccessibilityAlert ORDER BY CreatedAt DESC LIMIT ?
+                    SELECT TOP (?) Id, CrawlId, RootUrl, AlertType, Severity, Details, Status, CreatedAt
+                    FROM dbo.AccessibilityAlert ORDER BY CreatedAt DESC
                     """,
                     (limit,),
                 )
@@ -2467,7 +2552,7 @@ def acknowledge_alert(alert_id: int) -> bool:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE AccessibilityAlert SET Status = 'acknowledged' WHERE Id = ?",
+                "UPDATE dbo.AccessibilityAlert SET Status = 'acknowledged' WHERE Id = ?",
                 (alert_id,),
             )
             conn.commit()
@@ -2484,7 +2569,7 @@ def get_unacknowledged_alert_count() -> int:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(1) FROM AccessibilityAlert WHERE Status = 'active'")
+            cur.execute("SELECT COUNT(1) FROM dbo.AccessibilityAlert WHERE Status = 'active'")
             row = cur.fetchone()
         return int(row[0]) if row else 0
     finally:
@@ -2506,7 +2591,7 @@ def get_page_trends(crawl_id: str) -> dict:
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT RootUrl, CreatedAt FROM CrawlJob WHERE CrawlId = ?", (crawl_id,))
+            cur.execute("SELECT RootUrl, CreatedAt FROM dbo.CrawlJob WHERE CrawlId = ?", (crawl_id,))
             row = cur.fetchone()
         if not row:
             return empty
@@ -2515,11 +2600,10 @@ def get_page_trends(crawl_id: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT CrawlId FROM CrawlJob
+                SELECT TOP 1 CrawlId FROM dbo.CrawlJob
                 WHERE RootUrl = ? AND Status = 'completed'
                   AND CrawlId != ? AND CreatedAt < ?
                 ORDER BY CreatedAt DESC
-                LIMIT 1
                 """,
                 (root_url, crawl_id, created_at),
             )
@@ -2532,12 +2616,12 @@ def get_page_trends(crawl_id: str) -> dict:
             cur.execute(
                 """
                 SELECT cur.Url,
-                       COALESCE(prev.Violations, 0) AS PrevViol,
-                       COALESCE(cur.Violations, 0)  AS CurViol,
-                       COALESCE(prev.PassRate, 0)   AS PrevRate,
-                       COALESCE(cur.PassRate, 0)    AS CurRate
-                FROM CrawlPage cur
-                JOIN CrawlPage prev ON prev.NormalizedUrl = cur.NormalizedUrl
+                       ISNULL(prev.Violations, 0) AS PrevViol,
+                       ISNULL(cur.Violations, 0)  AS CurViol,
+                       ISNULL(prev.PassRate, 0)   AS PrevRate,
+                       ISNULL(cur.PassRate, 0)    AS CurRate
+                FROM dbo.CrawlPage cur
+                JOIN dbo.CrawlPage prev ON prev.NormalizedUrl = cur.NormalizedUrl
                                        AND prev.CrawlId = ?
                 WHERE cur.CrawlId = ?
                   AND cur.Status = 'scanned'
@@ -2607,10 +2691,10 @@ def save_assistive_scan(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO AssistiveScanHistory
+                INSERT INTO dbo.AssistiveScanHistory
                     (ScanType, Url, TimestampUtc, Passed, ResultPayload)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?)
-                RETURNING Id
                 """,
                 (scan_type[:50], url[:2048], timestamp, 1 if passed else 0, payload_json),
             )
@@ -2658,13 +2742,12 @@ def get_assistive_scans(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT Id, ScanType, Url, TimestampUtc, Passed
-                FROM AssistiveScanHistory
+                SELECT TOP (?) Id, ScanType, Url, TimestampUtc, Passed
+                FROM dbo.AssistiveScanHistory
                 {where}
                 ORDER BY TimestampUtc DESC
-                LIMIT ?
                 """,
-                params + [limit],
+                [limit] + params,
             )
             rows = cur.fetchall()
         out = []
@@ -2696,22 +2779,22 @@ def save_integration(user_id: int, platform: str, workspace_id: str,
         cur = conn.cursor()
         # Update if same workspace already exists for this user
         cur.execute("""
-            UPDATE Integration
+            UPDATE dbo.Integration
             SET WorkspaceName = ?, AccessToken = ?, Status = 'active'
             WHERE UserId = ? AND Platform = ? AND WorkspaceId = ?
         """, workspace_name, access_token, user_id, platform, workspace_id)
         if cur.rowcount == 0:
             cur.execute("""
-                INSERT INTO Integration (UserId, Platform, WorkspaceId, WorkspaceName, AccessToken)
+                INSERT INTO dbo.Integration (UserId, Platform, WorkspaceId, WorkspaceName, AccessToken)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?)
-                RETURNING Id
             """, user_id, platform, workspace_id, workspace_name, access_token)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
         conn.commit()
         cur.execute("""
-            SELECT Id FROM Integration
+            SELECT Id FROM dbo.Integration
             WHERE UserId = ? AND Platform = ? AND WorkspaceId = ?
         """, user_id, platform, workspace_id)
         return int(cur.fetchone()[0])
@@ -2728,8 +2811,8 @@ def get_integrations(user_id: int) -> list[dict]:
         cur = conn.cursor()
         cur.execute("""
             SELECT i.Id, i.Platform, i.WorkspaceId, i.WorkspaceName, i.ConnectedAt,
-                   (SELECT COUNT(*) FROM IntegrationChannel c WHERE c.IntegrationId = i.Id) AS ChannelCount
-            FROM Integration i
+                   (SELECT COUNT(*) FROM dbo.IntegrationChannel c WHERE c.IntegrationId = i.Id) AS ChannelCount
+            FROM dbo.Integration i
             WHERE i.UserId = ? AND i.Status = 'active'
             ORDER BY i.ConnectedAt DESC
         """, user_id)
@@ -2761,7 +2844,7 @@ def get_integration(integration_id: int, user_id: int) -> dict | None:
         cur = conn.cursor()
         cur.execute("""
             SELECT Id, Platform, WorkspaceId, WorkspaceName, AccessToken, ConnectedAt
-            FROM Integration
+            FROM dbo.Integration
             WHERE Id = ? AND UserId = ? AND Status = 'active'
         """, integration_id, user_id)
         r = cur.fetchone()
@@ -2790,7 +2873,7 @@ def delete_integration(integration_id: int, user_id: int) -> bool:
     try:
         cur = conn.cursor()
         cur.execute("""
-            UPDATE Integration SET Status = 'disconnected'
+            UPDATE dbo.Integration SET Status = 'disconnected'
             WHERE Id = ? AND UserId = ?
         """, integration_id, user_id)
         conn.commit()
@@ -2809,23 +2892,23 @@ def save_integration_channel(integration_id: int, channel_id: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            UPDATE IntegrationChannel
+            UPDATE dbo.IntegrationChannel
             SET ChannelName = ?, Purpose = ?, WebhookUrl = ?
             WHERE IntegrationId = ? AND ChannelId = ?
         """, channel_name, purpose, webhook_url, integration_id, channel_id)
         if cur.rowcount == 0:
             cur.execute("""
-                INSERT INTO IntegrationChannel
+                INSERT INTO dbo.IntegrationChannel
                     (IntegrationId, ChannelId, ChannelName, Purpose, WebhookUrl)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?)
-                RETURNING Id
             """, integration_id, channel_id, channel_name, purpose, webhook_url)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
         conn.commit()
         cur.execute("""
-            SELECT Id FROM IntegrationChannel
+            SELECT Id FROM dbo.IntegrationChannel
             WHERE IntegrationId = ? AND ChannelId = ?
         """, integration_id, channel_id)
         return int(cur.fetchone()[0])
@@ -2842,7 +2925,7 @@ def get_integration_channels(integration_id: int) -> list[dict]:
         cur = conn.cursor()
         cur.execute("""
             SELECT Id, ChannelId, ChannelName, Purpose, WebhookUrl, AddedAt
-            FROM IntegrationChannel
+            FROM dbo.IntegrationChannel
             WHERE IntegrationId = ?
             ORDER BY AddedAt
         """, integration_id)
@@ -2872,7 +2955,7 @@ def delete_integration_channel(integration_id: int, channel_id: str) -> bool:
     try:
         cur = conn.cursor()
         cur.execute("""
-            DELETE FROM IntegrationChannel
+            DELETE FROM dbo.IntegrationChannel
             WHERE IntegrationId = ? AND ChannelId = ?
         """, integration_id, channel_id)
         conn.commit()
@@ -2891,7 +2974,7 @@ def log_integration_delivery(integration_id: int, channel_id: str | None,
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO IntegrationDelivery
+            INSERT INTO dbo.IntegrationDelivery
                 (IntegrationId, ChannelId, ChannelName, ReportType, Status, ErrorMessage, Reference)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, integration_id, channel_id, channel_name, report_type, status, error_msg, reference)
@@ -2908,15 +2991,14 @@ def get_integration_deliveries(user_id: int, limit: int = 20) -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT d.Id, d.ReportType, d.Status, d.SentAt,
-                   d.ChannelName, d.ErrorMessage, d.Reference,
-                   i.Platform, i.WorkspaceName
-            FROM IntegrationDelivery d
-            JOIN Integration i ON i.Id = d.IntegrationId
+            SELECT TOP (?) d.Id, d.ReportType, d.Status, d.SentAt,
+                           d.ChannelName, d.ErrorMessage, d.Reference,
+                           i.Platform, i.WorkspaceName
+            FROM dbo.IntegrationDelivery d
+            JOIN dbo.Integration i ON i.Id = d.IntegrationId
             WHERE i.UserId = ?
             ORDER BY d.SentAt DESC
-            LIMIT ?
-        """, user_id, limit)
+        """, limit, user_id)
         rows = cur.fetchall()
     finally:
         conn.close()
@@ -2950,24 +3032,24 @@ def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            UPDATE RepoLink
+            UPDATE dbo.RepoLink
             SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?,
                 AccessToken = ?, Status = 'active'
             WHERE UserId = ? AND Domain = ?
         """, site_url, repo_url, default_branch, framework, access_token, user_id, domain)
         if cur.rowcount == 0:
             cur.execute("""
-                INSERT INTO RepoLink
+                INSERT INTO dbo.RepoLink
                     (UserId, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken)
+                OUTPUT INSERTED.Id
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                RETURNING Id
             """, user_id, domain, site_url, repo_url, default_branch, framework, access_token)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
         conn.commit()
         cur.execute("""
-            SELECT Id FROM RepoLink WHERE UserId = ? AND Domain = ?
+            SELECT Id FROM dbo.RepoLink WHERE UserId = ? AND Domain = ?
         """, user_id, domain)
         return int(cur.fetchone()[0])
     finally:
@@ -2983,7 +3065,7 @@ def get_repo_links(user_id: int) -> list[dict]:
         cur = conn.cursor()
         cur.execute("""
             SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, ConnectedAt
-            FROM RepoLink
+            FROM dbo.RepoLink
             WHERE UserId = ? AND Status = 'active'
             ORDER BY ConnectedAt DESC
         """, user_id)
@@ -3016,7 +3098,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
         cur = conn.cursor()
         cur.execute("""
             SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
-            FROM RepoLink
+            FROM dbo.RepoLink
             WHERE Id = ? AND UserId = ? AND Status = 'active'
         """, link_id, user_id)
         r = cur.fetchone()
@@ -3048,7 +3130,7 @@ def get_repo_link_by_domain(domain: str, user_id: int) -> dict | None:
         cur = conn.cursor()
         cur.execute("""
             SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
-            FROM RepoLink
+            FROM dbo.RepoLink
             WHERE Domain = ? AND UserId = ? AND Status = 'active'
         """, domain, user_id)
         r = cur.fetchone()
@@ -3079,7 +3161,7 @@ def delete_repo_link(link_id: int, user_id: int) -> bool:
     try:
         cur = conn.cursor()
         cur.execute("""
-            UPDATE RepoLink SET Status = 'disconnected'
+            UPDATE dbo.RepoLink SET Status = 'disconnected'
             WHERE Id = ? AND UserId = ?
         """, link_id, user_id)
         conn.commit()
@@ -3099,9 +3181,9 @@ def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO Fix (UserId, PageUrl, RuleId, Status, BranchUrl, ErrorMessage)
+            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, Status, BranchUrl, ErrorMessage)
+            OUTPUT INSERTED.Id
             VALUES (?, ?, ?, ?, ?, ?)
-            RETURNING Id
         """, user_id, page_url, rule_id, status, branch_url, error_message)
         row = cur.fetchone()
         conn.commit()

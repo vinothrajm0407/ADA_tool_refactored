@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault("DATABASE_URL", "")
+os.environ.setdefault("MSSQL_CONN_STR", "")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 

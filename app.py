@@ -46,7 +46,7 @@ from backend.services.crawl_service import (
     cancel_crawl_job,
 )
 
-# Create tables automatically if DATABASE_URL is set (Neon, Supabase, Render, or local Postgres)
+# Create database and table automatically if MSSQL_CONN_STR is set (Azure, AWS, or local)
 db.init_db()
 
 # Phase 3: start background crawl scheduler (daemon thread, no-op if disabled)

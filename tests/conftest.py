@@ -20,7 +20,7 @@ import pytest
 # ── Force test environment BEFORE any app import ─────────────────────────────
 os.environ["JWT_SECRET"]        = "test-secret-key-for-pytest-do-not-use-in-prod"
 os.environ["APP_ENV"]           = "testing"
-os.environ["DATABASE_URL"]     = ""   # disable DB connection
+os.environ["MSSQL_CONN_STR"]   = ""   # disable DB connection
 os.environ["REDIS_URL"]         = ""   # disable Redis
 os.environ["ANTHROPIC_API_KEY"] = ""   # disable Claude
 os.environ["SMTP_ENABLED"]      = "false"

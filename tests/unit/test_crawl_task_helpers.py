@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-os.environ.setdefault("DATABASE_URL", "")
+os.environ.setdefault("MSSQL_CONN_STR", "")
 os.environ.setdefault("REDIS_URL", "")
 
 from backend.services.crawl_task import _utcnow_iso, _duration
