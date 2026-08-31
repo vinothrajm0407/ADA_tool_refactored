@@ -22,6 +22,7 @@ import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import WcagReferencePage from './pages/WcagReferencePage'
 import IntegrationsPage from './pages/IntegrationsPage'
+import RepoLinkingPage from './pages/RepoLinkingPage'
 
 const PUBLIC_PAGES = new Set(['landing', 'login', 'signup', 'verify-email', 'forgot-password', 'reset-password']);
 
@@ -111,6 +112,7 @@ function AppInner() {
             {activePage === 'ai-fix' && <AIFixPage />}
             {activePage === 'wcag-reference' && <WcagReferencePage />}
             {activePage === 'integrations' && <IntegrationsPage />}
+            {activePage === 'repo-links' && <RepoLinkingPage />}
             {activePage === 'settings' && <SettingsPage />}
           </main>
         </div>
