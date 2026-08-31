@@ -116,6 +116,11 @@ def build_db_mock() -> MagicMock:
     m.set_verify_token.return_value          = None
     m.mark_email_verified.return_value       = None
     m.get_verify_token_issued_at.return_value = None
+    m.get_repo_links.return_value            = []
+    m.save_repo_link.return_value            = 1
+    m.delete_repo_link.return_value          = True
+    m.get_repo_link_by_domain.return_value   = None
+    m.save_fix.return_value                  = 1
     return m
 
 

@@ -16,7 +16,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # App code and built UI
-COPY app.py gunicorn.conf.py ./
+COPY app.py gunicorn.conf.py config.py ./
 COPY services ./services
 COPY backend ./backend
 COPY scripts ./scripts

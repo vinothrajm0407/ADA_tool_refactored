@@ -12,6 +12,7 @@ Run:   npm run build && python app.py
 import json
 import logging
 import os
+import re
 import threading
 try:
     from dotenv import load_dotenv
@@ -1225,6 +1226,36 @@ Provide a structured fix in this EXACT JSON format (no other text, valid JSON on
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/auto-fix", methods=["POST"])
+@require_auth
+def api_auto_fix():
+    """Run the real Auto-Fix pipeline (locate source, patch, build, re-scan, push branch)."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
+    body     = request.get_json(silent=True) or {}
+    page_url = (body.get("page_url") or "").strip()
+    rule     = body.get("rule") or {}
+    node     = body.get("node") or {}
+
+    if not page_url or not rule.get("id"):
+        return jsonify({"ok": False, "error": "page_url and rule are required"}), 400
+
+    import urllib.parse as _up
+    domain = _up.urlparse(page_url).netloc
+    link = db.get_repo_link_by_domain(domain, g.current_user_id)
+    if not link:
+        return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
+
+    from backend.services.auto_fix_service import run_auto_fix
+    result = run_auto_fix(link, page_url, rule, node)
+
+    db.save_fix(
+        g.current_user_id, page_url, rule.get("id", ""), result.get("status", "failed"),
+        result.get("branch_url"), result.get("error"),
+    )
+    return jsonify({"ok": True, **result})
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # INTEGRATIONS  (Slack OAuth + Teams incoming webhook)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1640,6 +1671,79 @@ def api_teams_connect():
         webhook_url=webhook_url,
     )
     return jsonify({"ok": True, "integration_id": integration_id})
+
+
+# ── Repo Links (Auto-Fix source repo) ──────────────────────────────────────────
+
+_GITHUB_REPO_RE = re.compile(
+    r"^https?://github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?/?$"
+)
+
+
+@app.route("/api/repo-links", methods=["GET"])
+@require_auth
+def api_repo_links_list():
+    links = db.get_repo_links(g.current_user_id)
+    return jsonify({"ok": True, "links": links})
+
+
+@app.route("/api/repo-links", methods=["POST"])
+@require_auth
+def api_repo_links_create():
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
+    body = request.get_json(silent=True) or {}
+    site_url       = (body.get("site_url") or "").strip()
+    repo_url       = (body.get("repo_url") or "").strip()
+    access_token   = (body.get("access_token") or "").strip()
+    default_branch = (body.get("default_branch") or "main").strip()
+
+    if not site_url or not repo_url or not access_token:
+        return jsonify({"ok": False, "error": "site_url, repo_url and access_token are required"}), 400
+
+    import urllib.parse as _up
+    domain = _up.urlparse(site_url).netloc
+    if not domain:
+        return jsonify({"ok": False, "error": "site_url must be a full URL, e.g. https://example.com"}), 400
+
+    match = _GITHUB_REPO_RE.match(repo_url)
+    if not match:
+        return jsonify({"ok": False, "error": "repo_url must look like https://github.com/owner/repo"}), 400
+
+    import urllib.request
+    import urllib.error
+    owner, repo = match.group("owner"), match.group("repo")
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repo}",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "ADA-Accessibility-Intelligence",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            pass
+    except urllib.error.HTTPError as e:
+        logging.warning("Repo link validation failed: %s %s/%s -> %s", e.code, owner, repo, e.reason)
+        return jsonify({"ok": False, "error": "Could not access that repo — check the URL and token"}), 502
+    except Exception as e:
+        logging.exception("Repo link validation error: %s", e)
+        return jsonify({"ok": False, "error": "Could not reach GitHub — try again"}), 502
+
+    link_id = db.save_repo_link(
+        g.current_user_id, domain, site_url, repo_url, default_branch, "react", access_token,
+    )
+    return jsonify({"ok": True, "id": link_id}), 201
+
+
+@app.route("/api/repo-links/<int:link_id>", methods=["DELETE"])
+@require_auth
+def api_repo_links_delete(link_id):
+    ok = db.delete_repo_link(link_id, g.current_user_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "Repo link not found"}), 404
+    return jsonify({"ok": True})
 
 
 # ── Send report ───────────────────────────────────────────────────────────────

@@ -447,6 +447,47 @@ def _ensure_table() -> None:
             )
         """)
         conn.commit()
+        # ── Repo Links (Auto-Fix source repo) ─────────────────────────────────
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'RepoLink')
+            CREATE TABLE dbo.RepoLink (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
+                UserId        INT            NOT NULL,
+                Domain        NVARCHAR(255)  NOT NULL,
+                SiteUrl       NVARCHAR(500)  NOT NULL,
+                RepoUrl       NVARCHAR(500)  NOT NULL,
+                DefaultBranch NVARCHAR(100)  NOT NULL DEFAULT 'main',
+                Framework     NVARCHAR(30)   NOT NULL DEFAULT 'react',
+                AccessToken   NVARCHAR(2000) NULL,
+                ConnectedAt   DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
+                Status        NVARCHAR(20)   NOT NULL DEFAULT 'active'
+            )
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'UX_RepoLink_User_Domain'
+            )
+            CREATE UNIQUE INDEX UX_RepoLink_User_Domain ON dbo.RepoLink (UserId, Domain)
+            WHERE Status = 'active'
+        """)
+        conn.commit()
+        # ── Fix attempts (Auto-Fix history) ───────────────────────────────────
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Fix')
+            CREATE TABLE dbo.Fix (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
+                UserId        INT            NOT NULL,
+                PageUrl       NVARCHAR(1000) NOT NULL,
+                RuleId        NVARCHAR(100)  NOT NULL,
+                Status        NVARCHAR(20)   NOT NULL,
+                BranchUrl     NVARCHAR(500)  NULL,
+                ErrorMessage  NVARCHAR(1000) NULL,
+                CreatedAt     DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME()
+            )
+        """)
+        conn.commit()
     finally:
         conn.close()
 
@@ -2978,3 +3019,174 @@ def get_integration_deliveries(user_id: int, limit: int = 20) -> list[dict]:
             "workspace_name": r.WorkspaceName,
         })
     return out
+
+
+# ── Repo Link CRUD (Auto-Fix source repo) ──────────────────────────────────────
+
+def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
+                    default_branch: str, framework: str, access_token: str | None) -> int:
+    """Upsert a site-to-repo link. Returns RepoLink.Id."""
+    if not is_enabled() or _INIT_ERROR:
+        raise RuntimeError("Database not available")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE dbo.RepoLink
+            SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?,
+                AccessToken = ?, Status = 'active'
+            WHERE UserId = ? AND Domain = ?
+        """, site_url, repo_url, default_branch, framework, access_token, user_id, domain)
+        if cur.rowcount == 0:
+            cur.execute("""
+                INSERT INTO dbo.RepoLink
+                    (UserId, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken)
+                OUTPUT INSERTED.Id
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, user_id, domain, site_url, repo_url, default_branch, framework, access_token)
+            row = cur.fetchone()
+            conn.commit()
+            return int(row[0])
+        conn.commit()
+        cur.execute("""
+            SELECT Id FROM dbo.RepoLink WHERE UserId = ? AND Domain = ?
+        """, user_id, domain)
+        return int(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
+def get_repo_links(user_id: int) -> list[dict]:
+    """Return all active repo links for a user (no access token)."""
+    if not is_enabled() or _INIT_ERROR:
+        return []
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, ConnectedAt
+            FROM dbo.RepoLink
+            WHERE UserId = ? AND Status = 'active'
+            ORDER BY ConnectedAt DESC
+        """, user_id)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        ts = r.ConnectedAt
+        if hasattr(ts, "isoformat"):
+            ts = ts.isoformat()
+        out.append({
+            "id": r.Id,
+            "domain": r.Domain,
+            "site_url": r.SiteUrl,
+            "repo_url": r.RepoUrl,
+            "default_branch": r.DefaultBranch,
+            "framework": r.Framework,
+            "connected_at": ts,
+        })
+    return out
+
+
+def get_repo_link(link_id: int, user_id: int) -> dict | None:
+    """Fetch a single repo link including its access token, verifying ownership."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            FROM dbo.RepoLink
+            WHERE Id = ? AND UserId = ? AND Status = 'active'
+        """, link_id, user_id)
+        r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return None
+    ts = r.ConnectedAt
+    if hasattr(ts, "isoformat"):
+        ts = ts.isoformat()
+    return {
+        "id": r.Id,
+        "domain": r.Domain,
+        "site_url": r.SiteUrl,
+        "repo_url": r.RepoUrl,
+        "default_branch": r.DefaultBranch,
+        "framework": r.Framework,
+        "access_token": r.AccessToken,
+        "connected_at": ts,
+    }
+
+
+def get_repo_link_by_domain(domain: str, user_id: int) -> dict | None:
+    """Fetch a single repo link by domain including its access token, verifying ownership."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            FROM dbo.RepoLink
+            WHERE Domain = ? AND UserId = ? AND Status = 'active'
+        """, domain, user_id)
+        r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return None
+    ts = r.ConnectedAt
+    if hasattr(ts, "isoformat"):
+        ts = ts.isoformat()
+    return {
+        "id": r.Id,
+        "domain": r.Domain,
+        "site_url": r.SiteUrl,
+        "repo_url": r.RepoUrl,
+        "default_branch": r.DefaultBranch,
+        "framework": r.Framework,
+        "access_token": r.AccessToken,
+        "connected_at": ts,
+    }
+
+
+def delete_repo_link(link_id: int, user_id: int) -> bool:
+    """Soft-delete a repo link."""
+    if not is_enabled() or _INIT_ERROR:
+        return False
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE dbo.RepoLink SET Status = 'disconnected'
+            WHERE Id = ? AND UserId = ?
+        """, link_id, user_id)
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ── Fix history (Auto-Fix) ──────────────────────────────────────────────────────
+
+def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
+             branch_url: str | None, error_message: str | None) -> int:
+    """Record one Auto-Fix attempt. Returns Fix.Id."""
+    if not is_enabled() or _INIT_ERROR:
+        raise RuntimeError("Database not available")
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, Status, BranchUrl, ErrorMessage)
+            OUTPUT INSERTED.Id
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, user_id, page_url, rule_id, status, branch_url, error_message)
+        row = cur.fetchone()
+        conn.commit()
+        return int(row[0])
+    finally:
+        conn.close()

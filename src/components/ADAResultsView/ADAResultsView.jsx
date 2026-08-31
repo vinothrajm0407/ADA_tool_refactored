@@ -1,6 +1,6 @@
 import { apiFetch } from '../../utils/api';
 import React, { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Shield, Users, Clock, ExternalLink, Sparkles, BookOpen } from 'lucide-react'
+import { ChevronRight, ChevronDown, Shield, Users, Clock, ExternalLink, Sparkles, BookOpen, Wand2, Loader2, CheckCircle2, XCircle, GitBranch } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import {
   getRuleFixTips, getRuleWhyMatters, splitFailureSummary,
@@ -9,6 +9,8 @@ import {
 import { formatDateTime } from '../../utils/format'
 
 const IMPACT_ORDER = ['critical', 'serious', 'moderate', 'minor']
+
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch']
 
 const WCAG_AA_CRITERIA = new Set([
   '1.2.4','1.2.5','1.3.4','1.3.5','1.4.3','1.4.4','1.4.5',
@@ -186,8 +188,10 @@ const EFFORT_META = {
   significant: { label: 'Significant', desc: '1–2 days',  cls: 'text-coral bg-coral/10 border border-coral/20' },
 }
 
-function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey }) {
+function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pageUrl }) {
   const [checkedSteps, setCheckedSteps] = useState(new Set())
+  const [autoFixState, setAutoFixState] = useState('idle') // idle | running | done
+  const [autoFixResult, setAutoFixResult] = useState(null)
   const { navigate, setWcagCriterionId } = useApp()
   const ruleId = rule.id || ''
   const tips = getRuleFixTips(ruleId)
@@ -197,9 +201,28 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey }) 
   const validationSteps = getRuleValidationSteps(ruleId)
   const whyMatters = getRuleWhyMatters(ruleId, rule.impact)
   const effortInfo = EFFORT_META[effort] || EFFORT_META.quick
+  const canAutoFix = Boolean(pageUrl)
 
   const toggleStep = (i) =>
     setCheckedSteps(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
+
+  async function handleAutoFix() {
+    setAutoFixState('running')
+    setAutoFixResult(null)
+    try {
+      const res  = await apiFetch('/api/auto-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_url: pageUrl, rule, node: rule.nodes?.[0] || {} }),
+      })
+      const data = await res.json()
+      setAutoFixResult(data.ok ? data : { status: 'failed', error: data.error || 'Auto-Fix failed', steps: [] })
+    } catch {
+      setAutoFixResult({ status: 'failed', error: 'Could not reach the server', steps: [] })
+    } finally {
+      setAutoFixState('done')
+    }
+  }
 
   return (
     <div className="my-3.5 rounded-xl border border-teal/20 bg-white dark:bg-charcoal overflow-hidden shadow-[0_1px_6px_rgba(0,0,0,0.06)]">
@@ -330,6 +353,70 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey }) 
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Auto Fix ── */}
+      {canAutoFix && (
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+          {autoFixState === 'idle' && (
+            <button type="button" onClick={handleAutoFix}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors">
+              <Wand2 size={13} /> Auto Fix
+            </button>
+          )}
+          {autoFixState === 'running' && (
+            <div className="flex flex-col gap-1.5">
+              <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-teal">
+                <Loader2 size={13} className="animate-spin" /> Running Auto Fix…
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {AUTO_FIX_STEP_NAMES.map(name => (
+                  <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-400 dark:text-gray-500">
+                    {name}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[11px] text-body dark:text-gray-500 m-0">This can take a minute — cloning, building, and re-scanning the fix.</p>
+            </div>
+          )}
+          {autoFixState === 'done' && autoFixResult && (
+            <div className="flex flex-col gap-2">
+              {autoFixResult.status === 'verified' ? (
+                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
+                  <CheckCircle2 size={14} /> Fix Verified
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-coral">
+                  <XCircle size={14} /> Auto Fix Failed
+                </span>
+              )}
+              {(autoFixResult.steps || []).length > 0 && (
+                <div className="flex flex-col gap-1">
+                  {autoFixResult.steps.map((s, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
+                      {s.ok ? <CheckCircle2 size={11} className="text-sage flex-shrink-0" /> : <XCircle size={11} className="text-coral flex-shrink-0" />}
+                      <span className="text-body dark:text-gray-400">{s.name}</span>
+                      {s.detail && <span className="text-gray-400 dark:text-gray-600 truncate">— {s.detail}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {autoFixResult.status === 'verified' && autoFixResult.branch_url && (
+                <a href={autoFixResult.branch_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal hover:underline w-fit">
+                  <GitBranch size={12} /> View branch
+                </a>
+              )}
+              {autoFixResult.status !== 'verified' && autoFixResult.error && (
+                <p className="text-[11.5px] text-coral m-0">{autoFixResult.error}</p>
+              )}
+              <button type="button" onClick={handleAutoFix}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium text-teal hover:underline w-fit">
+                <Wand2 size={11} /> Run again
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -851,6 +938,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                               copied={copied}
                               copyText={copyText}
                               violationKey={key}
+                              pageUrl={displayResult.url}
                             />
 
                             <div className="mt-1">

@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Wand2, Settings, X,
-  ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug,
+  ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug, GitBranch,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
@@ -30,6 +30,7 @@ const NAV_SECTIONS = [
     label: 'Integrations',
     items: [
       { id: 'integrations', label: 'Channels & Apps', icon: Plug },
+      { id: 'repo-links',   label: 'Connected Repos', icon: GitBranch },
     ],
   },
   {
