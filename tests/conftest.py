@@ -20,7 +20,7 @@ import pytest
 # ── Force test environment BEFORE any app import ─────────────────────────────
 os.environ["JWT_SECRET"]        = "test-secret-key-for-pytest-do-not-use-in-prod"
 os.environ["APP_ENV"]           = "testing"
-os.environ["MSSQL_CONN_STR"]   = ""   # disable DB connection
+os.environ["DATABASE_URL"]     = ""   # disable DB connection
 os.environ["REDIS_URL"]         = ""   # disable Redis
 os.environ["ANTHROPIC_API_KEY"] = ""   # disable Claude
 os.environ["SMTP_ENABLED"]      = "false"
@@ -116,6 +116,11 @@ def build_db_mock() -> MagicMock:
     m.set_verify_token.return_value          = None
     m.mark_email_verified.return_value       = None
     m.get_verify_token_issued_at.return_value = None
+    m.get_repo_links.return_value            = []
+    m.save_repo_link.return_value            = 1
+    m.delete_repo_link.return_value          = True
+    m.get_repo_link_by_domain.return_value   = None
+    m.save_fix.return_value                  = 1
     return m
 
 

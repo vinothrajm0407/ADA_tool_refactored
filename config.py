@@ -8,7 +8,7 @@ def _parse_int_list(value: str, default: str) -> list[int]:
 
 class Config:
     REDIS_URL = os.getenv("REDIS_URL", "")
-    MSSQL_CONN_STR = os.getenv("MSSQL_CONN_STR", "")
+    DATABASE_URL = os.getenv("DATABASE_URL", "")
     SCAN_QUEUE_NAME = os.getenv("SCAN_QUEUE_NAME", "ada_scan_queue")
     SCAN_WORKER_MAX_WORKERS = int(os.getenv("SCAN_WORKER_MAX_WORKERS", "2"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
