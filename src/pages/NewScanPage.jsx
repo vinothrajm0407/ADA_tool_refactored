@@ -337,8 +337,15 @@ export default function NewScanPage() {
         ) : (
         <div className="flex flex-col lg:flex-row gap-6 items-start">
         <div className="flex-1 min-w-0 w-full">
-
-        <ScanOptionCards activeId={activeTab} onSelect={(id) => setActiveTab(id)} />
+          <section aria-labelledby="scan-options-heading">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 id="scan-options-heading" className="font-heading text-base font-semibold text-ink dark:text-white">Choose a scan type</h2>
+                <p className="mt-1 text-xs text-body dark:text-gray-500">Select one option to begin a new accessibility check.</p>
+              </div>
+            </div>
+            <ScanOptionCards activeId={activeTab} onSelect={(id) => setActiveTab(id)} />
+          </section>
 
         {/* Single Page Scan */}
         {activeTab === 'single' && (
@@ -367,7 +374,7 @@ export default function NewScanPage() {
             )}
 
             {!showCompare && !activeSession && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+              <div className="surface-card">
                 <div className="px-6 py-5">
                   <SingleScanForm
                     scanUrl={formUrl}
@@ -393,13 +400,13 @@ export default function NewScanPage() {
             )}
 
             {!showCompare && activeSession?.phase === 'scanning' && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+              <div className="surface-card">
                 <ScanProgress bare url={activeSession.url} />
               </div>
             )}
 
             {!showCompare && activeSession?.phase === 'failed' && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft px-6 py-5">
+              <div className="surface-card px-6 py-5">
                 <SingleScanForm
                   scanUrl={activeSession.url}
                   onUrlChange={() => {}}
