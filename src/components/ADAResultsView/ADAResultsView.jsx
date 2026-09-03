@@ -623,14 +623,14 @@ export default function ADAResultsView({ initialResult = null, processResult = n
 
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <label className="inline-flex items-center cursor-pointer">
-            <span className="px-5 py-2.5 bg-teal text-white rounded-lg font-semibold text-[15px] hover:opacity-90 transition-opacity select-none">
+            <span               className="btn-primary select-none">
               Choose result file
             </span>
             <input type="file" accept=".json,application/json" onChange={handleFile} className="sr-only" />
           </label>
           {displayResult && (
             <button type="button" onClick={handleClearResult}
-              className="px-3.5 py-2 bg-transparent border border-gray-200 dark:border-white/[0.08] rounded-lg text-[13px] text-body dark:text-gray-400 cursor-pointer font-[inherit] hover:bg-black/[0.04] dark:hover:bg-white/[0.04] hover:text-ink dark:hover:text-white transition-colors">
+              className="btn-secondary text-[13px]">
               Clear result / Load another
             </button>
           )}
@@ -650,7 +650,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
             <span>{loadScanError}</span>
             {onClearResult && (
               <button type="button" onClick={onClearResult}
-                className="px-3.5 py-2 bg-transparent border border-coral/40 rounded-lg text-[13px] font-[inherit] cursor-pointer text-coral hover:bg-coral/10 transition-colors">
+                className="btn-secondary border-coral/40 text-coral hover:bg-coral/10 text-[13px]">
                 Close
               </button>
             )}
