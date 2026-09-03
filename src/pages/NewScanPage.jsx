@@ -33,7 +33,7 @@ const BEFORE_YOU_START = [
 
 function ScanOptionCards({ activeId, onSelect }) {
   return (
-    <div role="tablist" aria-label="Scan options" className="grid sm:grid-cols-3 gap-3 mb-6">
+    <div role="tablist" aria-label="Scan types" className="grid gap-3 sm:grid-cols-3 mb-6">
       {TABS.map(({ id, label, description, icon: Icon, disabled }) => {
         const isActive = activeId === id;
         return (
@@ -46,7 +46,7 @@ function ScanOptionCards({ activeId, onSelect }) {
             disabled={disabled}
             onClick={() => !disabled && onSelect(id)}
             className={[
-              'relative text-left rounded-2xl border-2 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40',
+              'relative min-h-[170px] text-left rounded-2xl border-2 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 focus-visible:ring-offset-2',
               disabled
                 ? 'border-gray-100 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.02] cursor-not-allowed opacity-70'
                 : isActive
@@ -66,9 +66,9 @@ function ScanOptionCards({ activeId, onSelect }) {
                 Coming soon
               </span>
             ) : (
-              <span
-                aria-hidden="true"
-                className={`absolute bottom-3 right-3 w-5 h-5 rounded-md border-2 flex items-center justify-center ${
+                <span
+                  aria-hidden="true"
+                  className={`absolute bottom-4 right-4 w-5 h-5 rounded-md border-2 flex items-center justify-center ${
                   isActive ? 'border-teal bg-teal' : 'border-gray-300 dark:border-white/20'
                 }`}
               >
@@ -323,7 +323,7 @@ export default function NewScanPage() {
 
   return (
     <div className="flex-1 overflow-auto bg-ivory dark:bg-night">
-      <div className="px-8 py-8 lg:px-12">
+      <div className="page-content">
 
         <div className="mb-8">
           <h1 className="font-heading font-bold text-3xl text-ink dark:text-white mb-2">Start a new accessibility audit</h1>
@@ -337,8 +337,15 @@ export default function NewScanPage() {
         ) : (
         <div className="flex flex-col lg:flex-row gap-6 items-start">
         <div className="flex-1 min-w-0 w-full">
-
-        <ScanOptionCards activeId={activeTab} onSelect={(id) => setActiveTab(id)} />
+          <section aria-labelledby="scan-options-heading">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 id="scan-options-heading" className="font-heading text-base font-semibold text-ink dark:text-white">Choose a scan type</h2>
+                <p className="mt-1 text-xs text-body dark:text-gray-500">Select one option to begin a new accessibility check.</p>
+              </div>
+            </div>
+            <ScanOptionCards activeId={activeTab} onSelect={(id) => setActiveTab(id)} />
+          </section>
 
         {/* Single Page Scan */}
         {activeTab === 'single' && (
@@ -367,7 +374,7 @@ export default function NewScanPage() {
             )}
 
             {!showCompare && !activeSession && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+              <div className="surface-card">
                 <div className="px-6 py-5">
                   <SingleScanForm
                     scanUrl={formUrl}
@@ -393,13 +400,13 @@ export default function NewScanPage() {
             )}
 
             {!showCompare && activeSession?.phase === 'scanning' && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+              <div className="surface-card">
                 <ScanProgress bare url={activeSession.url} />
               </div>
             )}
 
             {!showCompare && activeSession?.phase === 'failed' && (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft px-6 py-5">
+              <div className="surface-card px-6 py-5">
                 <SingleScanForm
                   scanUrl={activeSession.url}
                   onUrlChange={() => {}}

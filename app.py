@@ -9,6 +9,7 @@ Setup: pip install -r requirements.txt  # includes axe-playwright-python
        python -m playwright install chromium
 Run:   npm run build && python app.py
 """
+import hmac
 import json
 import logging
 import os
@@ -253,6 +254,24 @@ def api_auth_login():
 
     if not email or not password:
         return jsonify({"ok": False, "error": "Email and password are required"}), 400
+
+    # Explicitly opt-in development login for local UI testing only. This is
+    # blocked whenever APP_ENV=production and requires both env credentials.
+    if (
+        Config.DEV_AUTH_ENABLED
+        and Config.DEV_AUTH_EMAIL
+        and Config.DEV_AUTH_PASSWORD
+        and email == Config.DEV_AUTH_EMAIL
+        and hmac.compare_digest(password, Config.DEV_AUTH_PASSWORD)
+    ):
+        token = _make_token(0, Config.DEV_AUTH_EMAIL)
+        return jsonify({"ok": True, "token": token, "user": {
+            "id": 0,
+            "firstName": "Demo",
+            "lastName": "User",
+            "email": Config.DEV_AUTH_EMAIL,
+            "emailVerified": True,
+        }})
 
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not available"}), 503

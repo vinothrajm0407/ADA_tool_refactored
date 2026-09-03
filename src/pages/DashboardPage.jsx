@@ -1,12 +1,13 @@
 import { apiFetch } from '../utils/api';
 import { useState, useEffect } from 'react';
-import { Globe, BarChart2, TrendingUp, TrendingDown, Minus, Network, Activity, AlertTriangle } from 'lucide-react';
+import { Globe, BarChart2, TrendingUp, TrendingDown, Minus, Network, Activity, AlertTriangle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { formatUrl, formatShortDate, formatDuration } from '../utils/format';
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { StatusBadge } from '../components/ui/StatusBadge';
+import { useApp } from '../context/AppContext';
 
 /* ─── module-level sub-components ─── */
 
@@ -34,7 +35,7 @@ function KpiCard({ label, value, sub, color = 'text-ink dark:text-white', loadin
   const isPositive = delta > 0;
   const isGood = invertDelta ? !isPositive : isPositive;
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl p-5 border border-gray-100 dark:border-white/[0.06] shadow-soft flex flex-col justify-between">
+    <div className="surface-card p-5 flex min-h-[156px] flex-col justify-between">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">{label}</p>
       <div className="mt-3">
         {loading
@@ -106,6 +107,7 @@ const formatRuleId = (id) =>
 
 /* ─── page ─── */
 export default function DashboardPage() {
+  const { user, navigate } = useApp();
   const [historyItems, setHistoryItems] = useState([]);
   const [trendData, setTrendData]       = useState([]);
   const [trendSummary, setTrendSummary] = useState(null);
@@ -239,13 +241,41 @@ export default function DashboardPage() {
   /* ─── render ─── */
   return (
     <div className="flex-1 overflow-auto bg-ivory dark:bg-night">
-      <div className="max-w-7xl mx-auto p-6 space-y-5">
+      <div className="page-content space-y-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="eyebrow">Accessibility workspace</p>
+            <h1 className="mt-2 font-heading text-3xl font-bold tracking-tight text-ink dark:text-white">
+              Good morning{user?.firstName ? `, ${user.firstName}` : ''}
+            </h1>
+            <p className="mt-1 text-sm text-body dark:text-gray-400">Monitor your accessibility health and keep every release on track.</p>
+          </div>
+          <button type="button" onClick={() => navigate('new-scan')} className="btn-primary inline-flex items-center gap-2">
+            <ShieldCheck aria-hidden="true" size={16} />
+            Run new audit
+            <ArrowRight aria-hidden="true" size={15} />
+          </button>
+        </div>
+
+        <section aria-labelledby="health-heading" className="hero-banner">
+          <div className="min-w-0">
+            <p id="health-heading" className="text-sm font-semibold text-white/90">Accessibility health at a glance</p>
+            <div className="mt-2 flex items-end gap-3">
+              <span className="font-heading text-5xl font-bold leading-none text-white">{avgPassRate != null ? avgPassRate : '—'}</span>
+              <span className="pb-1 text-sm text-white/75">average pass rate</span>
+            </div>
+          </div>
+          <div className="hidden items-center gap-3 text-right sm:flex">
+            <div className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">{totalScans} scans</div>
+            <div className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-white">{totalViolations} issues tracked</div>
+          </div>
+        </section>
 
         {/* ── KPI ROW — 5 cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
 
           {/* Avg Pass Rate — compact stacked hero */}
-          <div className="col-span-2 lg:col-span-1 bg-white dark:bg-charcoal rounded-2xl p-5 border border-gray-100 dark:border-white/[0.06] shadow-soft flex flex-col justify-between">
+          <div className="col-span-2 lg:col-span-1 surface-card p-5 flex flex-col justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">
               Avg Pass Rate
             </p>
@@ -332,7 +362,7 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-2 gap-5">
 
           {/* Pass Rate Trend */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6">
+          <div className="surface-card p-6">
             <div className="mb-5">
               <p className="font-heading font-bold text-base text-ink dark:text-white">Pass Rate Trend</p>
               <p className="text-xs text-body dark:text-gray-500 mt-0.5">Avg pass rate over the last 30 days</p>
@@ -368,7 +398,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Violations Trend */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6">
+          <div className="surface-card p-6">
             <div className="mb-5">
               <p className="font-heading font-bold text-base text-ink dark:text-white">Violations Trend</p>
               <p className="text-xs text-body dark:text-gray-500 mt-0.5">Total violations per day over the last 30 days</p>
@@ -397,7 +427,7 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-3 gap-5">
 
           {/* Recent Scans */}
-          <div className="lg:col-span-2 bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+          <div className="lg:col-span-2 surface-card">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center justify-between">
               <span className="font-heading font-semibold text-base text-ink dark:text-white">Recent Scans</span>
               <span className="text-xs text-body dark:text-gray-500">{totalScans} total</span>
@@ -452,7 +482,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Top Violating URLs */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+          <div className="surface-card">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
               <p className="font-heading font-semibold text-base text-ink dark:text-white">Top Violating URLs</p>
               <p className="text-xs text-body dark:text-gray-500 mt-0.5">Sorted by violation count</p>
@@ -519,7 +549,7 @@ export default function DashboardPage() {
           <div className="grid lg:grid-cols-2 gap-5">
 
             {/* Severity Breakdown */}
-            <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+            <div className="surface-card">
               <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
                 <p className="font-heading font-semibold text-base text-ink dark:text-white">Severity Breakdown</p>
                 <p className="text-xs text-body dark:text-gray-500 mt-0.5">Node counts by impact level</p>
@@ -570,7 +600,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Top Issue Types */}
-            <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+            <div className="surface-card">
               <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
                 <p className="font-heading font-semibold text-base text-ink dark:text-white">Top Issue Types</p>
                 <p className="text-xs text-body dark:text-gray-500 mt-0.5">Most common violations</p>
@@ -624,7 +654,7 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-2 gap-5">
 
           {/* Needs Attention */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+          <div className="surface-card">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-coral-700 dark:text-coral-300 flex-shrink-0" />
               <span className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Needs Attention</span>
@@ -678,7 +708,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Crawls */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+          <div className="surface-card">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Network className="w-4 h-4 text-body dark:text-gray-500" />

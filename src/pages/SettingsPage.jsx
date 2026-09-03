@@ -10,7 +10,7 @@ const TABS = [
 
 function ProfileTab({ user }) {
   return (
-    <div className="card p-6 space-y-5">
+    <div className="surface-card p-6 space-y-5">
       <div>
         <h2 className="font-heading font-semibold text-lg text-ink dark:text-white">Profile</h2>
         <p className="text-sm text-body dark:text-gray-400 mt-0.5">
@@ -47,7 +47,7 @@ function ThemeOption({ label, icon: Icon, active, onClick }) {
           : 'border-gray-200 dark:border-white/10 hover:border-gray-300 dark:hover:border-white/20'
       }`}
     >
-      <Icon size={20} className={active ? 'text-teal' : 'text-body dark:text-gray-400'} />
+      <Icon aria-hidden="true" size={20} className={active ? 'text-teal' : 'text-body dark:text-gray-400'} />
       <span className={`text-sm font-medium ${active ? 'text-teal' : 'text-ink dark:text-white'}`}>{label}</span>
       <span
         className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
@@ -62,7 +62,7 @@ function ThemeOption({ label, icon: Icon, active, onClick }) {
 
 function AppearanceTab({ dark, setDark, reducedMotion, setReducedMotion }) {
   return (
-    <div className="card p-6 space-y-6">
+    <div className="surface-card p-6 space-y-6">
       <div>
         <h2 className="font-heading font-semibold text-lg text-ink dark:text-white">Appearance</h2>
         <p className="text-sm text-body dark:text-gray-400 mt-0.5">Choose how the ADA Tool looks on this device.</p>
@@ -125,7 +125,7 @@ function SecurityTab({ user }) {
   }
 
   return (
-    <div className="card p-6 space-y-5">
+    <div className="surface-card p-6 space-y-5">
       <div>
         <h2 className="font-heading font-semibold text-lg text-ink dark:text-white">Security</h2>
         <p className="text-sm text-body dark:text-gray-400 mt-0.5">
@@ -177,7 +177,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
           <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Settings</h1>
@@ -199,7 +199,7 @@ export default function SettingsPage() {
                   aria-current={isActive ? 'true' : undefined}
                   className={isActive ? 'nav-item-active' : 'nav-item'}
                 >
-                  <Icon size={16} />
+                  <Icon aria-hidden="true" size={16} />
                   {t.label}
                 </button>
               );
@@ -215,9 +215,9 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="card p-5 border-2 border-coral/20">
+        <div className="surface-card p-5 border-2 border-coral/20">
           <div className="flex items-center gap-2 mb-3">
-            <Trash2 size={20} className="text-coral shrink-0" />
+            <Trash2 aria-hidden="true" size={20} className="text-coral shrink-0" />
             <h3 className="font-heading font-semibold text-ink dark:text-white">Danger Zone</h3>
           </div>
           <hr className="border-coral/20 mb-4" />

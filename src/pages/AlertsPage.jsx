@@ -244,7 +244,7 @@ export default function AlertsPage() {
   const hasUnreadInView = items.some((a) => a.status === 'active');
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
       <div className="max-w-6xl mx-auto space-y-6">
 
         <div>

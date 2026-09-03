@@ -65,6 +65,13 @@ class Config:
     JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
     EMAIL_VERIFY_EXPIRE_HOURS = int(os.getenv("EMAIL_VERIFY_EXPIRE_HOURS", "24"))
     PASSWORD_RESET_EXPIRE_HOURS = int(os.getenv("PASSWORD_RESET_EXPIRE_HOURS", "1"))
+    # Local-only demo login for UI testing. It is always disabled in production.
+    DEV_AUTH_ENABLED = (
+        not IS_PRODUCTION
+        and os.getenv("ADA_DEV_AUTH", "false").lower() in ("1", "true", "yes")
+    )
+    DEV_AUTH_EMAIL = os.getenv("ADA_DEV_EMAIL", "").strip().lower()
+    DEV_AUTH_PASSWORD = os.getenv("ADA_DEV_PASSWORD", "")
     GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
     # Slack integration (OAuth bot token flow)
     SLACK_CLIENT_ID     = os.getenv("SLACK_CLIENT_ID", "")
