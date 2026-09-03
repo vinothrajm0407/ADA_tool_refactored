@@ -89,7 +89,7 @@ export default function CrawlForm({
 
         <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-ink dark:text-white">Full Site Crawl</p>
+            <p id="full-site-label" className="text-sm font-semibold text-ink dark:text-white">Full Site Crawl</p>
             <p className="text-sm text-body dark:text-gray-400 mt-1 leading-relaxed">
               No page limit — crawls the entire site (up to 10,000 pages).
             </p>
@@ -100,6 +100,7 @@ export default function CrawlForm({
               checked={fullSite}
               onChange={e => onFullSiteChange(e.target.checked)}
               disabled={crawlLoading}
+              ariaLabelledBy="full-site-label"
             />
           </div>
         </div>

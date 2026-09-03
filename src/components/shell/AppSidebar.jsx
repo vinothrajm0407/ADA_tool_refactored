@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Wand2, Settings, X,
-  ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug, GitBranch,
+  ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug, GitBranch, GitPullRequest,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
@@ -37,6 +37,7 @@ const NAV_SECTIONS = [
     label: 'Tools',
     items: [
       { id: 'ai-fix',         label: 'AI Fix Assistant',  icon: Wand2          },
+      { id: 'fix-history',    label: 'Fix History',       icon: GitPullRequest },
       { id: 'assistive-test', label: 'Assistive Testing', icon: ClipboardList  },
       { id: 'wcag-reference', label: 'WCAG Reference',    icon: BookOpen       },
     ],
@@ -108,7 +109,7 @@ export default function AppSidebar() {
         </div>
 
         {/* ── NAV ── */}
-        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+        <nav aria-label="Primary" className="flex-1 px-3 space-y-1 overflow-y-auto">
           {NAV_SECTIONS.map((section) => (
             <div key={section.label || '__top'} className="mb-1">
               {section.label && (
@@ -122,6 +123,7 @@ export default function AppSidebar() {
                   <button
                     key={id}
                     onClick={() => { navigate(id); setSidebarOpen(false); }}
+                    aria-current={active ? 'page' : undefined}
                     className={[
                       'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[13.5px] border-0 transition-all duration-150',
                       active

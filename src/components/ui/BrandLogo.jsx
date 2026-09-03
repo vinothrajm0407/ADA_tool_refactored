@@ -86,7 +86,7 @@ export default function BrandLogo({ variant = 'sidebar' }) {
             </span>
             <span className="block text-[10px] text-body dark:text-gray-500 mt-0.5">
               Powered by{' '}
-              <span className="font-semibold text-brand-blue">{BRAND.companyName}</span>
+              <span className="font-semibold text-brand-blue-700 dark:text-brand-blue-300">{BRAND.companyName}</span>
             </span>
           </>
         )}

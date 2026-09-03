@@ -6,13 +6,13 @@ const PAGES = [
 ];
 
 const STATUS_CLS = {
-  Passed: 'text-sage bg-sage/10',
-  Review: 'text-amber-500 bg-amber-500/10',
-  Failed: 'text-coral bg-coral/10',
+  Passed: 'text-sage-700 dark:text-sage-300 bg-sage/10',
+  Review: 'text-amber-800 dark:text-amber-300 bg-amber-500/10',
+  Failed: 'text-coral-700 dark:text-coral-300 bg-coral/10',
 };
 
 function scoreColor(s) {
-  return s >= 85 ? 'text-sage' : s >= 70 ? 'text-amber-500' : 'text-coral';
+  return s >= 85 ? 'text-sage-700 dark:text-sage-300' : s >= 70 ? 'text-amber-800 dark:text-amber-300' : 'text-coral-700 dark:text-coral-300';
 }
 
 export default function CrawlPreview() {

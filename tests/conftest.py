@@ -119,8 +119,10 @@ def build_db_mock() -> MagicMock:
     m.get_repo_links.return_value            = []
     m.save_repo_link.return_value            = 1
     m.delete_repo_link.return_value          = True
-    m.get_repo_link_by_domain.return_value   = None
+    m.get_repo_link_for_url.return_value      = None
     m.save_fix.return_value                  = 1
+    m.get_fixes.return_value                 = []
+    m.get_open_fix.return_value              = None
     return m
 
 

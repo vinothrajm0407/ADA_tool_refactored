@@ -15,22 +15,83 @@
     @apply min-h-screen bg-ivory font-body dark:bg-night;
   }
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0;
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-ivory transition-colors duration-200 cursor-pointer dark:border-white/10 dark:bg-charcoal dark:text-white dark:hover:bg-white/5;
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-ivory transition-colors duration-200 cursor-pointer dark:border-white/10 dark:bg-charcoal dark:text-white dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-charcoal;
   }
   .btn-ghost {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-xl text-body font-medium text-sm hover:bg-gray-100 transition-colors duration-200 cursor-pointer dark:text-gray-400 dark:hover:bg-white/5;
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-xl text-body font-medium text-sm hover:bg-gray-100 transition-colors duration-200 cursor-pointer dark:text-gray-400 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent;
+  }
+  .btn-danger {
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-coral text-white font-semibold font-heading text-sm hover:bg-coral-700 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-coral;
   }
   .input-base {
-    @apply w-full px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-ink placeholder-gray-400 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal transition-all duration-200 dark:border-white/20 dark:bg-charcoal dark:text-white dark:placeholder-gray-500 dark:shadow-none disabled:opacity-60 disabled:cursor-not-allowed;
+    @apply w-full px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-ink placeholder-gray-400 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal transition-all duration-200 dark:border-white/20 dark:bg-charcoal dark:text-white dark:placeholder-gray-500 dark:shadow-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-gray-50 dark:disabled:bg-white/[0.02];
+  }
+  .select-base {
+    @apply input-base cursor-pointer disabled:cursor-not-allowed;
+  }
+  .checkbox-base {
+    @apply w-4 h-4 rounded border-gray-300 text-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 focus-visible:ring-offset-1 dark:border-white/25 dark:bg-charcoal disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer;
   }
   .nav-item {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-body transition-colors duration-200 cursor-pointer hover:bg-ivory dark:text-gray-400 dark:hover:bg-white/5;
   }
   .nav-item-active {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-teal bg-teal/10 cursor-pointer;
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-teal-800 dark:text-teal-300 bg-teal/10 cursor-pointer;
+  }
+
+  /* Tabs (segmented control, e.g. New Scan's Single/HTML/Crawl switcher) */
+  .tab {
+    @apply flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer text-gray-600 dark:text-gray-400 hover:text-ink dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-600;
+  }
+  .tab-active {
+    @apply flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 cursor-pointer bg-white dark:bg-night shadow-sm text-teal font-semibold;
+  }
+
+  /* Alerts / inline banners — distinct from toast notifications */
+  .alert {
+    @apply flex items-start gap-3 px-4 py-3 rounded-xl border text-sm;
+  }
+  .alert-info    { @apply alert bg-teal/10 border-teal/25 text-teal-800 dark:text-teal-300; }
+  .alert-success { @apply alert bg-sage/10 border-sage/25 text-sage-700 dark:text-sage-300; }
+  .alert-warning { @apply alert bg-amber/10 border-amber/25 text-amber-800 dark:text-amber-300; }
+  .alert-danger  { @apply alert bg-coral/10 border-coral/25 text-coral-700 dark:text-coral-300; }
+
+  /* Tables */
+  .table-base {
+    @apply w-full text-sm text-left border-collapse;
+  }
+  .table-base thead th {
+    @apply px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-body dark:text-gray-400 border-b border-gray-100 dark:border-white/[0.06];
+  }
+  .table-base tbody td {
+    @apply px-4 py-3 border-b border-gray-100 dark:border-white/[0.06] text-ink dark:text-white;
+  }
+  .table-base tbody tr:hover {
+    @apply bg-gray-50 dark:bg-white/[0.02];
+  }
+
+  /* Dialogs (modals) */
+  .dialog-overlay {
+    @apply fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4;
+  }
+  .dialog-panel {
+    @apply w-full max-w-md bg-white dark:bg-charcoal rounded-2xl shadow-lg border border-gray-100 dark:border-white/[0.08] p-6;
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-gray-100 dark:bg-white/[0.06];
+  }
+
+  /* Empty / error states */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center py-16 px-6 text-body dark:text-gray-400;
+  }
+  .error-text {
+    @apply text-sm text-coral-700 dark:text-coral-300;
   }
 }
 
@@ -291,6 +352,56 @@ input,
 textarea,
 select {
   font-family: inherit;
+}
+
+/* ─── Focus visibility ───────────────────────────────────── */
+/* `button { outline: none }` above strips the default focus ring from every
+   button in the app. Individual components add their own `focus-visible:ring`
+   utility, but many icon-only buttons don't — this is the safety net so
+   *nothing* interactive loses keyboard focus visibility. Layers under any
+   component-specific ring (this fires only when nothing more specific wins). */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Reduced motion ─────────────────────────────────────── */
+/* Honors the OS preference automatically, and also an explicit in-app
+   override (Settings → Appearance → Reduced motion) via [data-reduced-motion="true"]. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html[data-reduced-motion="true"] {
+  scroll-behavior: auto;
+}
+
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* ─── Glow Input — shared across pages ──────────────────── */

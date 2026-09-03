@@ -42,6 +42,12 @@ class Config:
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
     AI_SUMMARY_ENABLED = bool(os.getenv("ANTHROPIC_API_KEY", ""))
     AI_SUMMARY_MODEL = os.getenv("AI_SUMMARY_MODEL", "claude-sonnet-4-6")
+    # Auto-Fix Tier 2 — free-tier Gemini instead of a paid Anthropic key
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    # gemini-3.6-flash's free tier is capped at 20 requests/day — far too low for
+    # Fix All / repeated testing. gemini-3.5-flash-lite is a separate quota bucket
+    # (per-model, not shared) and still produces clean patches.
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     # Phase 3 — Alert thresholds (Feature 3)
     ALERT_SCORE_DROP_THRESHOLD = int(os.getenv("ALERT_SCORE_DROP_THRESHOLD", "5"))
     ALERT_VIOLATION_INCREASE_THRESHOLD = int(os.getenv("ALERT_VIOLATION_INCREASE_THRESHOLD", "10"))

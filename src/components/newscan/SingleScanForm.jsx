@@ -37,7 +37,7 @@ export default function SingleScanForm({
       <section className="pt-2 pb-1">
         <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-ink dark:text-white">Best Practices</p>
+            <p id="best-practices-label" className="text-sm font-semibold text-ink dark:text-white">Best Practices</p>
             <p className="text-sm text-body dark:text-gray-400 mt-1 leading-relaxed">
               Includes non-WCAG rules to provide broader accessibility guidance. Issue count may increase.
             </p>
@@ -47,6 +47,7 @@ export default function SingleScanForm({
               id="best-practices"
               checked={includeBestPractices}
               onChange={e => onBestPracticesChange(e.target.checked)}
+              ariaLabelledBy="best-practices-label"
             />
           </div>
         </div>

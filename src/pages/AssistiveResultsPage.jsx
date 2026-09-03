@@ -1,27 +1,7 @@
 import { useEffect } from 'react';
 import { ArrowLeft, RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import KeyboardNavigationModule from '../components/assistive/KeyboardNavigationModule';
-import ColorContrastModule from '../components/assistive/ColorContrastModule';
-import PageStructureModule from '../components/assistive/PageStructureModule';
-import FormsAccessibilityModule from '../components/assistive/FormsAccessibilityModule';
-import PlaceholderModule from '../components/assistive/PlaceholderModule';
-
-const MODULE_LABELS = {
-  keyboard:       'Keyboard Navigation',
-  'color-contrast': 'Color Contrast',
-  'page-structure': 'Page Structure',
-  forms:          'Forms Accessibility',
-};
-
-function ResultsContent({ result }) {
-  const { testType } = result;
-  if (testType === 'keyboard')       return <KeyboardNavigationModule result={result} />;
-  if (testType === 'color-contrast') return <ColorContrastModule result={result} />;
-  if (testType === 'page-structure') return <PageStructureModule result={result} />;
-  if (testType === 'forms')          return <FormsAccessibilityModule result={result} />;
-  return <PlaceholderModule module={{ label: MODULE_LABELS[testType] ?? testType }} />;
-}
+import AssistiveResultView, { MODULE_LABELS } from '../components/assistive/AssistiveResultView';
 
 export default function AssistiveResultsPage() {
   const { assistiveResult, setAssistiveResult, navigate } = useApp();
@@ -79,7 +59,7 @@ export default function AssistiveResultsPage() {
       </div>
 
       {/* RESULTS */}
-      <ResultsContent result={assistiveResult} />
+      <AssistiveResultView result={assistiveResult} />
 
     </div>
   );

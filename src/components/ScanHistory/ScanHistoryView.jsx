@@ -1,12 +1,13 @@
 import { apiFetch } from '../../utils/api';
 import React, { useState, useEffect, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronRight, Keyboard, Eye, RotateCcw, AlignLeft } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Keyboard, Eye, RotateCcw, AlignLeft, Globe, FileText, ExternalLink, ArrowRight, CheckCircle2 } from 'lucide-react'
 import { formatDateTime } from '../../utils/format'
 import GlowInput from '../ui/GlowInput'
 import { useApp } from '../../context/AppContext'
 import { CrawlHistoryContent } from './CrawlHistoryContent'
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 10
+const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100]
 
 // ─── Shared badge components ─────────────────────────────────────────────────
 
@@ -14,13 +15,13 @@ function PassRateBadge({ value }) {
   if (value == null) return '—'
   const cls =
     value >= 90
-      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+      ? 'bg-sage/15 text-sage-700 dark:text-sage-300'
       : value >= 70
-        ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-        : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+        ? 'bg-amber/15 text-amber-700 dark:text-amber-300'
+        : 'bg-coral/15 text-coral-700 dark:text-coral-300'
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
-      {value}%
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
+      {value}
     </span>
   )
 }
@@ -29,10 +30,10 @@ function ViolationsBadge({ value }) {
   if (value == null) return '—'
   const cls =
     value === 0
-      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+      ? 'bg-sage/15 text-sage-700 dark:text-sage-300'
       : value <= 5
-        ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-        : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+        ? 'bg-amber/15 text-amber-700 dark:text-amber-300'
+        : 'bg-coral/15 text-coral-700 dark:text-coral-300'
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
       {value}
@@ -42,23 +43,48 @@ function ViolationsBadge({ value }) {
 
 function SourceBadge({ usedFallback }) {
   return usedFallback ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber/15 text-amber-700 dark:text-amber-300">
       Fallback
     </span>
   ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal/10 dark:bg-teal/20 text-teal">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal/10 text-teal-700 dark:text-teal-300">
       Live run
+    </span>
+  )
+}
+
+// Every saved history record is, by definition, a finished scan — there's no
+// "in progress" state in this data (in-progress scans live only in the New
+// Scan tab session, not in /api/history), so this is always "Completed"
+// rather than a fabricated multi-state field.
+function CompletedStatusBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sage/15 text-sage-700 dark:text-sage-300">
+      <CheckCircle2 size={12} />
+      Completed
+    </span>
+  )
+}
+
+// Reuses the existing includeBestPractices flag (previously shown as plain
+// "Profile" text) as the scan-type indicator — no new data invented.
+function ScanProfileBadge({ includeBestPractices }) {
+  const Icon = includeBestPractices ? Globe : FileText
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-body dark:text-gray-400 whitespace-nowrap">
+      <Icon size={13} className="flex-shrink-0 text-gray-400" />
+      {includeBestPractices ? 'WCAG 2.1 AA + Best Practices' : 'WCAG 2.1 AA'}
     </span>
   )
 }
 
 function ResultBadge({ passed }) {
   return passed ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-sage/15 text-sage-700 dark:text-sage-300">
       Passed
     </span>
   ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-coral/15 text-coral-700 dark:text-coral-300">
       Failed
     </span>
   )
@@ -67,7 +93,7 @@ function ResultBadge({ passed }) {
 function ScanTypeBadge({ scanType }) {
   if (scanType === 'keyboard') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-teal/15 text-teal-700 dark:text-teal-300">
         <Keyboard size={11} />
         Keyboard
       </span>
@@ -75,48 +101,82 @@ function ScanTypeBadge({ scanType }) {
   }
   if (scanType === 'page-structure') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-sage/10 text-sage">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-sage/15 text-sage-700 dark:text-sage-300">
         <AlignLeft size={11} />
         Page Structure
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-terracotta/15 text-terracotta-700 dark:text-terracotta-300">
       <Eye size={11} />
       Contrast
     </span>
   )
 }
 
-// ─── Pagination helper ────────────────────────────────────────────────────────
+// ─── Pagination footer ────────────────────────────────────────────────────────
 
-function Paginator({ currentPage, totalPages, onPageChange }) {
-  if (totalPages <= 1) return null
+function Paginator({ currentPage, totalPages, totalItems, pageSize, onPageChange, onPageSizeChange, label }) {
+  if (totalItems === 0) return null
+  const firstShown = (currentPage - 1) * pageSize + 1
+  const lastShown = Math.min(currentPage * pageSize, totalItems)
   return (
-    <div className="flex items-center justify-between mt-4 text-sm text-body dark:text-gray-400">
-      <span>Page {currentPage} of {totalPages}</span>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onPageChange(p => Math.max(1, p - 1))}
-          disabled={currentPage === 1}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white text-xs font-medium hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-          Prev
-        </button>
-        <span className="px-1 tabular-nums">{currentPage} / {totalPages}</span>
-        <button
-          type="button"
-          onClick={() => onPageChange(p => Math.min(totalPages, p + 1))}
-          disabled={currentPage === totalPages}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white text-xs font-medium hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          Next
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 text-sm text-body dark:text-gray-400">
+      <span>Showing {firstShown} to {lastShown} of {totalItems} results</span>
+      <div className="flex items-center gap-4">
+        {totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onPageChange(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              aria-label="Previous page"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <span className="inline-flex items-center justify-center min-w-8 h-8 px-2 rounded-lg bg-teal text-white text-xs font-semibold tabular-nums">
+              {currentPage}
+            </span>
+            <span className="tabular-nums text-xs">of {totalPages}</span>
+            <button
+              type="button"
+              onClick={() => onPageChange(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              aria-label="Next page"
+              className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+        {onPageSizeChange && (
+          <label className="flex items-center gap-2 text-xs">
+            Rows per page:
+            <select
+              value={pageSize}
+              onChange={e => onPageSizeChange(Number(e.target.value))}
+              aria-label={`Rows per page for ${label}`}
+              className="select-base w-auto py-1.5 pl-2.5 pr-7 text-xs"
+            >
+              {ROWS_PER_PAGE_OPTIONS.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </label>
+        )}
       </div>
+    </div>
+  )
+}
+
+function NoResultsInRange({ message }) {
+  return (
+    <div className="mt-4 border-2 border-dashed border-gray-200 dark:border-white/10 rounded-2xl px-6 py-10 flex flex-col items-center text-center gap-2">
+      <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-white/[0.06] flex items-center justify-center">
+        <Search size={16} className="text-gray-400" />
+      </div>
+      <p className="text-sm font-semibold text-ink dark:text-white m-0">{message}</p>
+      <p className="text-xs text-body dark:text-gray-400 m-0">Try adjusting your search or date range to see more results.</p>
     </div>
   )
 }
@@ -133,14 +193,18 @@ const ADA_SORT_OPTIONS = [
 ]
 
 function AdaScansTab({ onScanClick }) {
+  const { navigate } = useApp()
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [historyMessage, setHistoryMessage] = useState('')
   const [historyAvailable, setHistoryAvailable] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [sortKey, setSortKey] = useState('newest')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   const handleScanIdClick = (item) => {
     if (!onScanClick || !item?.id) return
@@ -170,17 +234,26 @@ function AdaScansTab({ onScanClick }) {
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, sortKey])
+  useEffect(() => { setCurrentPage(1) }, [searchQuery, sortKey, dateFrom, dateTo, pageSize])
 
   const filteredAndSorted = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
-    const filtered = q
+    let filtered = q
       ? items.filter(item =>
           (item.url || '').toLowerCase().includes(q) ||
           (item.id || '').toLowerCase().includes(q) ||
           (item.usedFallback ? 'fallback' : 'live run').includes(q)
         )
       : items
+    if (dateFrom) {
+      const from = new Date(dateFrom)
+      filtered = filtered.filter(item => item.timestamp && new Date(item.timestamp) >= from)
+    }
+    if (dateTo) {
+      const to = new Date(dateTo)
+      to.setHours(23, 59, 59, 999)
+      filtered = filtered.filter(item => item.timestamp && new Date(item.timestamp) <= to)
+    }
     return [...filtered].sort((a, b) => {
       switch (sortKey) {
         case 'oldest':          return new Date(a.timestamp) - new Date(b.timestamp)
@@ -191,19 +264,20 @@ function AdaScansTab({ onScanClick }) {
         default:                return new Date(b.timestamp) - new Date(a.timestamp)
       }
     })
-  }, [items, searchQuery, sortKey])
+  }, [items, searchQuery, sortKey, dateFrom, dateTo])
 
-  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize))
   const safePage = Math.min(currentPage, totalPages)
-  const paginatedItems = filteredAndSorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+  const paginatedItems = filteredAndSorted.slice((safePage - 1) * pageSize, safePage * pageSize)
   const showControls = !loading && !error && items.length > 0 && historyAvailable
+  const isFiltering = searchQuery.trim() !== '' || dateFrom !== '' || dateTo !== ''
 
   return (
     <>
       {!loading && !error && historyMessage && (
         <p className={historyAvailable
           ? 'mt-4 text-[0.95rem] text-body dark:text-gray-400'
-          : 'mt-4 text-[0.95rem] text-ink dark:text-white bg-teal/10 dark:bg-teal/[0.15] px-4 py-3 rounded-xl border border-teal'}
+          : 'alert-info mt-4'}
           role={historyAvailable ? undefined : 'status'}
         >
           {historyMessage}
@@ -211,7 +285,7 @@ function AdaScansTab({ onScanClick }) {
       )}
       {loading && <p className="mt-4 text-[0.95rem] text-body dark:text-gray-400">Loading scan history…</p>}
       {error && (
-        <p className="mt-4 text-[0.95rem] text-ink dark:text-white bg-teal/10 dark:bg-teal/[0.15] px-4 py-3 rounded-xl border border-teal" role="alert">
+        <p className="alert-danger mt-4" role="alert">
           {error}
         </p>
       )}
@@ -222,41 +296,69 @@ function AdaScansTab({ onScanClick }) {
       )}
 
       {showControls && (
-        <div className="flex flex-col sm:flex-row gap-3 mt-4 mb-2">
-          <div className="flex-1">
+        <div className="flex flex-col lg:flex-row gap-3 mt-4 mb-2">
+          <div className="flex-1 min-w-[200px]">
             <GlowInput
               icon={Search}
               type="search"
-              placeholder="Search by URL, ID, or source…"
+              placeholder="Search websites…"
+              aria-label="Search scan history by website, ID, or source"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
+          <div className="flex items-center gap-2">
+            <label className="sr-only" htmlFor="ada-date-from">From date</label>
+            <input
+              id="ada-date-from"
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="select-base w-auto pr-3"
+            />
+            <span className="text-body dark:text-gray-500 text-sm" aria-hidden="true">–</span>
+            <label className="sr-only" htmlFor="ada-date-to">To date</label>
+            <input
+              id="ada-date-to"
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="select-base w-auto pr-3"
+            />
+          </div>
+          <label className="sr-only" htmlFor="ada-sort">Sort scan history</label>
           <select
+            id="ada-sort"
             value={sortKey}
             onChange={e => setSortKey(e.target.value)}
-            className="sm:w-52 px-3 py-2 text-sm bg-white dark:bg-charcoal border border-gray-200 dark:border-white/[0.1] rounded-xl text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal"
+            className="select-base lg:w-52"
           >
             {ADA_SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <button
+            type="button"
+            onClick={() => navigate('new-scan')}
+            className="btn-primary whitespace-nowrap"
+          >
+            Run new audit
+            <ArrowRight size={15} />
+          </button>
         </div>
       )}
 
       {showControls && filteredAndSorted.length === 0 && (
-        <p className="mt-4 text-[0.95rem] text-body dark:text-gray-400">
-          No results match <strong>&ldquo;{searchQuery}&rdquo;</strong>.
-        </p>
+        <NoResultsInRange message={`No scans match "${searchQuery}"${dateFrom || dateTo ? ' in this date range' : ''}.`} />
       )}
 
       {showControls && filteredAndSorted.length > 0 && (
         <>
           <div className="mt-3 bg-white dark:bg-charcoal border border-gray-100 dark:border-white/[0.06] rounded-xl shadow-soft overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead className="bg-gray-50 dark:bg-night border-b border-gray-100 dark:border-white/[0.06]">
+              <table className="table-base">
+                <thead>
                   <tr>
-                    {['ID', 'URL', 'Timestamp', 'Pass rate', 'Violations', 'Profile', 'Source'].map(h => (
-                      <th key={h} className="py-3 px-3.5 text-left text-xs font-semibold text-body dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">
+                    {['Website', 'Score', 'Issues', 'Scan type', 'Status', 'Date', 'Actions'].map(h => (
+                      <th key={h} scope="col" className="whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -264,39 +366,49 @@ function AdaScansTab({ onScanClick }) {
                 </thead>
                 <tbody>
                   {paginatedItems.map(item => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-gray-100 dark:border-white/[0.06] last:border-b-0 even:bg-black/[0.02] dark:even:bg-white/[0.03] hover:bg-teal/[0.05] dark:hover:bg-teal/[0.08] transition-colors"
-                    >
-                      <td className="py-3 px-3.5 whitespace-nowrap font-mono text-xs text-body dark:text-gray-400">
-                        {onScanClick ? (
-                          <button
-                            type="button"
-                            className="bg-transparent border-0 p-0 font-[inherit] text-teal cursor-pointer underline-offset-2 hover:underline"
-                            onClick={() => handleScanIdClick(item)}
-                          >
-                            {item.id}
-                          </button>
-                        ) : item.id}
+                    <tr key={item.id}>
+                      <td className="max-w-[220px]">
+                        <span className="font-medium text-ink dark:text-white break-all">{item.url || '—'}</span>
+                        <span className="block font-mono text-[11px] text-body dark:text-gray-500">{item.id}</span>
                       </td>
-                      <td className="py-3 px-3.5 max-w-[200px]">
-                        {item.url ? (
-                          <a href={item.url} target="_blank" rel="noopener noreferrer"
-                            className="text-teal hover:underline underline-offset-2 break-all">
-                            {item.url}
-                          </a>
-                        ) : '—'}
+                      <td className="whitespace-nowrap"><PassRateBadge value={item.passRate} /></td>
+                      <td className="whitespace-nowrap"><ViolationsBadge value={item.violations} /></td>
+                      <td className="whitespace-nowrap"><ScanProfileBadge includeBestPractices={item.includeBestPractices} /></td>
+                      <td className="whitespace-nowrap">
+                        <div className="flex flex-col gap-1 items-start">
+                          <CompletedStatusBadge />
+                          <SourceBadge usedFallback={item.usedFallback} />
+                        </div>
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap text-body dark:text-gray-400">
+                      <td className="whitespace-nowrap text-body dark:text-gray-400">
                         {formatDateTime(item.timestamp)}
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap"><PassRateBadge value={item.passRate} /></td>
-                      <td className="py-3 px-3.5 whitespace-nowrap"><ViolationsBadge value={item.violations} /></td>
-                      <td className="py-3 px-3.5 text-body dark:text-gray-400 whitespace-nowrap text-xs">
-                        {item.includeBestPractices ? 'WCAG 2.1 AA + Best Practices' : 'WCAG 2.1 AA'}
-                      </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <SourceBadge usedFallback={item.usedFallback} />
+                      <td className="whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {onScanClick && (
+                            <button
+                              type="button"
+                              onClick={() => handleScanIdClick(item)}
+                              aria-label={`View scan details for ${item.url || item.id}`}
+                              title="View details"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                            >
+                              <Eye size={15} />
+                            </button>
+                          )}
+                          {item.url && (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${item.url} in a new tab`}
+                              title="Open site"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                            >
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -304,7 +416,15 @@ function AdaScansTab({ onScanClick }) {
               </table>
             </div>
           </div>
-          <Paginator currentPage={safePage} totalPages={totalPages} onPageChange={setCurrentPage} />
+          <Paginator
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalItems={filteredAndSorted.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            label="ADA scan history"
+          />
         </>
       )}
     </>
@@ -338,6 +458,7 @@ function AssistiveTestsTab() {
   const [typeFilter, setTypeFilter] = useState('')
   const [sortKey, setSortKey] = useState('newest')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   const SCAN_TYPE_TO_MODULE = {
     keyboard: 'keyboard',
@@ -373,7 +494,7 @@ function AssistiveTestsTab() {
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, typeFilter, sortKey])
+  useEffect(() => { setCurrentPage(1) }, [searchQuery, typeFilter, sortKey, pageSize])
 
   const filteredAndSorted = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -394,9 +515,9 @@ function AssistiveTestsTab() {
     })
   }, [items, searchQuery, typeFilter, sortKey])
 
-  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize))
   const safePage = Math.min(currentPage, totalPages)
-  const paginatedItems = filteredAndSorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+  const paginatedItems = filteredAndSorted.slice((safePage - 1) * pageSize, safePage * pageSize)
   const showControls = !loading && !error && items.length > 0 && available
 
   return (
@@ -404,7 +525,7 @@ function AssistiveTestsTab() {
       {!loading && !error && message && (
         <p className={available
           ? 'mt-4 text-[0.95rem] text-body dark:text-gray-400'
-          : 'mt-4 text-[0.95rem] text-ink dark:text-white bg-teal/10 dark:bg-teal/[0.15] px-4 py-3 rounded-xl border border-teal'}
+          : 'alert-info mt-4'}
           role={available ? undefined : 'status'}
         >
           {message}
@@ -412,7 +533,7 @@ function AssistiveTestsTab() {
       )}
       {loading && <p className="mt-4 text-[0.95rem] text-body dark:text-gray-400">Loading assistive test history…</p>}
       {error && (
-        <p className="mt-4 text-[0.95rem] text-ink dark:text-white bg-teal/10 dark:bg-teal/[0.15] px-4 py-3 rounded-xl border border-teal" role="alert">
+        <p className="alert-danger mt-4" role="alert">
           {error}
         </p>
       )}
@@ -429,21 +550,26 @@ function AssistiveTestsTab() {
               icon={Search}
               type="search"
               placeholder="Search by URL or type…"
+              aria-label="Search assistive test history"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
+          <label className="sr-only" htmlFor="assistive-type-filter">Filter by test type</label>
           <select
+            id="assistive-type-filter"
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
-            className="sm:w-44 px-3 py-2 text-sm bg-white dark:bg-charcoal border border-gray-200 dark:border-white/[0.1] rounded-xl text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal"
+            className="select-base sm:w-44"
           >
             {TYPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          <label className="sr-only" htmlFor="assistive-sort">Sort assistive test history</label>
           <select
+            id="assistive-sort"
             value={sortKey}
             onChange={e => setSortKey(e.target.value)}
-            className="sm:w-44 px-3 py-2 text-sm bg-white dark:bg-charcoal border border-gray-200 dark:border-white/[0.1] rounded-xl text-ink dark:text-white focus:outline-none focus:ring-2 focus:ring-teal/40 focus:border-teal"
+            className="select-base sm:w-44"
           >
             {ASSISTIVE_SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -451,20 +577,18 @@ function AssistiveTestsTab() {
       )}
 
       {showControls && filteredAndSorted.length === 0 && (
-        <p className="mt-4 text-[0.95rem] text-body dark:text-gray-400">
-          No results match your filters.
-        </p>
+        <NoResultsInRange message="No results match your filters." />
       )}
 
       {showControls && filteredAndSorted.length > 0 && (
         <>
           <div className="mt-3 bg-white dark:bg-charcoal border border-gray-100 dark:border-white/[0.06] rounded-xl shadow-soft overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead className="bg-gray-50 dark:bg-night border-b border-gray-100 dark:border-white/[0.06]">
+              <table className="table-base">
+                <thead>
                   <tr>
-                    {['ID', 'URL', 'Type', 'Timestamp', 'Result', ''].map(h => (
-                      <th key={h} className="py-3 px-3.5 text-left text-xs font-semibold text-body dark:text-gray-400 uppercase tracking-wide whitespace-nowrap">
+                    {['ID', 'URL', 'Type', 'Timestamp', 'Result', 'Actions'].map(h => (
+                      <th key={h} scope="col" className="whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -472,14 +596,11 @@ function AssistiveTestsTab() {
                 </thead>
                 <tbody>
                   {paginatedItems.map(item => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-gray-100 dark:border-white/[0.06] last:border-b-0 even:bg-black/[0.02] dark:even:bg-white/[0.03] hover:bg-teal/[0.05] dark:hover:bg-teal/[0.08] transition-colors"
-                    >
-                      <td className="py-3 px-3.5 whitespace-nowrap font-mono text-xs text-body dark:text-gray-400">
+                    <tr key={item.id}>
+                      <td className="whitespace-nowrap font-mono text-xs text-body dark:text-gray-400">
                         {item.id}
                       </td>
-                      <td className="py-3 px-3.5 max-w-[260px]">
+                      <td className="max-w-[260px]">
                         {item.url ? (
                           <a href={item.url} target="_blank" rel="noopener noreferrer"
                             className="text-teal hover:underline underline-offset-2 break-all">
@@ -487,20 +608,20 @@ function AssistiveTestsTab() {
                           </a>
                         ) : '—'}
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
+                      <td className="whitespace-nowrap">
                         <ScanTypeBadge scanType={item.scan_type} />
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap text-body dark:text-gray-400">
+                      <td className="whitespace-nowrap text-body dark:text-gray-400">
                         {formatDateTime(item.timestamp)}
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
+                      <td className="whitespace-nowrap">
                         <ResultBadge passed={item.passed} />
                       </td>
-                      <td className="py-3 px-3.5 whitespace-nowrap">
+                      <td className="whitespace-nowrap">
                         <button
                           onClick={() => handleRetest(item)}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-teal hover:text-teal/70 transition-colors"
-                          title="Re-run this test"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-teal hover:text-teal-700 dark:hover:text-teal-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 rounded px-1 py-0.5"
+                          aria-label={`Re-run ${item.scan_type || 'assistive'} test for ${item.url || item.id}`}
                         >
                           <RotateCcw size={12} />
                           Re-test
@@ -512,7 +633,15 @@ function AssistiveTestsTab() {
               </table>
             </div>
           </div>
-          <Paginator currentPage={safePage} totalPages={totalPages} onPageChange={setCurrentPage} />
+          <Paginator
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalItems={filteredAndSorted.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            label="assistive test history"
+          />
         </>
       )}
     </>
@@ -541,36 +670,37 @@ export default function ScanHistoryView({ onScanClick }) {
 
   return (
     <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
-      <div className={activeTab === 'crawls' ? 'max-w-[1100px] mx-auto' : 'max-w-[960px] mx-auto'}>
+      <div className={activeTab === 'crawls' ? 'max-w-[1100px] mx-auto' : 'max-w-[1100px] mx-auto'}>
 
         <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-2">
           Scan History
         </h1>
         <p className="text-body dark:text-gray-400 text-[0.9375rem] mb-5">
-          ADA scans and assistive test runs, saved for regression tracking and audit review.
+          Review previous audits and track progress over time.
         </p>
 
         {/* Tab switcher */}
-        <div className="inline-flex bg-gray-100 dark:bg-charcoal/80 rounded-xl p-1 gap-0.5 mb-2 border border-gray-200 dark:border-white/[0.06]">
+        <div role="tablist" aria-label="Scan history views" className="inline-flex bg-gray-100 dark:bg-charcoal/80 rounded-xl p-1 gap-0.5 mb-2 border border-gray-200 dark:border-white/[0.06]">
           {TABS.map(tab => (
             <button
               key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              id={`scan-history-tab-${tab.id}`}
+              aria-controls={`scan-history-panel-${tab.id}`}
               onClick={() => setActiveTab(tab.id)}
-              className={[
-                'px-5 py-2 rounded-lg text-sm font-medium transition-all duration-150',
-                activeTab === tab.id
-                  ? 'bg-white dark:bg-night shadow-sm text-teal font-semibold'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-ink dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/5',
-              ].join(' ')}
+              className={activeTab === tab.id ? 'tab-active' : 'tab'}
             >
               {tab.label}
             </button>
           ))}
         </div>
 
-        {activeTab === 'ada' && <AdaScansTab onScanClick={onScanClick} />}
-        {activeTab === 'assistive' && <AssistiveTestsTab />}
-        {activeTab === 'crawls' && <CrawlHistoryContent />}
+        <div role="tabpanel" id={`scan-history-panel-${activeTab}`} aria-labelledby={`scan-history-tab-${activeTab}`}>
+          {activeTab === 'ada' && <AdaScansTab onScanClick={onScanClick} />}
+          {activeTab === 'assistive' && <AssistiveTestsTab />}
+          {activeTab === 'crawls' && <CrawlHistoryContent />}
+        </div>
 
       </div>
     </main>

@@ -1,11 +1,214 @@
 import { useState } from 'react';
-import { Shield, Users, Clock, ExternalLink, Sparkles } from 'lucide-react';
+import { Shield, Users, Clock, ExternalLink, Sparkles, Wand2, Loader2, CheckCircle2, XCircle, GitBranch } from 'lucide-react';
 import {
   getRuleFixTips, getRuleWhyMatters,
   getRuleEffort, getRuleImpactedUsers, getRuleCodePair, getRuleValidationSteps,
 } from '../../config/axeFixGuidance';
-import { nsWcagTagToMeta, truncateHtml, P4_EFFORT } from './scanUtils';
+import { nsWcagTagToMeta, truncateHtml, P4_EFFORT, nsAutoFixKey } from './scanUtils';
 import ScreenshotModal from './ScreenshotModal';
+import { apiFetch } from '../../utils/api';
+import { useApp } from '../../context/AppContext';
+
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch', 'Open PR', 'Auto-merge'];
+
+// Self-contained Auto Fix button + progress + result — each instance owns its
+// own run, so a per-violation control and several per-element controls on the
+// same violation can all run independently. State lives in AppContext (keyed by
+// sessionId + a hash of the element's HTML), not local useState, so an in-flight
+// fetch's result still lands — and the finished state is still there — even if
+// the user navigates away and back while it's running.
+function AutoFixControl({ pageUrl, rule, node, sessionId }) {
+  const { scanSessions, updateSessionAutoFix } = useApp();
+  const fixKey = nsAutoFixKey(rule.id, node?.html);
+  const session = scanSessions.find(s => s.id === sessionId);
+  const fix = session?.autoFixState?.[fixKey] || { status: 'idle', result: null };
+
+  if (!pageUrl) return null;
+
+  async function handleAutoFix() {
+    updateSessionAutoFix(sessionId, fixKey, { status: 'running', result: null });
+    let result;
+    try {
+      const res  = await apiFetch('/api/auto-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_url: pageUrl, rule, node: node || {} }),
+      });
+      const data = await res.json();
+      result = data.ok ? data : { status: 'failed', error: data.error || 'Auto-Fix failed', steps: [] };
+    } catch {
+      result = { status: 'failed', error: 'Could not reach the server', steps: [] };
+    }
+    updateSessionAutoFix(sessionId, fixKey, { status: 'done', result });
+  }
+
+  if (fix.status === 'idle') {
+    return (
+      <button type="button" onClick={handleAutoFix}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors">
+        <Wand2 size={13} /> Auto Fix
+      </button>
+    );
+  }
+
+  if (fix.status === 'running') {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-teal">
+          <Loader2 size={13} className="animate-spin" /> Running Auto Fix…
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {AUTO_FIX_STEP_NAMES.map(name => (
+            <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-400 dark:text-gray-500">
+              {name}
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // done
+  const result = fix.result;
+  return (
+    <div className="flex flex-col gap-2">
+      {result.status === 'verified' ? (
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
+          <CheckCircle2 size={14} /> {result.merged ? 'Fix Verified & Merged' : 'Fix Verified'}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-coral">
+          <XCircle size={14} /> Auto Fix Failed
+        </span>
+      )}
+      {(result.steps || []).length > 0 && (
+        <div className="flex flex-col gap-1">
+          {result.steps.map((s, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
+              {s.ok ? <CheckCircle2 size={11} className="text-sage flex-shrink-0" /> : <XCircle size={11} className="text-coral flex-shrink-0" />}
+              <span className="text-body dark:text-gray-400">{s.name}</span>
+              {s.detail && <span className="text-gray-400 dark:text-gray-600 truncate">— {s.detail}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {result.status === 'verified' && result.pr_url && (
+        <a href={result.pr_url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal hover:underline w-fit">
+          <GitBranch size={12} /> {result.merged ? 'View merged Pull Request' : 'View Pull Request'}
+        </a>
+      )}
+      {result.status === 'verified' && !result.pr_url && result.branch_url && (
+        <a href={result.branch_url} target="_blank" rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal hover:underline w-fit">
+          <GitBranch size={12} /> View branch
+        </a>
+      )}
+      {result.status !== 'verified' && result.error && (
+        <p className="text-[11.5px] text-coral m-0">{result.error}</p>
+      )}
+      <button type="button" onClick={handleAutoFix}
+        className="inline-flex items-center gap-1.5 text-[11px] font-medium text-teal hover:underline w-fit">
+        <Wand2 size={11} /> Run again
+      </button>
+    </div>
+  );
+}
+
+// Runs Auto-Fix across every affected element, one at a time, and tracks a
+// per-element result so a violation with many nodes doesn't need N separate
+// clicks. State lives in AppContext (see AutoFixControl above) — the sequential
+// loop keeps running and its updates keep landing even if the page that started
+// it unmounts, and progress is still there if the user comes back to it.
+function FixAllControl({ pageUrl, rule, nodes, sessionId }) {
+  const { scanSessions, updateSessionAutoFix } = useApp();
+  const fixAllKey = `fixall::${rule.id}`;
+  const session = scanSessions.find(s => s.id === sessionId);
+  const fixAll = session?.autoFixState?.[fixAllKey] || { status: 'idle', results: [] };
+
+  if (!pageUrl || nodes.length < 2) return null;
+
+  async function fixOne(i, next) {
+    next[i] = { status: 'running' };
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: [...next] });
+    try {
+      const res = await apiFetch('/api/auto-fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_url: pageUrl, rule, node: nodes[i] || {} }),
+      });
+      const data = await res.json();
+      next[i] = data.ok ? data : { status: 'failed', error: data.error || 'Auto-Fix failed' };
+    } catch {
+      next[i] = { status: 'failed', error: 'Could not reach the server' };
+    }
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: [...next] });
+  }
+
+  async function handleFixAll() {
+    const next = nodes.map(() => ({ status: 'pending' }));
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: next });
+    for (let i = 0; i < nodes.length; i++) {
+      await fixOne(i, next);
+    }
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'done', results: next });
+  }
+
+  async function retryOne(i) {
+    const next = [...fixAll.results];
+    await fixOne(i, next);
+  }
+
+  if (fixAll.status === 'idle') {
+    return (
+      <button type="button" onClick={handleFixAll}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-teal text-teal hover:bg-teal/10 transition-colors w-fit">
+        <Wand2 size={13} /> Fix All {nodes.length} Elements
+      </button>
+    );
+  }
+
+  const results = fixAll.results;
+  const verifiedCount = results.filter(r => r.status === 'verified').length;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[12px] font-semibold text-teal">
+        {fixAll.status === 'running'
+          ? <><Loader2 size={13} className="inline animate-spin mr-1.5" />Fixing elements…</>
+          : `${verifiedCount} of ${nodes.length} fixed`}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {results.map((r, i) => (
+          <span key={i} className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
+            r.status === 'verified' ? 'bg-sage/10 text-sage' :
+            r.status === 'failed' ? 'bg-coral/10 text-coral' :
+            'bg-gray-100 dark:bg-white/[0.06] text-gray-400'
+          }`}>
+            {r.status === 'running' && <Loader2 size={10} className="animate-spin" />}
+            {r.status === 'verified' && <CheckCircle2 size={10} />}
+            {r.status === 'failed' && <XCircle size={10} />}
+            #{i + 1}
+          </span>
+        ))}
+      </div>
+      {fixAll.status === 'done' && results.some(r => r.status === 'failed') && (
+        <div className="flex flex-col gap-1 mt-1">
+          {results.map((r, i) => r.status === 'failed' && (
+            <div key={i} className="flex items-center justify-between gap-3 text-[11.5px] bg-coral/[0.06] border border-coral/20 rounded-lg px-2.5 py-1.5">
+              <span className="text-coral min-w-0">
+                <strong>#{i + 1}</strong> — {r.error || 'Auto-Fix failed'}
+              </span>
+              <button type="button" onClick={() => retryOne(i)}
+                className="inline-flex items-center gap-1 text-teal font-medium hover:underline flex-shrink-0">
+                <Wand2 size={10} /> Retry
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const copyBtnBase = 'border rounded font-semibold whitespace-nowrap flex-shrink-0 cursor-pointer transition-colors';
 const copyBtnIdle = 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-charcoal text-body dark:text-gray-400 hover:border-teal hover:text-ink dark:hover:text-white';
@@ -17,7 +220,7 @@ const EFFORT_META = {
   significant: { label: 'Significant', desc: '1–2 days',  cls: 'text-coral bg-coral/10 border border-coral/20' },
 };
 
-function RecommendedFixCard({ violation, wcagMeta }) {
+function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
   const [checkedSteps, setCheckedSteps] = useState(new Set());
   const [copied, setCopied] = useState({});
 
@@ -173,6 +376,16 @@ function RecommendedFixCard({ violation, wcagMeta }) {
         </div>
       )}
 
+      {/* ── Auto Fix — only when there's exactly one affected element; with
+          multiple elements, "Fix All" + the per-element controls below cover it,
+          and this single-element control would otherwise silently only ever
+          fix the first one while looking like it fixed the whole violation. ── */}
+      {pageUrl && (violation.nodes?.length ?? 0) <= 1 && (
+        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+          <AutoFixControl pageUrl={pageUrl} rule={violation} node={violation.nodes?.[0]} sessionId={sessionId} />
+        </div>
+      )}
+
       {/* ── Action row ── */}
       <div className="flex items-center gap-3 px-4 py-2 bg-gray-50/70 dark:bg-white/[0.02]">
         {tips.length > 0 && (
@@ -195,10 +408,11 @@ function RecommendedFixCard({ violation, wcagMeta }) {
   );
 }
 
-export default function ViolationRow({ violation }) {
+export default function ViolationRow({ violation, pageUrl, sessionId }) {
   const [expanded, setExpanded] = useState(false);
   const [copiedNode, setCopiedNode] = useState(null);
   const [screenshotOpen, setScreenshotOpen] = useState(false);
+  const [showAllNodes, setShowAllNodes] = useState(false);
 
   const impact = (violation.impact ?? 'minor').toLowerCase();
   const impactConfig = {
@@ -278,16 +492,19 @@ export default function ViolationRow({ violation }) {
             </button>
           )}
 
-          <RecommendedFixCard violation={violation} wcagMeta={wcag} />
+          <RecommendedFixCard violation={violation} wcagMeta={wcag} pageUrl={pageUrl} sessionId={sessionId} />
 
           {/* Affected elements */}
           {nodes.length > 0 && (
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-body dark:text-gray-400 mb-2">
-                Affected Elements <span className="font-normal normal-case tracking-normal">({nodes.length})</span>
-              </p>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-body dark:text-gray-400 m-0">
+                  Affected Elements <span className="font-normal normal-case tracking-normal">({nodes.length})</span>
+                </p>
+                <FixAllControl pageUrl={pageUrl} rule={violation} nodes={nodes} sessionId={sessionId} />
+              </div>
               <div className="space-y-2">
-                {nodes.slice(0, 3).map((node, ni) => (
+                {nodes.slice(0, showAllNodes ? nodes.length : 3).map((node, ni) => (
                   <div key={ni}>
                     {node.failureSummary && (
                       <p className="text-[11px] text-amber mb-1">
@@ -306,10 +523,18 @@ export default function ViolationRow({ violation }) {
                         {copiedNode === ni ? '✓ Copied' : 'Copy'}
                       </button>
                     </div>
+                    {pageUrl && nodes.length > 1 && (
+                      <div className="mt-2">
+                        <AutoFixControl pageUrl={pageUrl} rule={violation} node={node} sessionId={sessionId} />
+                      </div>
+                    )}
                   </div>
                 ))}
                 {nodes.length > 3 && (
-                  <p className="text-xs text-body dark:text-gray-500">… and {nodes.length - 3} more element{nodes.length - 3 !== 1 ? 's' : ''}</p>
+                  <button type="button" onClick={() => setShowAllNodes(v => !v)}
+                    className="text-xs font-medium text-teal hover:underline">
+                    {showAllNodes ? 'Show fewer elements' : `Show ${nodes.length - 3} more element${nodes.length - 3 !== 1 ? 's' : ''}`}
+                  </button>
                 )}
               </div>
             </div>

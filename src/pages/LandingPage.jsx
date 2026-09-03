@@ -412,18 +412,18 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
                   <Globe className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-heading font-bold text-lg mb-2">Developer First</h3>
+                  <h3 className="font-heading font-bold text-lg mb-2 text-white">Developer First</h3>
                   <p className="text-teal-100 text-sm leading-relaxed">
                     Paste a URL, get results in minutes. Webhooks, SARIF export, and CI/CD integration let your team run ADA inside existing workflows — no context switching required.
                   </p>
                 </div>
               </div>
-              <div className="bg-terracotta text-white p-8 rounded-2xl flex flex-col gap-4">
+              <div className="bg-terracotta-700 text-white p-8 rounded-2xl flex flex-col gap-4">
                 <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center" aria-hidden="true">
                   <ShieldCheck className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-heading font-bold text-lg mb-2">WCAG 2.1 &amp; 2.2 Complete</h3>
+                  <h3 className="font-heading font-bold text-lg mb-2 text-white">WCAG 2.1 &amp; 2.2 Complete</h3>
                   <p className="text-orange-100 text-sm leading-relaxed">
                     Every rule mapped to a WCAG success criterion. Critical, Serious, Moderate, and Minor severities — from color contrast to ARIA roles to keyboard traps.
                   </p>
@@ -482,7 +482,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {INTEGRATIONS.map(({ icon: Icon, label, desc, available }) => (
-                <div key={label} className={`card p-5 flex flex-col gap-3 ${!available ? 'opacity-60' : ''}`}>
+                <div key={label} className="card p-5 flex flex-col gap-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${available ? 'bg-teal/10' : 'bg-gray-100 dark:bg-white/5'}`} aria-hidden="true">
                     <Icon className={`w-5 h-5 ${available ? 'text-teal' : 'text-body dark:text-gray-500'}`} />
                   </div>
