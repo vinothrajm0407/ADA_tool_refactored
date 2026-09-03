@@ -34,7 +34,7 @@ function KpiCard({ label, value, sub, color = 'text-ink dark:text-white', loadin
   const isPositive = delta > 0;
   const isGood = invertDelta ? !isPositive : isPositive;
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl p-5 border border-gray-100 dark:border-white/[0.06] shadow-soft flex flex-col justify-between">
+    <div className="surface-card p-5 flex min-h-[156px] flex-col justify-between">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">{label}</p>
       <div className="mt-3">
         {loading
@@ -239,7 +239,7 @@ export default function DashboardPage() {
   /* ─── render ─── */
   return (
     <div className="flex-1 overflow-auto bg-ivory dark:bg-night">
-      <div className="max-w-7xl mx-auto p-6 space-y-5">
+      <div className="page-content space-y-5">
 
         {/* ── KPI ROW — 5 cards ── */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -332,7 +332,7 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-2 gap-5">
 
           {/* Pass Rate Trend */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6">
+          <div className="surface-card p-6">
             <div className="mb-5">
               <p className="font-heading font-bold text-base text-ink dark:text-white">Pass Rate Trend</p>
               <p className="text-xs text-body dark:text-gray-500 mt-0.5">Avg pass rate over the last 30 days</p>
@@ -368,7 +368,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Violations Trend */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6">
+          <div className="surface-card p-6">
             <div className="mb-5">
               <p className="font-heading font-bold text-base text-ink dark:text-white">Violations Trend</p>
               <p className="text-xs text-body dark:text-gray-500 mt-0.5">Total violations per day over the last 30 days</p>

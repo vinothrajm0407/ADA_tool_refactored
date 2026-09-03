@@ -123,7 +123,9 @@ export default function AppHeader() {
         {/* Notifications bell */}
         <button
           className="btn-ghost p-2 rounded-2xl relative"
-          aria-label="Notifications"
+          onClick={() => navigate('alerts')}
+          aria-label="Open notifications"
+          title="Notifications"
         >
           <Bell className="w-5 h-5 text-ink dark:text-white" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-coral" />
@@ -134,16 +136,22 @@ export default function AppHeader() {
           <button
             ref={menuTriggerRef}
             onClick={() => setMenuOpen(o => !o)}
-            className="w-8 h-8 rounded-full bg-teal flex items-center justify-center text-white text-xs font-bold select-none hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
-            aria-label="User menu"
-            aria-haspopup="true"
+            className="w-9 h-9 rounded-full bg-teal flex items-center justify-center text-white text-xs font-bold select-none hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
+            aria-label={`Open user menu for ${displayName || 'account'}`}
+            aria-haspopup="menu"
+            aria-controls="account-menu"
             aria-expanded={menuOpen}
           >
             {initials}
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-10 w-56 bg-white dark:bg-charcoal rounded-2xl shadow-lg border border-gray-100 dark:border-white/[0.08] py-1 z-50">
+            <div
+              id="account-menu"
+              role="menu"
+              aria-label="Account menu"
+              className="absolute right-0 top-10 w-56 bg-white dark:bg-charcoal rounded-2xl shadow-lg border border-gray-100 dark:border-white/[0.08] py-1 z-50"
+            >
               {/* User info */}
               <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
                 <div className="w-8 h-8 rounded-full bg-teal flex items-center justify-center flex-shrink-0">
@@ -158,7 +166,8 @@ export default function AppHeader() {
               {/* Logout */}
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-coral/10 hover:text-coral dark:hover:text-coral transition-colors"
+                role="menuitem"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-coral/10 hover:text-coral dark:hover:text-coral transition-colors focus-visible:bg-coral/10 focus-visible:text-coral"
               >
                 <LogOut size={15} className="flex-shrink-0" />
                 Sign out

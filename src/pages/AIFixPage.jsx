@@ -185,7 +185,7 @@ export default function AIFixPage() {
   }, [result]);
 
   return (
-    <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
+    <div className="flex-1 overflow-auto bg-ivory dark:bg-night page-content">
       {/* Page header */}
       <div className="flex items-start gap-3 mb-5">
         <div className="w-10 h-10 rounded-xl bg-teal/10 flex items-center justify-center shrink-0 mt-0.5">

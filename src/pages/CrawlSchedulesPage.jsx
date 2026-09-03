@@ -292,7 +292,7 @@ export default function CrawlSchedulesPage() {
   const attentionCount = items.filter((i) => i.last_run_status === 'failed' || i.last_run_status === 'cancelled').length;
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
       <div className="max-w-[1040px] mx-auto space-y-6">
 
         {/* Header */}

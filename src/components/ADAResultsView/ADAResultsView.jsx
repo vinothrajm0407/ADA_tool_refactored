@@ -607,7 +607,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0">
       <div>
         <h1 className="mb-2 font-heading font-bold text-3xl text-ink dark:text-white">ADA Automation Results</h1>
         <p className="mb-5 text-[15px] text-body dark:text-gray-400">

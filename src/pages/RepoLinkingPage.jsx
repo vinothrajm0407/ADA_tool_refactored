@@ -267,7 +267,7 @@ export default function RepoLinkingPage() {
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
       <div className="max-w-[1200px] mx-auto">
 
         {/* Header */}

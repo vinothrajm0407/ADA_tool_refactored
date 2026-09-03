@@ -33,7 +33,7 @@ const BEFORE_YOU_START = [
 
 function ScanOptionCards({ activeId, onSelect }) {
   return (
-    <div role="tablist" aria-label="Scan options" className="grid sm:grid-cols-3 gap-3 mb-6">
+    <div role="tablist" aria-label="Scan types" className="grid gap-3 sm:grid-cols-3 mb-6">
       {TABS.map(({ id, label, description, icon: Icon, disabled }) => {
         const isActive = activeId === id;
         return (
@@ -46,7 +46,7 @@ function ScanOptionCards({ activeId, onSelect }) {
             disabled={disabled}
             onClick={() => !disabled && onSelect(id)}
             className={[
-              'relative text-left rounded-2xl border-2 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40',
+              'relative min-h-[170px] text-left rounded-2xl border-2 p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 focus-visible:ring-offset-2',
               disabled
                 ? 'border-gray-100 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.02] cursor-not-allowed opacity-70'
                 : isActive
@@ -66,9 +66,9 @@ function ScanOptionCards({ activeId, onSelect }) {
                 Coming soon
               </span>
             ) : (
-              <span
-                aria-hidden="true"
-                className={`absolute bottom-3 right-3 w-5 h-5 rounded-md border-2 flex items-center justify-center ${
+                <span
+                  aria-hidden="true"
+                  className={`absolute bottom-4 right-4 w-5 h-5 rounded-md border-2 flex items-center justify-center ${
                   isActive ? 'border-teal bg-teal' : 'border-gray-300 dark:border-white/20'
                 }`}
               >
@@ -323,7 +323,7 @@ export default function NewScanPage() {
 
   return (
     <div className="flex-1 overflow-auto bg-ivory dark:bg-night">
-      <div className="px-8 py-8 lg:px-12">
+      <div className="page-content">
 
         <div className="mb-8">
           <h1 className="font-heading font-bold text-3xl text-ink dark:text-white mb-2">Start a new accessibility audit</h1>

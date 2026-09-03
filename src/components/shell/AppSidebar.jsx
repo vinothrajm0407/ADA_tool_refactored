@@ -82,7 +82,7 @@ export default function AppSidebar() {
         />
       )}
 
-      <aside className={[
+      <aside aria-label="Application sidebar" className={[
         'fixed inset-y-0 left-0 z-30 w-64 bg-white dark:bg-charcoal flex flex-col h-full',
         'border-r border-gray-100 dark:border-white/[0.06]',
         'lg:relative lg:translate-x-0 lg:flex transition-transform duration-200',
@@ -132,6 +132,7 @@ export default function AppSidebar() {
                     ].join(' ')}
                   >
                     <Icon
+                      aria-hidden="true"
                       size={17}
                       className={active ? 'text-white flex-shrink-0' : 'text-gray-400 dark:text-gray-500 flex-shrink-0'}
                       strokeWidth={active ? 2 : 1.75}
@@ -148,7 +149,7 @@ export default function AppSidebar() {
         <div className="px-4 py-4 border-t border-gray-100 dark:border-white/[0.06] flex-shrink-0">
           <div className="flex items-center gap-3 px-2">
             <div className="w-8 h-8 rounded-full bg-teal flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-xs font-bold">{initials}</span>
+              <span aria-hidden="true" className="text-white text-xs font-bold">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-ink dark:text-white leading-tight truncate">{displayName}</p>

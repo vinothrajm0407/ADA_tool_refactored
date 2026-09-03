@@ -3,6 +3,68 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Shared accessibility and visual foundation ─────────── */
+@layer base {
+  html {
+    background: var(--bg-base, #F8F6F1);
+  }
+
+  body {
+    @apply m-0 bg-ivory text-ink antialiased;
+    font-family: var(--font-body, Inter, sans-serif);
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 3px solid rgba(37, 99, 235, 0.45);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: rgba(15, 118, 110, 0.18);
+  }
+}
+
+@layer components {
+  .skip-link {
+    @apply sr-only fixed left-3 top-3 z-[100] rounded-xl bg-teal px-4 py-2.5 text-sm font-semibold text-white shadow-lg;
+  }
+
+  .skip-link:focus {
+    @apply not-sr-only;
+  }
+
+  .page-content {
+    @apply mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8;
+  }
+
+  .surface-card {
+    @apply rounded-2xl border border-gray-100 bg-white shadow-soft dark:border-white/[0.08] dark:bg-charcoal;
+  }
+
+  .coming-soon {
+    @apply cursor-not-allowed opacity-60;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ─── Tailwind component utilities ──────────────────────── */
 @layer components {
   .card {
@@ -15,10 +77,10 @@
     @apply min-h-screen bg-ivory font-body dark:bg-night;
   }
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-teal px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-teal-700 focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-ivory transition-colors duration-200 cursor-pointer dark:border-white/10 dark:bg-charcoal dark:text-white dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-charcoal;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-ink shadow-sm transition-colors duration-200 hover:bg-ivory focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2 cursor-pointer dark:border-white/10 dark:bg-charcoal dark:text-white dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-charcoal;
   }
   .btn-ghost {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-xl text-body font-medium text-sm hover:bg-gray-100 transition-colors duration-200 cursor-pointer dark:text-gray-400 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent;
@@ -27,7 +89,7 @@
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-coral text-white font-semibold font-heading text-sm hover:bg-coral-700 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-coral;
   }
   .input-base {
-    @apply w-full px-4 py-2.5 rounded-xl border border-gray-300 bg-white text-ink placeholder-gray-400 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal transition-all duration-200 dark:border-white/20 dark:bg-charcoal dark:text-white dark:placeholder-gray-500 dark:shadow-none disabled:opacity-60 disabled:cursor-not-allowed disabled:bg-gray-50 dark:disabled:bg-white/[0.02];
+    @apply min-h-11 w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-ink shadow-sm transition-all duration-200 placeholder:text-gray-400 focus:border-teal focus:outline-none focus:ring-2 focus:ring-teal/30 focus-visible:ring-2 focus-visible:ring-teal dark:border-white/20 dark:bg-charcoal dark:text-white dark:placeholder:text-gray-500 dark:shadow-none disabled:cursor-not-allowed disabled:bg-gray-50 disabled:opacity-60 dark:disabled:bg-white/[0.02];
   }
   .select-base {
     @apply input-base cursor-pointer disabled:cursor-not-allowed;

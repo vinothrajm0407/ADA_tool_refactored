@@ -177,7 +177,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
       <div className="max-w-4xl mx-auto space-y-6">
         <div>
           <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Settings</h1>

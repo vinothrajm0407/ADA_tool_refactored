@@ -170,7 +170,7 @@ export default function AssistiveTestingPage() {
   }, [url, activeModule, activeModuleId, setAssistiveResult, navigate]);
 
   return (
-    <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
+    <div className="flex-1 overflow-auto bg-ivory dark:bg-night page-content">
 
       {/* HEADER */}
       <div className="mb-6">
