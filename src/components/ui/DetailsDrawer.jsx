@@ -109,7 +109,7 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
             <span className="text-sm font-body font-medium text-body dark:text-ivory/60">
               Violations Found
             </span>
-            <span className={`font-heading text-xl ${(violationCount ?? 0) > 0 ? 'text-coral' : 'text-sage'}`}>
+            <span className={`font-heading text-xl ${(violationCount ?? 0) > 0 ? 'text-coral-700 dark:text-coral-300' : 'text-sage-700 dark:text-sage-300'}`}>
               {violationCount ?? 0}
             </span>
           </div>
@@ -136,7 +136,7 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
 
               {!violationsLoading && violations === null && (
                 <div className="flex items-center gap-2 text-body dark:text-gray-400 text-xs py-2">
-                  <AlertCircle size={14} className="text-amber flex-shrink-0" />
+                  <AlertCircle size={14} className="text-amber-800 dark:text-amber-300 flex-shrink-0" />
                   Violation detail unavailable — database not configured.
                 </div>
               )}

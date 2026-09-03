@@ -40,12 +40,12 @@ export default function ScoreTrendPreview() {
           </p>
           <div className="flex items-end gap-2">
             <span className="font-heading font-bold text-3xl text-teal leading-none">92</span>
-            <span className="text-sm font-semibold text-sage mb-0.5">↑ +28 pts</span>
+            <span className="text-sm font-semibold text-sage-700 dark:text-sage-300 mb-0.5">↑ +28 pts</span>
           </div>
         </div>
         <div className="text-right">
           <p className="text-[10px] text-body dark:text-gray-500">Trend</p>
-          <p className="text-xs font-semibold text-sage">Improving</p>
+          <p className="text-xs font-semibold text-sage-700 dark:text-sage-300">Improving</p>
         </div>
       </div>
 

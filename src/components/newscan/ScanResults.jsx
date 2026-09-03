@@ -1,8 +1,10 @@
 import { apiFetch } from '../../utils/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Shield, Search, History, Play } from 'lucide-react';
+import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Shield, Search, History, Play, Loader2, AlertCircle, X } from 'lucide-react';
 import ViolationRow from './ViolationList';
 import ScreenshotModal from './ScreenshotModal';
+import AssistiveTestDropdown from './AssistiveTestDropdown';
+import AssistiveResultView, { MODULE_LABELS } from '../assistive/AssistiveResultView';
 import {
   nsComputeScore, nsScoreGradeInfo, nsScoreMessage,
   nsBuildSeverityBreakdown, nsBuildTopIssues,
@@ -13,6 +15,51 @@ import {
   p4loadVpResults, p4saveVpResults, P4_VIEWPORTS,
 } from './scanUtils';
 import { useApp } from '../../context/AppContext';
+
+// Inline results for tests started from AssistiveTestDropdown — one collapsible
+// card per module that's running/finished/errored, right on the scan results view.
+function AssistiveResultsPanel({ sessionId }) {
+  const { scanSessions, updateSessionAssistive } = useApp();
+  const session = scanSessions.find(s => s.id === sessionId);
+  const assistiveState = session?.assistiveState ?? {};
+  const entries = Object.entries(assistiveState);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      {entries.map(([moduleId, state]) => (
+        <div key={moduleId} className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+            <span className="font-heading font-semibold text-sm text-ink dark:text-white">
+              {MODULE_LABELS[moduleId] ?? moduleId}
+            </span>
+            <div className="flex items-center gap-3">
+              {state.status === 'running' && (
+                <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal">
+                  <Loader2 size={13} className="animate-spin" /> Running…
+                </span>
+              )}
+              {state.status === 'error' && (
+                <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-coral">
+                  <AlertCircle size={13} /> {state.error}
+                </span>
+              )}
+              <button type="button" onClick={() => updateSessionAssistive(sessionId, moduleId, undefined)}
+                className="text-gray-400 hover:text-ink dark:hover:text-white">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          {state.status === 'done' && (
+            <div className="p-5">
+              <AssistiveResultView result={state.result} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ─── Count-up animation hook ─────────────────────────────────────────────────
 
@@ -334,8 +381,8 @@ function ViewportComparisonPanel({ scanUrl, currentViolations }) {
 
 // ─── Main scan results view ──────────────────────────────────────────────────
 
-export default function ScanResults({ violations, incomplete, passes, scanRan, scanUrl, onReset, screenshot, screenshotType }) {
-  const { navigate, setPendingAssistiveUrl } = useApp();
+export default function ScanResults({ violations, incomplete, passes, scanRan, scanUrl, onReset, screenshot, screenshotType, sessionId }) {
+  const { navigate } = useApp();
   const [filterImpact, setFilterImpact] = useState('all');
   const [pageScreenshotOpen, setPageScreenshotOpen] = useState(false);
   const hasPageScreenshot = typeof screenshot === 'string' && screenshot.trim().length > 0;
@@ -743,7 +790,7 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
                     <div className="space-y-2">
                       {aViolations.map((v, i) => (
                         <div key={v.id ?? i} id={`nsvi-${v.id ?? i}`}>
-                          <ViolationRow violation={v} />
+                          <ViolationRow violation={v} pageUrl={scanUrl} sessionId={sessionId} />
                         </div>
                       ))}
                     </div>
@@ -754,7 +801,7 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
               <div className="space-y-2">
                 {finalViolations.map((v, i) => (
                   <div key={v.id ?? i} id={`nsvi-${v.id ?? i}`}>
-                    <ViolationRow violation={v} />
+                    <ViolationRow violation={v} pageUrl={scanUrl} sessionId={sessionId} />
                   </div>
                 ))}
               </div>
@@ -796,19 +843,15 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
 
       {/* Run Assistive Test CTA */}
       {scanRan && scanUrl && (
-        <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-5 flex items-center justify-between gap-4">
-          <div>
-            <p className="font-heading font-semibold text-sm text-ink dark:text-white mb-0.5">Deepen your audit</p>
-            <p className="text-xs text-body dark:text-gray-400">Check keyboard navigation, color contrast, and more with Assistive Testing.</p>
+        <div className="space-y-3">
+          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-5 flex items-center justify-between gap-4">
+            <div>
+              <p className="font-heading font-semibold text-sm text-ink dark:text-white mb-0.5">Deepen your audit</p>
+              <p className="text-xs text-body dark:text-gray-400">Check keyboard navigation, color contrast, and more with Assistive Testing.</p>
+            </div>
+            <AssistiveTestDropdown scanUrl={scanUrl} sessionId={sessionId} />
           </div>
-          <button
-            type="button"
-            onClick={() => { setPendingAssistiveUrl(scanUrl); navigate('assistive-test'); }}
-            className="btn-primary text-sm flex items-center gap-2 flex-shrink-0"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Run Assistive Test
-          </button>
+          <AssistiveResultsPanel sessionId={sessionId} />
         </div>
       )}
 

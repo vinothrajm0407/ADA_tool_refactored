@@ -1,10 +1,19 @@
-export default function Toggle({ id, checked, onChange, disabled }) {
+export default function Toggle({ id, checked, onChange, disabled, ariaLabelledBy, ariaLabel }) {
   return (
     <label
       htmlFor={id}
       className={`relative inline-flex items-center flex-shrink-0 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
     >
-      <input id={id} type="checkbox" className="sr-only" checked={checked} onChange={onChange} disabled={disabled} />
+      <input
+        id={id}
+        type="checkbox"
+        className="sr-only"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        aria-labelledby={ariaLabelledBy}
+        aria-label={ariaLabelledBy ? undefined : ariaLabel}
+      />
       <div
         className={[
           'relative w-11 h-6 rounded-full transition-all duration-200',

@@ -1,15 +1,16 @@
 import { apiFetch } from '../utils/api';
-import { useState, useEffect, useCallback } from 'react';
-import { Wand2, Bot, Copy, Check, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Wand2, Bot, Copy, Check, AlertCircle, RefreshCw, ShieldAlert, Clock3, CheckCircle2, ChevronRight, ChevronLeft } from 'lucide-react';
 import { StatusPill } from '../components/ui/StatusBadge';
 import CodeBlock from '../components/ui/CodeBlock';
-import IssueCard from '../components/ui/IssueCard';
 
 const FRAMEWORKS = [
   { id: 'html', label: 'HTML' },
   { id: 'react', label: 'React' },
   { id: 'vue', label: 'Vue' },
 ];
+
+const PAGE_SIZE = 6;
 
 function capitalizeFirst(str) {
   if (!str) return '';
@@ -27,6 +28,28 @@ function impactToSeverity(impact) {
   return map[impact.toLowerCase()] ?? capitalizeFirst(impact);
 }
 
+const SEVERITY_ORDER = ['Critical', 'Serious', 'Moderate', 'Minor'];
+
+function StatCard({ icon: Icon, tone, value, label, sub }) {
+  const toneClasses = {
+    danger:  'bg-coral/10 text-coral',
+    warning: 'bg-amber/10 text-amber-700 dark:text-amber-300',
+    success: 'bg-sage/10 text-sage-700 dark:text-sage-300',
+  }[tone];
+  return (
+    <div className="flex items-center gap-3 px-5 py-4 flex-1 min-w-[200px]">
+      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${toneClasses}`}>
+        <Icon size={18} />
+      </div>
+      <div className="min-w-0">
+        <p className="font-heading font-bold text-2xl text-ink dark:text-white leading-none m-0">{value}</p>
+        <p className="text-sm font-medium text-ink dark:text-white m-0 mt-1">{label}</p>
+        <p className="text-xs text-body dark:text-gray-400 m-0">{sub}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function AIFixPage() {
   const [violations, setViolations] = useState([]);
   const [selectedViolation, setSelectedViolation] = useState(null);
@@ -36,6 +59,9 @@ export default function AIFixPage() {
   const [error, setError] = useState('');
   const [historyLoading, setHistoryLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [fixStats, setFixStats] = useState({ awaitingReview: 0, applied: 0 });
 
   useEffect(() => {
     const fetchViolations = async () => {
@@ -52,28 +78,31 @@ export default function AIFixPage() {
         const collected = [];
 
         for (const item of data.items) {
-          let violations = [];
+          let itemViolations = [];
 
           if (Array.isArray(item.violations)) {
-            violations = item.violations;
+            itemViolations = item.violations;
           } else if (item.result && Array.isArray(item.result.violations)) {
-            violations = item.result.violations;
+            itemViolations = item.result.violations;
           } else if (item.id) {
             try {
               const detailRes = await apiFetch(`/api/history/${item.id}`);
               const detailData = await detailRes.json();
               if (detailData.ok && detailData.result && Array.isArray(detailData.result.violations)) {
-                violations = detailData.result.violations;
+                itemViolations = detailData.result.violations;
               }
             } catch {
               // skip
             }
           }
 
-          for (const v of violations) {
+          for (const v of itemViolations) {
             if (v.id && !seen.has(v.id)) {
               seen.add(v.id);
-              collected.push(v);
+              // Tag with the scan it came from — the mockup shows a source
+              // URL per issue; the raw axe violation has no URL of its own,
+              // so this is the scan-level context it was collected under.
+              collected.push({ ...v, sourceUrl: item.url, sourceScanId: item.id });
             }
           }
         }
@@ -88,6 +117,40 @@ export default function AIFixPage() {
 
     fetchViolations();
   }, []);
+
+  // Fixable/Awaiting-review/Applied stats — real counts, not placeholders.
+  // "Fixable issues" = violations loaded above (existing count). Awaiting
+  // review / Applied come from the real Auto-Fix pipeline's fix history
+  // (a separate system from this page's own AI-snippet generator below —
+  // see the note near the Apply-fix behavior further down).
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/fixes?limit=200')
+      .then(res => res.json())
+      .then(data => {
+        if (cancelled || !data.ok || !Array.isArray(data.fixes)) return;
+        const awaitingReview = data.fixes.filter(f => f.status === 'verified' && !f.merged).length;
+        const applied = data.fixes.filter(f => f.merged).length;
+        setFixStats({ awaitingReview, applied });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => { setCurrentPage(1) }, [severityFilter]);
+
+  const filteredViolations = useMemo(() => {
+    const filtered = severityFilter
+      ? violations.filter(v => impactToSeverity(v.impact) === severityFilter)
+      : violations;
+    return [...filtered].sort((a, b) =>
+      SEVERITY_ORDER.indexOf(impactToSeverity(a.impact)) - SEVERITY_ORDER.indexOf(impactToSeverity(b.impact))
+    );
+  }, [violations, severityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredViolations.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedViolations = filteredViolations.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const handleGetFix = useCallback(async () => {
     if (!selectedViolation || loading) return;
@@ -124,7 +187,7 @@ export default function AIFixPage() {
   return (
     <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
       {/* Page header */}
-      <div className="flex items-start gap-3 mb-1">
+      <div className="flex items-start gap-3 mb-5">
         <div className="w-10 h-10 rounded-xl bg-teal/10 flex items-center justify-center shrink-0 mt-0.5">
           <Wand2 className="w-5 h-5 text-teal" />
         </div>
@@ -138,20 +201,49 @@ export default function AIFixPage() {
         </div>
       </div>
 
+      {/* Stat cards */}
+      <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-white/[0.06] bg-white dark:bg-charcoal border border-gray-100 dark:border-white/[0.06] rounded-2xl shadow-soft mb-3">
+        <StatCard icon={ShieldAlert} tone="danger" value={historyLoading ? '—' : violations.length} label="Fixable issues" sub="Ready for AI assistance" />
+        <StatCard icon={Clock3} tone="warning" value={fixStats.awaitingReview} label="Awaiting review" sub="Open PRs need your review" />
+        <StatCard icon={CheckCircle2} tone="success" value={fixStats.applied} label="Fixes applied" sub="Merged across all audits" />
+      </div>
+
+      {/* Warning banner */}
+      <div className="alert-warning mb-5">
+        <AlertCircle size={16} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
+        <span>AI-generated fixes may not be perfect. Always review and test changes before deploying to production.</span>
+      </div>
+
       {/* Two-column layout */}
-      <div className="grid lg:grid-cols-2 gap-6 mt-6">
+      <div className="grid lg:grid-cols-2 gap-6">
 
         {/* LEFT PANEL — Issue selector */}
         <div className="card p-5 h-fit">
           {/* Panel heading */}
-          <div className="flex items-center gap-2 mb-4">
-            <h3 className="font-heading font-semibold text-base text-ink dark:text-white">
-              Select Violation
-            </h3>
-            {!historyLoading && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-teal/10 text-teal">
-                {violations.length}
-              </span>
+          <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <h3 className="font-heading font-semibold text-base text-ink dark:text-white m-0">
+                Accessibility issues
+              </h3>
+              {!historyLoading && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-teal/10 text-teal-700 dark:text-teal-300">
+                  {filteredViolations.length}
+                </span>
+              )}
+            </div>
+            {!historyLoading && violations.length > 0 && (
+              <label className="flex items-center gap-2 text-xs text-body dark:text-gray-400">
+                <span className="sr-only">Filter by severity</span>
+                <select
+                  value={severityFilter}
+                  onChange={e => setSeverityFilter(e.target.value)}
+                  className="select-base w-auto py-1.5 pl-2.5 pr-7 text-xs"
+                  aria-label="Filter issues by severity"
+                >
+                  <option value="">All severities</option>
+                  {SEVERITY_ORDER.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
             )}
           </div>
 
@@ -167,36 +259,61 @@ export default function AIFixPage() {
               <p>No violations found. Run a scan first.</p>
             </div>
           ) : (
-            <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
-              {violations.map((v) => {
-                const isSelected = selectedViolation?.id === v.id;
-                return (
-                  <div
-                    key={v.id}
-                    onClick={() => {
-                      setSelectedViolation(v);
-                      setResult(null);
-                      setError('');
-                    }}
-                    className={`cursor-pointer p-3 rounded-xl transition-colors ${
-                      isSelected
-                        ? 'bg-teal/10 border border-teal/30'
-                        : 'hover:bg-ivory dark:hover:bg-white/5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <StatusPill severity={impactToSeverity(v.impact)} />
-                      <span className="font-mono text-xs text-body dark:text-gray-400 truncate">
-                        {v.id}
-                      </span>
-                    </div>
-                    <p className="text-sm text-ink dark:text-white truncate leading-snug">
-                      {v.description ?? v.help ?? v.id}
-                    </p>
+            <>
+              <div className="space-y-2">
+                {pagedViolations.map((v) => {
+                  const isSelected = selectedViolation?.id === v.id && selectedViolation?.sourceScanId === v.sourceScanId;
+                  return (
+                    <button
+                      key={`${v.sourceScanId}-${v.id}`}
+                      type="button"
+                      onClick={() => {
+                        setSelectedViolation(v);
+                        setResult(null);
+                        setError('');
+                      }}
+                      className={`w-full text-left flex items-center justify-between gap-3 p-3 rounded-xl transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 ${
+                        isSelected
+                          ? 'bg-teal/10 border border-teal/30'
+                          : 'hover:bg-ivory dark:hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <StatusPill severity={impactToSeverity(v.impact)} />
+                        </div>
+                        <p className="text-sm font-medium text-ink dark:text-white truncate leading-snug m-0">
+                          {v.description ?? v.help ?? v.id}
+                        </p>
+                        {v.sourceUrl && (
+                          <p className="text-xs text-body dark:text-gray-500 truncate m-0 mt-0.5">{v.sourceUrl}</p>
+                        )}
+                      </div>
+                      <ChevronRight size={16} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4 text-xs text-body dark:text-gray-400">
+                  <span>Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredViolations.length)} of {filteredViolations.length} issues</span>
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
+                      aria-label="Previous page"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 dark:border-white/10 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-ivory dark:hover:bg-white/5">
+                      <ChevronLeft size={13} />
+                    </button>
+                    <span className="tabular-nums">{safePage} / {totalPages}</span>
+                    <button type="button" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+                      aria-label="Next page"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 dark:border-white/10 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-ivory dark:hover:bg-white/5">
+                      <ChevronRight size={13} />
+                    </button>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Framework selector */}
@@ -225,7 +342,7 @@ export default function AIFixPage() {
           <button
             onClick={handleGetFix}
             disabled={!selectedViolation || loading}
-            className="btn-primary w-full mt-5 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-primary w-full mt-5 flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
@@ -261,15 +378,15 @@ export default function AIFixPage() {
               <div className="w-14 h-14 rounded-2xl bg-teal/10 flex items-center justify-center">
                 <Bot className="w-7 h-7 text-teal animate-pulse" />
               </div>
-              <div className="text-center">
+              <div className="text-center" role="status">
                 <p className="text-sm font-medium text-ink dark:text-white">
-                  Generating fix with Claude AI…
+                  Generating fix…
                 </p>
                 <p className="text-xs text-body dark:text-gray-400 mt-1">
                   Analyzing the violation and crafting a remediation
                 </p>
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1" aria-hidden="true">
                 {[0, 1, 2].map((i) => (
                   <span
                     key={i}
@@ -284,11 +401,11 @@ export default function AIFixPage() {
           {/* Error state */}
           {!loading && error && (
             <div className="flex flex-col gap-3">
-              <div className="flex items-start gap-3 p-4 rounded-xl bg-coral/10 border border-coral/20">
-                <AlertCircle className="w-5 h-5 text-coral shrink-0 mt-0.5" />
+              <div className="alert-danger" role="alert">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
                 <div>
-                  <p className="text-sm font-medium text-coral">Generation failed</p>
-                  <p className="text-xs text-coral/80 mt-0.5">{error}</p>
+                  <p className="text-sm font-medium m-0">Generation failed</p>
+                  <p className="text-xs mt-0.5 m-0 opacity-90">{error}</p>
                 </div>
               </div>
               <button
@@ -312,16 +429,16 @@ export default function AIFixPage() {
                     <Bot className="w-4 h-4 text-teal" />
                   </div>
                   <div>
-                    <p className="font-heading font-semibold text-sm text-ink dark:text-white leading-tight">
-                      AI Fix Assistant
+                    <p className="font-heading font-semibold text-sm text-ink dark:text-white leading-tight m-0">
+                      AI-suggested fix
                     </p>
                     <span className="text-xs text-body dark:text-gray-400">
-                      Powered by Claude
+                      {FRAMEWORKS.find(f => f.id === framework)?.label ?? framework}
                     </span>
                   </div>
                 </div>
                 {result.wcagCriterion && (
-                  <span className="font-mono text-xs bg-teal/10 text-teal px-2 py-1 rounded-lg border border-teal/20 shrink-0">
+                  <span className="font-mono text-xs bg-teal/10 text-teal-700 dark:text-teal-300 px-2 py-1 rounded-lg border border-teal/20 shrink-0">
                     {result.wcagCriterion}
                   </span>
                 )}
@@ -347,7 +464,13 @@ export default function AIFixPage() {
                 <CodeBlock title="Code After" code={result.after} tone="after" />
               )}
 
-              {/* Copy button */}
+              {/* Copy button — this is the terminal action on purpose: the
+                  fix is copied to the clipboard for you to paste and commit
+                  yourself, so nothing is ever applied without you doing it.
+                  (Auto-Fix's real apply/PR/merge pipeline is a separate
+                  system, reachable from a scan's violation list once a repo
+                  is connected under Connected Repos — this page is a
+                  lighter, repo-independent "get me a snippet" tool.) */}
               {result.after && (
                 <button
                   onClick={handleCopy}

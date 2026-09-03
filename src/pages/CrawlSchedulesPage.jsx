@@ -96,9 +96,10 @@ function RunHistoryRow({ scheduleId }) {
               Recent runs
             </p>
             {runs.map((run) => (
-              <div
+              <button
+                type="button"
                 key={run.crawl_id}
-                className="flex items-center justify-between gap-3 text-xs cursor-pointer hover:text-teal transition-colors"
+                className="w-full flex items-center justify-between gap-3 text-xs text-left hover:text-teal transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 rounded px-1 py-0.5"
                 onClick={() => { setCrawlId(run.crawl_id); navigate('crawl-results'); }}
               >
                 <span className="text-body dark:text-gray-400">{formatDate(run.created_at)}</span>
@@ -106,7 +107,7 @@ function RunHistoryRow({ scheduleId }) {
                   {run.total_scanned ?? 0} scanned{run.total_failed ? `, ${run.total_failed} failed` : ''}
                 </span>
                 <StatusBadge status={RUN_STATUS_BADGE[run.status] || 'Needs review'} />
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -364,7 +365,7 @@ export default function CrawlSchedulesPage() {
                   Frequency
                 </label>
                 <select
-                  className="h-10 px-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal"
+                  className="select-base h-10 text-sm"
                   value={newFreq}
                   onChange={(e) => setNewFreq(e.target.value)}
                 >
@@ -379,7 +380,7 @@ export default function CrawlSchedulesPage() {
                 </label>
                 <input
                   type="time"
-                  className="h-10 px-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal"
+                  className="input-base h-10 text-sm"
                   value={newTime}
                   onChange={(e) => setNewTime(e.target.value)}
                 />
@@ -510,7 +511,9 @@ export default function CrawlSchedulesPage() {
                           <td className="py-3 px-2">
                             <button
                               onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                              className="p-1 rounded text-body dark:text-gray-400 hover:text-teal"
+                              className="p-1 rounded text-body dark:text-gray-400 hover:text-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                              aria-label={isExpanded ? `Hide run history for ${item.name || item.root_url}` : `Show run history for ${item.name || item.root_url}`}
+                              aria-expanded={isExpanded}
                               title="Toggle run history"
                             >
                               {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -557,9 +560,10 @@ export default function CrawlSchedulesPage() {
                               {isRunning ? (
                                 <button
                                   title="Stop this run"
+                                  aria-label={`Stop the running crawl for ${item.name || item.root_url}`}
                                   onClick={() => handleStop(item)}
                                   disabled={stoppingId === item.id}
-                                  className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40"
+                                  className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
                                 >
                                   {stoppingId === item.id
                                     ? <RefreshCw size={14} className="animate-spin" />
@@ -568,9 +572,10 @@ export default function CrawlSchedulesPage() {
                               ) : (
                                 <button
                                   title="Run now"
+                                  aria-label={`Run ${item.name || item.root_url} now`}
                                   onClick={() => handleRunNow(item)}
                                   disabled={runningId === item.id}
-                                  className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40"
+                                  className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                                 >
                                   {runningId === item.id
                                     ? <RefreshCw size={14} className="animate-spin" />
@@ -579,16 +584,18 @@ export default function CrawlSchedulesPage() {
                               )}
                               <button
                                 title="Edit schedule"
+                                aria-label={`Edit ${item.name || item.root_url}`}
                                 onClick={() => openEditForm(item)}
-                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors"
+                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                               >
                                 <Pencil size={14} />
                               </button>
                               <button
                                 title={item.enabled ? 'Pause schedule' : 'Resume schedule'}
+                                aria-label={`${item.enabled ? 'Pause' : 'Resume'} ${item.name || item.root_url}`}
                                 onClick={() => handleToggle(item)}
                                 disabled={togglingId === item.id}
-                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40"
+                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                               >
                                 {togglingId === item.id
                                   ? <RefreshCw size={14} className="animate-spin" />
@@ -599,9 +606,10 @@ export default function CrawlSchedulesPage() {
                               </button>
                               <button
                                 title="Delete schedule"
+                                aria-label={`Delete ${item.name || item.root_url}`}
                                 onClick={() => handleDelete(item.id)}
                                 disabled={deletingId === item.id}
-                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40"
+                                className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
                               >
                                 {deletingId === item.id
                                   ? <RefreshCw size={14} className="animate-spin" />

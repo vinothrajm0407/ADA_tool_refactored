@@ -24,13 +24,17 @@ export default {
           800:      '#115e59',
           900:      '#134e4a',
         },
-        terracotta: '#D97757',
-        sage:       '#6BA368',
-        amber:      '#F59E0B',
-        coral:      '#E76F51',
+        // 300/700 shades are WCAG-AA text-contrast pairs (verified >=4.5:1) for
+        // using these colors as TEXT on a light tint of themselves (badges,
+        // pills, alerts) — 700 for light mode, 300 for dark mode. DEFAULT is
+        // unchanged so every existing bg-x/text-x/border-x usage is untouched.
+        terracotta: { DEFAULT: '#D97757', 300: '#F0A583', 700: '#A3502F' },
+        sage:       { DEFAULT: '#6BA368', 300: '#8FCB8A', 700: '#3F6B3D' },
+        amber:      { DEFAULT: '#F59E0B', 300: '#F6C453', 700: '#92640A', 800: '#7A5407' },
+        coral:      { DEFAULT: '#E76F51', 300: '#F0947C', 700: '#B23D22' },
         night:      '#161616',
         charcoal:   '#1F1F1F',
-        'brand-blue': '#2563EB',
+        'brand-blue': { DEFAULT: '#2563EB', 300: '#93C5FD', 700: '#1E40AF' },
       },
       fontFamily: {
         heading: ['"Space Grotesk"', 'sans-serif'],

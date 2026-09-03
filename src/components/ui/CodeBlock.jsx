@@ -15,11 +15,11 @@ export function IconButton({ onClick, label, children, className = '' }) {
 export function CodeBlock({ title, code, tone = 'neutral' }) {
   const headerConfig = {
     before: {
-      className: 'bg-coral/10 text-coral border-b border-coral/20',
+      className: 'bg-coral/10 text-coral-700 dark:text-coral-300 border-b border-coral/20',
       Icon: XCircle,
     },
     after: {
-      className: 'bg-sage/10 text-sage border-b border-sage/20',
+      className: 'bg-sage/10 text-sage-700 dark:text-sage-300 border-b border-sage/20',
       Icon: CheckCircle,
     },
     neutral: {

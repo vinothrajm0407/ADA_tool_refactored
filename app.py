@@ -1240,20 +1240,51 @@ def api_auto_fix():
     if not page_url or not rule.get("id"):
         return jsonify({"ok": False, "error": "page_url and rule are required"}), 400
 
-    import urllib.parse as _up
-    domain = _up.urlparse(page_url).netloc
-    link = db.get_repo_link_by_domain(domain, g.current_user_id)
+    import hashlib
+    link = db.get_repo_link_for_url(page_url, g.current_user_id)
     if not link:
         return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
 
-    from backend.services.auto_fix_service import run_auto_fix
+    # Identifies which specific element this is, not just which rule — so
+    # fixing several different elements flagged by the same rule on the same
+    # page (e.g. via "Fix All") isn't mistaken for re-fixing the same one.
+    node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
+
+    from backend.services.auto_fix_service import run_auto_fix, is_pull_request_open
+
+    existing = db.get_open_fix(g.current_user_id, page_url, rule.get("id", ""), node_signature)
+    if existing:
+        # The DB row only reflects what happened when we opened that PR — it
+        # has no idea if it was since closed, or the repo archived. Check
+        # GitHub directly rather than trust a record that could be stale.
+        pr_match = re.search(r"/pull/(\d+)$", existing["pr_url"] or "")
+        still_open = bool(pr_match) and is_pull_request_open(
+            link["repo_url"], link["access_token"], int(pr_match.group(1))
+        )
+        if still_open:
+            return jsonify({
+                "ok": True, "status": "verified", "duplicate": True, "merged": False,
+                "pr_url": existing["pr_url"], "branch_url": existing["branch_url"],
+                "steps": [{"name": "Existing fix", "ok": True,
+                           "detail": "A PR for this violation is already open and awaiting review"}],
+            })
+
     result = run_auto_fix(link, page_url, rule, node)
 
     db.save_fix(
         g.current_user_id, page_url, rule.get("id", ""), result.get("status", "failed"),
-        result.get("branch_url"), result.get("error"),
+        result.get("branch_url"), result.get("error"), result.get("pr_url"),
+        result.get("merged", False), node_signature,
     )
     return jsonify({"ok": True, **result})
+
+
+@app.route("/api/fixes", methods=["GET"])
+@require_auth
+def api_fixes_list():
+    limit = request.args.get("limit", type=int) or 50
+    fixes = db.get_fixes(g.current_user_id, limit=limit)
+    return jsonify({"ok": True, "fixes": fixes})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1702,7 +1733,8 @@ def api_repo_links_create():
         return jsonify({"ok": False, "error": "site_url, repo_url and access_token are required"}), 400
 
     import urllib.parse as _up
-    domain = _up.urlparse(site_url).netloc
+    parsed_site = _up.urlparse(site_url)
+    domain = parsed_site.netloc
     if not domain:
         return jsonify({"ok": False, "error": "site_url must be a full URL, e.g. https://example.com"}), 400
 
@@ -1733,6 +1765,7 @@ def api_repo_links_create():
 
     link_id = db.save_repo_link(
         g.current_user_id, domain, site_url, repo_url, default_branch, "react", access_token,
+        path_prefix=parsed_site.path,
     )
     return jsonify({"ok": True, "id": link_id}), 201
 
@@ -1826,4 +1859,9 @@ def serve_ui(path):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # use_reloader=False: the file-watcher reloader has been flaky on this
+    # machine, restarting on unrelated changes (even inside .venv) and
+    # dropping any request in flight — fatal for a long-running Auto-Fix
+    # call. debug=True is kept for error tracebacks; restart manually after
+    # code changes instead.
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

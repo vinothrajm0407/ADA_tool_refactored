@@ -2,9 +2,10 @@ import { StatusPill } from './StatusBadge';
 
 export function IssueCard({ title, detail, severity, wcag, onClick }) {
   return (
-    <div
-      className="bg-ivory dark:bg-night/50 border border-gray-200 dark:border-white/5 rounded-2xl p-4 cursor-pointer hover:border-teal/40 transition-colors"
+    <button
+      type="button"
       onClick={onClick}
+      className="w-full text-left bg-ivory dark:bg-night/50 border border-gray-200 dark:border-white/5 rounded-2xl p-4 cursor-pointer hover:border-teal/40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
     >
       <div className="flex items-center justify-between gap-2">
         <div>
@@ -26,7 +27,7 @@ export function IssueCard({ title, detail, severity, wcag, onClick }) {
           {detail}
         </p>
       )}
-    </div>
+    </button>
   );
 }
 

@@ -1,7 +1,14 @@
 import { apiFetch } from '../utils/api';
-import { useState, useEffect } from 'react';
-import { BellRing, CheckCheck, TrendingDown, AlertTriangle, ShieldAlert, BarChart2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { BellRing, CheckCheck, TrendingDown, AlertTriangle, ShieldAlert, BarChart2, ArrowRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+
+function formatTime(iso) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
+}
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -12,19 +19,37 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
+function isToday(iso) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  const now = new Date();
+  return d.toDateString() === now.toDateString();
+}
+
 const ALERT_META = {
-  score_decrease:       { label: 'Score Decrease',       icon: TrendingDown, color: 'text-coral',  bg: 'bg-coral/10'  },
-  violation_increase:   { label: 'Violation Increase',   icon: BarChart2,    color: 'text-amber',  bg: 'bg-amber/10'  },
-  critical_introduced:  { label: 'Critical Introduced',  icon: ShieldAlert,  color: 'text-coral',  bg: 'bg-coral/10'  },
-  regression_detected:  { label: 'Regression Detected',  icon: AlertTriangle, color: 'text-amber', bg: 'bg-amber/10'  },
+  score_decrease:       { label: 'Score Decrease',       icon: TrendingDown,  color: 'text-coral',  bg: 'bg-coral/10'  },
+  violation_increase:   { label: 'Violation Increase',   icon: BarChart2,     color: 'text-amber',  bg: 'bg-amber/10'  },
+  critical_introduced:  { label: 'Critical Introduced',  icon: ShieldAlert,   color: 'text-coral',  bg: 'bg-coral/10'  },
+  regression_detected:  { label: 'Regression Detected',  icon: AlertTriangle, color: 'text-amber',  bg: 'bg-amber/10'  },
 };
 
-const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, info: 3 };
+const LEFT_BAR = {
+  critical: 'border-l-coral',
+  serious:  'border-l-amber',
+  moderate: 'border-l-blue-400 dark:border-l-blue-500',
+  info:     'border-l-teal',
+};
+
+const TABS = [
+  { id: 'all', label: 'All' },
+  { id: 'unread', label: 'Unread' },
+  { id: 'critical', label: 'Critical' },
+];
 
 function SeverityChip({ severity }) {
   const cls = {
-    critical: 'bg-coral/10 text-coral',
-    serious:  'bg-amber/10 text-amber',
+    critical: 'bg-coral/10 text-coral-700 dark:text-coral-300',
+    serious:  'bg-amber/10 text-amber-700 dark:text-amber-300',
     moderate: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
     info:     'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400',
   }[severity] || 'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400';
@@ -35,14 +60,15 @@ function SeverityChip({ severity }) {
   );
 }
 
-function AlertCard({ alert, onAcknowledge, acknowledging }) {
+function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
   const meta = ALERT_META[alert.alert_type] || { label: alert.alert_type, icon: AlertTriangle, color: 'text-body', bg: 'bg-gray-100' };
   const Icon = meta.icon;
   const isActive = alert.status === 'active';
   const details = alert.details || {};
+  const leftBar = LEFT_BAR[alert.severity] || 'border-l-gray-200 dark:border-l-white/10';
 
   return (
-    <div className={`bg-white dark:bg-charcoal rounded-xl border shadow-soft transition-opacity ${
+    <div className={`bg-white dark:bg-charcoal rounded-xl border border-l-4 shadow-soft transition-opacity ${leftBar} ${
       isActive
         ? 'border-gray-100 dark:border-white/[0.06]'
         : 'border-gray-100 dark:border-white/[0.04] opacity-60'
@@ -62,12 +88,11 @@ function AlertCard({ alert, onAcknowledge, acknowledging }) {
             <div className="flex items-center gap-2 flex-shrink-0">
               <SeverityChip severity={alert.severity} />
               {!isActive && (
-                <span className="text-xs text-body dark:text-gray-500">Acknowledged</span>
+                <span className="text-xs text-body dark:text-gray-500">Read</span>
               )}
             </div>
           </div>
 
-          {/* Details */}
           <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-body dark:text-gray-400">
             {details.previous_score != null && details.current_score != null && (
               <span>Score: {details.previous_score} → <strong className="text-coral">{details.current_score}</strong></span>
@@ -86,20 +111,54 @@ function AlertCard({ alert, onAcknowledge, acknowledging }) {
             )}
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <span className="text-[10px] text-body dark:text-gray-500">{formatDate(alert.created_at)}</span>
-            {isActive && (
-              <button
-                onClick={() => onAcknowledge(alert.id)}
-                disabled={acknowledging === alert.id}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-body dark:text-gray-400 hover:text-teal transition-colors disabled:opacity-40"
-              >
-                <CheckCheck size={13} />
-                {acknowledging === alert.id ? 'Marking…' : 'Acknowledge'}
-              </button>
-            )}
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-[10px] text-body dark:text-gray-500" title={formatDate(alert.created_at)}>
+              {isToday(alert.created_at) ? formatTime(alert.created_at) : formatDate(alert.created_at)}
+            </span>
+            <div className="flex items-center gap-4">
+              {alert.crawl_id && (
+                <button
+                  type="button"
+                  onClick={() => onViewResults(alert.crawl_id)}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-teal hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
+                >
+                  View results <ArrowRight size={12} />
+                </button>
+              )}
+              {isActive && (
+                <button
+                  type="button"
+                  onClick={() => onAcknowledge(alert.id)}
+                  disabled={acknowledging === alert.id}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-body dark:text-gray-400 hover:text-teal transition-colors disabled:opacity-40"
+                >
+                  <CheckCheck size={13} />
+                  {acknowledging === alert.id ? 'Marking…' : 'Mark as read'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AlertGroup({ title, items, onAcknowledge, onViewResults, acknowledging }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-body dark:text-gray-500">{title}</h2>
+      <div className="space-y-3">
+        {items.map((alert) => (
+          <AlertCard
+            key={alert.id}
+            alert={alert}
+            onAcknowledge={onAcknowledge}
+            onViewResults={onViewResults}
+            acknowledging={acknowledging}
+          />
+        ))}
       </div>
     </div>
   );
@@ -111,21 +170,34 @@ export default function AlertsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [available, setAvailable] = useState(true);
-  const [filter, setFilter] = useState('active');
+  const [filter, setFilter] = useState('all');
+  const [unreadCount, setUnreadCount] = useState(0);
   const [acknowledging, setAcknowledging] = useState(null);
+  const [markingAll, setMarkingAll] = useState(false);
+  const [integrations, setIntegrations] = useState([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(true);
 
-  useEffect(() => { loadAlerts(); }, [filter]);
+  useEffect(() => { loadAlerts(filter); }, [filter]);
 
-  async function loadAlerts() {
+  useEffect(() => {
+    apiFetch('/api/integrations')
+      .then((r) => r.json())
+      .then((d) => { if (d.ok) setIntegrations(d.integrations || []); })
+      .catch(() => {})
+      .finally(() => setIntegrationsLoading(false));
+  }, []);
+
+  async function loadAlerts(tab) {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ limit: '100' });
-      if (filter !== 'all') params.set('status', filter);
+      if (tab === 'unread') params.set('status', 'active');
       const res = await apiFetch(`/api/alerts?${params}`);
       const data = await res.json();
       if (data.ok) {
         setItems(data.items || []);
+        setUnreadCount(data.unread_count ?? 0);
         setAvailable(data.available !== false);
       } else {
         setError(data.error || 'Failed to load notifications');
@@ -140,104 +212,156 @@ export default function AlertsPage() {
     setAcknowledging(id);
     try {
       await apiFetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' });
-      loadAlerts();
+      loadAlerts(filter);
     } catch {}
     setAcknowledging(null);
   }
 
-  const sortedItems = [...items].sort((a, b) => {
-    const sA = SEVERITY_ORDER[a.severity] ?? 9;
-    const sB = SEVERITY_ORDER[b.severity] ?? 9;
-    if (sA !== sB) return sA - sB;
-    return new Date(b.created_at) - new Date(a.created_at);
-  });
+  async function handleMarkAllRead() {
+    const activeIds = items.filter((a) => a.status === 'active').map((a) => a.id);
+    if (activeIds.length === 0) return;
+    setMarkingAll(true);
+    try {
+      await Promise.all(activeIds.map((id) => apiFetch(`/api/alerts/${id}/acknowledge`, { method: 'PATCH' })));
+      loadAlerts(filter);
+    } catch {}
+    setMarkingAll(false);
+  }
+
+  function handleViewResults(crawlId) {
+    setCrawlId(crawlId);
+    navigate('crawl-results');
+  }
+
+  const displayedItems = useMemo(() => {
+    let list = [...items];
+    if (filter === 'critical') list = list.filter((a) => a.severity === 'critical');
+    return list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  }, [items, filter]);
+
+  const todayItems = displayedItems.filter((a) => isToday(a.created_at));
+  const earlierItems = displayedItems.filter((a) => !isToday(a.created_at));
+  const hasUnreadInView = items.some((a) => a.status === 'active');
 
   return (
     <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
-      <div className="max-w-[860px] mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">
-              Accessibility Notifications
-            </h1>
-            <p className="text-body dark:text-gray-400 text-[0.9375rem]">
-              Notifications are generated automatically when significant regressions are detected after each crawl.
-            </p>
-          </div>
-        </div>
-
-        {/* Filter tabs */}
-        <div className="flex gap-2">
-          {['active', 'all'].map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                filter === f
-                  ? 'bg-teal text-white'
-                  : 'bg-white dark:bg-charcoal border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:text-ink dark:hover:text-white'
-              }`}
-            >
-              {f === 'active' ? 'Active' : 'All notifications'}
-            </button>
-          ))}
-        </div>
-
-        {/* DB unavailable */}
-        {!available && !loading && (
-          <p className="text-sm text-body dark:text-gray-400 bg-teal/10 px-4 py-3 rounded-xl border border-teal">
-            Notifications require database (MSSQL) to be configured.
+        <div>
+          <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">
+            Notifications
+          </h1>
+          <p className="text-body dark:text-gray-400 text-[0.9375rem]">
+            Stay informed about accessibility changes that need attention.
           </p>
-        )}
+        </div>
 
-        {loading && (
-          <div className="space-y-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-gray-200 dark:bg-white/10 rounded-xl animate-pulse" />
-            ))}
-          </div>
-        )}
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
+          <div className="flex-1 min-w-0 w-full space-y-6">
 
-        {error && (
-          <p className="text-sm text-coral bg-coral/10 px-4 py-3 rounded-xl border border-coral/30">{error}</p>
-        )}
-
-        {!loading && !error && sortedItems.length === 0 && available && (
-          <div className="mt-16 flex flex-col items-center text-center gap-4">
-            <div className="w-16 h-16 rounded-2xl bg-sage/10 flex items-center justify-center">
-              <BellRing className="w-8 h-8 text-sage" />
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div role="tablist" aria-label="Notification filter" className="flex gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl">
+                {TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === t.id}
+                    onClick={() => setFilter(t.id)}
+                    className={filter === t.id ? 'tab-active' : 'tab'}
+                  >
+                    {t.label}
+                    {t.id === 'unread' && unreadCount > 0 && (
+                      <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-coral text-white text-[10px] font-bold">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleMarkAllRead}
+                disabled={markingAll || !hasUnreadInView}
+                className="btn-secondary text-xs py-2"
+              >
+                <CheckCheck size={14} />
+                {markingAll ? 'Marking…' : 'Mark all as read'}
+              </button>
             </div>
-            <p className="font-heading font-bold text-xl text-ink dark:text-white">
-              {filter === 'active' ? 'No active notifications' : 'No notifications yet'}
-            </p>
-            <p className="text-sm text-body dark:text-gray-400 max-w-xs leading-relaxed">
-              {filter === 'active'
-                ? 'All notifications have been acknowledged. Notifications are generated automatically after crawl completion.'
-                : 'Notifications appear here after crawls detect significant accessibility regressions.'}
-            </p>
-          </div>
-        )}
 
-        {!loading && !error && sortedItems.length > 0 && (
-          <div className="space-y-3">
-            {sortedItems.map((alert) => (
-              <AlertCard
-                key={alert.id}
-                alert={alert}
-                onAcknowledge={handleAcknowledge}
-                acknowledging={acknowledging}
-              />
-            ))}
-          </div>
-        )}
+            {!available && !loading && (
+              <div className="alert-info">
+                Notifications require the database to be configured.
+              </div>
+            )}
 
-        {/* Info */}
-        <div className="text-xs text-body dark:text-gray-500 bg-gray-50 dark:bg-white/[0.03] rounded-xl p-4 space-y-1">
-          <p className="font-semibold text-ink dark:text-gray-300">When are notifications created?</p>
-          <p>Site score drops ≥ 5 points · Total violations increase ≥ 10 · New critical issues introduced · Page regressions detected</p>
-          <p>These thresholds are configurable via environment variables: <code className="font-mono text-[10px]">ALERT_SCORE_DROP_THRESHOLD</code>, <code className="font-mono text-[10px]">ALERT_VIOLATION_INCREASE_THRESHOLD</code></p>
+            {loading && (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => <div key={i} className="skeleton h-24" />)}
+              </div>
+            )}
+
+            {error && <p className="error-text bg-coral/10 px-4 py-3 rounded-xl border border-coral/30">{error}</p>}
+
+            {!loading && !error && displayedItems.length === 0 && available && (
+              <div className="empty-state">
+                <div className="w-16 h-16 rounded-2xl bg-sage/10 flex items-center justify-center mb-4">
+                  <BellRing className="w-8 h-8 text-sage" />
+                </div>
+                <p className="font-heading font-bold text-xl text-ink dark:text-white mb-1">
+                  {filter === 'unread' ? 'No unread notifications' : filter === 'critical' ? 'No critical notifications' : 'No notifications yet'}
+                </p>
+                <p className="text-sm max-w-xs leading-relaxed">
+                  Notifications are generated automatically after a crawl detects a significant accessibility regression.
+                </p>
+              </div>
+            )}
+
+            {!loading && !error && displayedItems.length > 0 && (
+              <div className="space-y-6">
+                <AlertGroup title="Today" items={todayItems} onAcknowledge={handleAcknowledge} onViewResults={handleViewResults} acknowledging={acknowledging} />
+                <AlertGroup title="Earlier" items={earlierItems} onAcknowledge={handleAcknowledge} onViewResults={handleViewResults} acknowledging={acknowledging} />
+              </div>
+            )}
+
+            <div className="text-xs text-body dark:text-gray-500 bg-gray-50 dark:bg-white/[0.03] rounded-xl p-4 space-y-1">
+              <p className="font-semibold text-ink dark:text-gray-300">When are notifications created?</p>
+              <p>Site score drops ≥ 5 points · Total violations increase ≥ 10 · New critical issues introduced · Page regressions detected</p>
+              <p>These thresholds are configurable via environment variables: <code className="font-mono text-[10px]">ALERT_SCORE_DROP_THRESHOLD</code>, <code className="font-mono text-[10px]">ALERT_VIOLATION_INCREASE_THRESHOLD</code></p>
+            </div>
+          </div>
+
+          <aside className="w-full lg:w-72 flex-shrink-0">
+            <div className="card p-5">
+              <h2 className="font-heading font-semibold text-sm text-ink dark:text-white mb-1">Connected channels</h2>
+              <p className="text-xs text-body dark:text-gray-400 mb-4">
+                Accessibility reports are delivered to these workspaces after each crawl.
+              </p>
+              {integrationsLoading ? (
+                <div className="space-y-2 mb-3">
+                  <div className="skeleton h-9" />
+                  <div className="skeleton h-9" />
+                </div>
+              ) : integrations.length === 0 ? (
+                <p className="text-xs text-body dark:text-gray-500 mb-4">No channels connected yet.</p>
+              ) : (
+                <ul className="space-y-2 mb-4">
+                  {integrations.map((integ) => (
+                    <li key={integ.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
+                      <span className="text-ink dark:text-white font-medium capitalize truncate">{integ.workspace_name || integ.platform}</span>
+                      <span className="text-body dark:text-gray-500 flex-shrink-0">
+                        {integ.channel_count} channel{integ.channel_count !== 1 ? 's' : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button type="button" onClick={() => navigate('integrations')} className="btn-secondary w-full justify-center text-xs py-2">
+                Manage channels
+              </button>
+            </div>
+          </aside>
         </div>
 
       </div>

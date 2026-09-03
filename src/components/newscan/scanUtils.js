@@ -82,6 +82,17 @@ export function truncateHtml(html, maxLen = 280) {
   return html.length <= maxLen ? html : html.slice(0, maxLen) + '…';
 }
 
+// Stable key identifying one specific violation element — same idea as the
+// backend's node_signature, used to key persisted Auto-Fix state per element.
+export function nsAutoFixKey(ruleId, nodeHtml) {
+  const str = nodeHtml || '';
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  }
+  return `${ruleId}::${hash}`;
+}
+
 // ─── Phase 3: colors, localStorage, grouping, donut ──────────────────────────
 
 export const SEV_COLORS = {

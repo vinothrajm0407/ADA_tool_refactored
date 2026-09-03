@@ -46,10 +46,10 @@ function KpiCard({ label, value, sub, color = 'text-ink dark:text-white', loadin
           {!loading && delta != null && (
             <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
               delta === 0
-                ? 'text-gray-500 bg-gray-100 dark:bg-white/[0.06]'
+                ? 'text-gray-600 bg-gray-100 dark:bg-white/[0.06]'
                 : isGood
-                  ? 'text-sage bg-sage/10'
-                  : 'text-coral bg-coral/10'
+                  ? 'text-sage-700 dark:text-sage-300 bg-sage/10'
+                  : 'text-coral-700 dark:text-coral-300 bg-coral/10'
             }`}>
               {delta === 0
                 ? <Minus className="w-2.5 h-2.5" />
@@ -69,10 +69,10 @@ function KpiCard({ label, value, sub, color = 'text-ink dark:text-white', loadin
 function CrawlStatusChip({ status }) {
   const s = (status || '').toLowerCase();
   const styles = {
-    completed: 'bg-teal/10 text-teal',
-    running:   'bg-amber/10 text-amber',
-    failed:    'bg-coral/10 text-coral',
-    pending:   'bg-gray-100 text-gray-500 dark:bg-white/[0.06] dark:text-gray-400',
+    completed: 'bg-teal/10 text-teal-800 dark:text-teal-300',
+    running:   'bg-amber/10 text-amber-800 dark:text-amber-300',
+    failed:    'bg-coral/10 text-coral-700 dark:text-coral-300',
+    pending:   'bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-gray-400',
   };
   return (
     <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full capitalize flex-shrink-0 ${styles[s] ?? styles.pending}`}>
@@ -95,10 +95,10 @@ function ChartSkeleton() {
 }
 
 const SEVERITY_CONFIG = [
-  { key: 'critical', label: 'Critical', barClass: 'bg-coral',    textClass: 'text-coral' },
-  { key: 'serious',  label: 'Serious',  barClass: 'bg-amber',    textClass: 'text-amber' },
-  { key: 'moderate', label: 'Moderate', barClass: 'bg-blue-400', textClass: 'text-blue-400' },
-  { key: 'minor',    label: 'Minor',    barClass: 'bg-gray-400', textClass: 'text-gray-400' },
+  { key: 'critical', label: 'Critical', barClass: 'bg-coral',    textClass: 'text-coral-700 dark:text-coral-300' },
+  { key: 'serious',  label: 'Serious',  barClass: 'bg-amber',    textClass: 'text-amber-800 dark:text-amber-300' },
+  { key: 'moderate', label: 'Moderate', barClass: 'bg-blue-400', textClass: 'text-blue-700 dark:text-blue-300' },
+  { key: 'minor',    label: 'Minor',    barClass: 'bg-gray-400', textClass: 'text-gray-600 dark:text-gray-400' },
 ];
 
 const formatRuleId = (id) =>
@@ -275,9 +275,9 @@ export default function DashboardPage() {
             <div className="mt-2 h-6">
               {!loading && passRateDelta60 != null && (
                 <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                  passRateDelta60 > 0 ? 'text-sage bg-sage/10'
-                  : passRateDelta60 < 0 ? 'text-coral bg-coral/10'
-                  : 'text-gray-500 bg-gray-100 dark:bg-white/[0.06]'
+                  passRateDelta60 > 0 ? 'text-sage-700 dark:text-sage-300 bg-sage/10'
+                  : passRateDelta60 < 0 ? 'text-coral-700 dark:text-coral-300 bg-coral/10'
+                  : 'text-gray-600 bg-gray-100 dark:bg-white/[0.06]'
                 }`}>
                   {passRateDelta60 > 0
                     ? <TrendingUp className="w-2.5 h-2.5" />
@@ -289,7 +289,7 @@ export default function DashboardPage() {
                 </span>
               )}
               {!loading && passRateDelta60 == null && (
-                <span className="text-[10px] text-gray-400 dark:text-gray-600">Not enough data</span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">Not enough data</span>
               )}
             </div>
           </div>
@@ -306,7 +306,7 @@ export default function DashboardPage() {
             label="Total Violations"
             value={totalViolations}
             sub="across all scans"
-            color="text-coral"
+            color="text-coral-700 dark:text-coral-300"
             loading={loading}
             delta={violationsDelta}
             invertDelta
@@ -429,9 +429,9 @@ export default function DashboardPage() {
                     className="flex items-center gap-4 px-6 py-4"
                   >
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-heading font-bold text-sm ${
-                      (item.passRate ?? 0) >= 80 ? 'bg-teal/10 text-teal'
-                      : (item.passRate ?? 0) >= 50 ? 'bg-amber/10 text-amber'
-                      : 'bg-coral/10 text-coral'
+                      (item.passRate ?? 0) >= 80 ? 'bg-teal/10 text-teal-800 dark:text-teal-300'
+                      : (item.passRate ?? 0) >= 50 ? 'bg-amber/10 text-amber-800 dark:text-amber-300'
+                      : 'bg-coral/10 text-coral-700 dark:text-coral-300'
                     }`}>
                       {item.passRate != null ? item.passRate : '—'}
                     </div>
@@ -489,7 +489,7 @@ export default function DashboardPage() {
                         >
                           {formatUrl(item.url ?? '')}
                         </p>
-                        <span className="text-xs font-semibold text-coral ml-2 flex-shrink-0">
+                        <span className="text-xs font-semibold text-coral-700 dark:text-coral-300 ml-2 flex-shrink-0">
                           {item.violations ?? 0}
                         </span>
                       </div>
@@ -552,7 +552,7 @@ export default function DashboardPage() {
                             <div className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.barClass}`} />
                             <span className="text-xs font-medium text-ink dark:text-white">{cfg.label}</span>
                           </div>
-                          <span className={`text-xs font-semibold ${count > 0 ? cfg.textClass : 'text-gray-400 dark:text-gray-600'}`}>
+                          <span className={`text-xs font-semibold ${count > 0 ? cfg.textClass : 'text-gray-500 dark:text-gray-400'}`}>
                             {count}
                           </span>
                         </div>
@@ -605,7 +605,7 @@ export default function DashboardPage() {
                           >
                             {formatRuleId(item.rule_id)}
                           </p>
-                          <span className="text-xs font-semibold text-coral ml-2 flex-shrink-0">{item.count}</span>
+                          <span className="text-xs font-semibold text-coral-700 dark:text-coral-300 ml-2 flex-shrink-0">{item.count}</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-gray-100 dark:bg-white/5 overflow-hidden">
                           <div className="h-full rounded-full bg-coral/50" style={{ width: `${pct}%` }} />
@@ -626,7 +626,7 @@ export default function DashboardPage() {
           {/* Needs Attention */}
           <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
             <div className="px-6 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-coral flex-shrink-0" />
+              <AlertTriangle className="w-4 h-4 text-coral-700 dark:text-coral-300 flex-shrink-0" />
               <span className="font-heading font-semibold text-base text-ink dark:text-white leading-none">Needs Attention</span>
             </div>
             {intelLoading ? (
@@ -648,7 +648,7 @@ export default function DashboardPage() {
             ) : needsAttention.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
                 <div className="w-10 h-10 rounded-full bg-sage/10 flex items-center justify-center mb-3">
-                  <TrendingUp className="w-5 h-5 text-sage" />
+                  <TrendingUp className="w-5 h-5 text-sage-700 dark:text-sage-300" />
                 </div>
                 <p className="text-sm font-medium text-ink dark:text-white">All URLs stable</p>
                 <p className="text-xs text-body dark:text-gray-500 mt-1">No regressions detected in recent scans</p>
@@ -661,12 +661,12 @@ export default function DashboardPage() {
                       <p className="text-sm font-medium text-ink dark:text-white truncate" title={item.url}>
                         {formatUrl(item.url)}
                       </p>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-coral/10 text-coral flex-shrink-0 mt-0.5">
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-coral/10 text-coral-700 dark:text-coral-300 flex-shrink-0 mt-0.5">
                         +{item.delta}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-1">
-                      <span className="text-sm font-semibold text-coral">{item.current_violations}</span>
+                      <span className="text-sm font-semibold text-coral-700 dark:text-coral-300">{item.current_violations}</span>
                       <span className="text-xs text-body dark:text-gray-500">violations</span>
                       <span className="text-xs text-body dark:text-gray-500">·</span>
                       <span className="text-xs text-body dark:text-gray-500">was {item.previous_violations}</span>

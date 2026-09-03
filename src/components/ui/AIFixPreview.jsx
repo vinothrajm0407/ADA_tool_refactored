@@ -9,10 +9,10 @@ export default function AIFixPreview() {
           <p className="text-xs text-body dark:text-gray-500 mt-0.5">
             <span className="font-mono">image-alt</span>
             {' · '}WCAG 1.1.1 Non-text Content{' · '}
-            <span className="font-semibold text-coral">Critical</span>
+            <span className="font-semibold text-coral-700 dark:text-coral-300">Critical</span>
           </p>
         </div>
-        <span className="flex-shrink-0 text-[10px] font-semibold text-sage bg-sage/10 px-2 py-0.5 rounded-full mt-0.5 whitespace-nowrap">
+        <span className="flex-shrink-0 text-[10px] font-semibold text-sage-700 dark:text-sage-300 bg-sage/10 px-2 py-0.5 rounded-full mt-0.5 whitespace-nowrap">
           Fix ready
         </span>
       </div>
@@ -22,7 +22,7 @@ export default function AIFixPreview() {
         {/* Before */}
         <div>
           <div className="px-4 py-1.5 bg-coral/[0.06] border-b border-gray-100 dark:border-white/10">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-coral">Before</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide text-coral-700 dark:text-coral-300">Before</span>
           </div>
           <pre className="px-4 py-4 text-xs font-mono leading-relaxed text-body dark:text-gray-400 overflow-hidden whitespace-pre">{`<img
   src="hero.jpg"
@@ -33,7 +33,7 @@ export default function AIFixPreview() {
         {/* After */}
         <div>
           <div className="px-4 py-1.5 bg-sage/[0.06] border-b border-gray-100 dark:border-white/10">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-sage">AI Fix</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide text-sage-700 dark:text-sage-300">AI Fix</span>
           </div>
           <pre className="px-4 py-4 text-xs font-mono leading-relaxed text-body dark:text-gray-400 overflow-hidden whitespace-pre">{`<img
   src="hero.jpg"

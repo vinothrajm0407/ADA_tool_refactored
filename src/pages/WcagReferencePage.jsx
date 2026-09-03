@@ -9,8 +9,8 @@ function LevelBadge({ level }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide border ${
       level === 'A'
-        ? 'bg-teal/10 text-teal border-teal/20'
-        : 'bg-amber/10 text-amber border-amber/20'
+        ? 'bg-teal/10 text-teal-800 dark:text-teal-300 border-teal/20'
+        : 'bg-amber/10 text-amber-800 dark:text-amber-300 border-amber/20'
     }`}>
       {level === 'A' ? 'Level A' : 'Level AA'}
     </span>
@@ -20,10 +20,10 @@ function LevelBadge({ level }) {
 // ─── Principle badge ──────────────────────────────────────────────────────────
 
 const PRINCIPLE_COLORS = {
-  Perceivable:    'bg-brand-blue/10 text-brand-blue border-brand-blue/20',
-  Operable:       'bg-teal/10 text-teal border-teal/20',
-  Understandable: 'bg-sage/10 text-sage border-sage/20',
-  Robust:         'bg-terracotta/10 text-terracotta border-terracotta/20',
+  Perceivable:    'bg-brand-blue/10 text-brand-blue-700 dark:text-brand-blue-300 border-brand-blue/20',
+  Operable:       'bg-teal/10 text-teal-800 dark:text-teal-300 border-teal/20',
+  Understandable: 'bg-sage/10 text-sage-700 dark:text-sage-300 border-sage/20',
+  Robust:         'bg-terracotta/10 text-terracotta-700 dark:text-terracotta-300 border-terracotta/20',
 }
 
 function PrincipleBadge({ principle }) {
@@ -273,7 +273,7 @@ export default function WcagReferencePage() {
             <h1 className="font-heading font-bold text-2xl text-ink dark:text-white">
               WCAG Reference
             </h1>
-            <span className="px-2 py-0.5 rounded-full bg-teal/10 text-teal text-xs font-semibold">
+            <span className="px-2 py-0.5 rounded-full bg-teal/10 text-teal-800 dark:text-teal-300 text-xs font-semibold">
               {WCAG_CRITERIA.length} criteria
             </span>
           </div>
@@ -295,66 +295,63 @@ export default function WcagReferencePage() {
             />
           </div>
 
-          <div className="flex gap-2 flex-wrap">
-            {/* Level filter */}
-            <div className="flex rounded-xl border border-gray-200 dark:border-white/[0.1] overflow-hidden">
-              {['All', 'A', 'AA'].map(opt => (
-                <button
-                  key={opt}
-                  onClick={() => setFilterLevel(opt)}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    filterLevel === opt
-                      ? 'bg-teal text-white'
-                      : 'text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
-                  }`}
-                >
-                  {opt === 'All' ? 'All Levels' : `Level ${opt}`}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-body dark:text-gray-400">Filter by:</span>
 
-            {/* Principle filter */}
-            <div className="flex rounded-xl border border-gray-200 dark:border-white/[0.1] overflow-hidden">
+            <button
+              onClick={() => setFilterPrinciple('All')}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                filterPrinciple === 'All'
+                  ? 'bg-teal text-white'
+                  : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
+              }`}
+            >
+              All principles
+            </button>
+            {WCAG_PRINCIPLES.map(p => (
               <button
-                onClick={() => setFilterPrinciple('All')}
-                className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  filterPrinciple === 'All'
+                key={p}
+                onClick={() => setFilterPrinciple(p)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  filterPrinciple === p
                     ? 'bg-teal text-white'
-                    : 'text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
+                    : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
                 }`}
               >
-                All
+                {p}
               </button>
-              {WCAG_PRINCIPLES.map(p => (
-                <button
-                  key={p}
-                  onClick={() => setFilterPrinciple(p)}
-                  className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    filterPrinciple === p
-                      ? 'bg-teal text-white'
-                      : 'text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
+            ))}
+
+            <span className="w-px h-4 bg-gray-200 dark:bg-white/10 mx-1" aria-hidden="true" />
+
+            {['All', 'A', 'AA'].map(opt => (
+              <button
+                key={opt}
+                onClick={() => setFilterLevel(opt)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  filterLevel === opt
+                    ? 'bg-teal text-white'
+                    : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
+                }`}
+              >
+                {opt === 'All' ? 'All Levels' : `Level ${opt}`}
+              </button>
+            ))}
           </div>
 
-          {/* Active filter count */}
-          {(search || filterLevel !== 'All' || filterPrinciple !== 'All') && (
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-body dark:text-gray-400">
-                Showing {filtered.length} of {WCAG_CRITERIA.length} criteria
-              </p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-body dark:text-gray-400">
+              Showing {filtered.length} of {WCAG_CRITERIA.length} criteria
+            </p>
+            {(search || filterLevel !== 'All' || filterPrinciple !== 'All') && (
               <button
                 onClick={() => { setSearch(''); setFilterLevel('All'); setFilterPrinciple('All') }}
                 className="text-xs text-teal hover:underline"
               >
                 Clear filters
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Grid */}

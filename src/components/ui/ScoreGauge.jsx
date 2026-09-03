@@ -6,13 +6,13 @@ const getStrokeColor = (score) => {
   return "#E76F51";
 };
 
-export function ScoreGauge({ score = 0, size = 120 }) {
+export function ScoreGauge({ score = 0, size = 120, label = 'Score', color }) {
   const strokeWidth = size * 0.08;
   const radius = (size - strokeWidth * 2) / 2;
   const circumference = 2 * Math.PI * radius;
   const clampedScore = Math.min(100, Math.max(0, score));
   const offset = circumference - (clampedScore / 100) * circumference;
-  const strokeColor = getStrokeColor(clampedScore);
+  const strokeColor = color || getStrokeColor(clampedScore);
   const center = size / 2;
 
   return (
@@ -62,7 +62,7 @@ export function ScoreGauge({ score = 0, size = 120 }) {
           {clampedScore}
         </span>
         <span className="text-xs text-body font-body mt-0.5 leading-none">
-          Score
+          {label}
         </span>
       </div>
     </div>

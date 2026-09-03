@@ -11,6 +11,7 @@ import os
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse as _urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -448,12 +449,16 @@ def _ensure_table() -> None:
         """)
         conn.commit()
         # ── Repo Links (Auto-Fix source repo) ─────────────────────────────────
+        # PathPrefix disambiguates multiple sites sharing one domain (e.g. two
+        # GitHub Pages project sites both under the same *.github.io host) —
+        # Domain alone isn't enough to pick the right repo for a given page_url.
         cur.execute("""
             IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'RepoLink')
             CREATE TABLE dbo.RepoLink (
                 Id            INT IDENTITY(1,1) PRIMARY KEY,
                 UserId        INT            NOT NULL,
                 Domain        NVARCHAR(255)  NOT NULL,
+                PathPrefix    NVARCHAR(200)  NOT NULL DEFAULT '',
                 SiteUrl       NVARCHAR(500)  NOT NULL,
                 RepoUrl       NVARCHAR(500)  NOT NULL,
                 DefaultBranch NVARCHAR(100)  NOT NULL DEFAULT 'main',
@@ -466,10 +471,26 @@ def _ensure_table() -> None:
         conn.commit()
         cur.execute("""
             IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'PathPrefix'
+            )
+            ALTER TABLE dbo.RepoLink ADD PathPrefix NVARCHAR(200) NOT NULL DEFAULT ''
+        """)
+        conn.commit()
+        cur.execute("""
+            IF EXISTS (
                 SELECT 1 FROM sys.indexes
                 WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'UX_RepoLink_User_Domain'
             )
-            CREATE UNIQUE INDEX UX_RepoLink_User_Domain ON dbo.RepoLink (UserId, Domain)
+            DROP INDEX UX_RepoLink_User_Domain ON dbo.RepoLink
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'UX_RepoLink_User_Domain_Path'
+            )
+            CREATE UNIQUE INDEX UX_RepoLink_User_Domain_Path ON dbo.RepoLink (UserId, Domain, PathPrefix)
             WHERE Status = 'active'
         """)
         conn.commit()
@@ -481,11 +502,36 @@ def _ensure_table() -> None:
                 UserId        INT            NOT NULL,
                 PageUrl       NVARCHAR(1000) NOT NULL,
                 RuleId        NVARCHAR(100)  NOT NULL,
+                NodeSignature NVARCHAR(64)   NULL,
                 Status        NVARCHAR(20)   NOT NULL,
                 BranchUrl     NVARCHAR(500)  NULL,
                 ErrorMessage  NVARCHAR(1000) NULL,
                 CreatedAt     DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME()
             )
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'PrUrl'
+            )
+            ALTER TABLE dbo.Fix ADD PrUrl NVARCHAR(500) NULL
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'Merged'
+            )
+            ALTER TABLE dbo.Fix ADD Merged BIT NOT NULL DEFAULT 0
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'NodeSignature'
+            )
+            ALTER TABLE dbo.Fix ADD NodeSignature NVARCHAR(64) NULL
         """)
         conn.commit()
     finally:
@@ -3023,11 +3069,26 @@ def get_integration_deliveries(user_id: int, limit: int = 20) -> list[dict]:
 
 # ── Repo Link CRUD (Auto-Fix source repo) ──────────────────────────────────────
 
+def _normalize_path_prefix(path: str) -> str:
+    """'' for a link that owns its whole domain, otherwise always trailing-slashed
+    so prefix matching can't confuse '/ada-test' with '/ada-test-lab/...'."""
+    path = (path or "").strip()
+    if not path or path == "/":
+        return ""
+    if not path.endswith("/"):
+        path += "/"
+    return path
+
+
 def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
-                    default_branch: str, framework: str, access_token: str | None) -> int:
-    """Upsert a site-to-repo link. Returns RepoLink.Id."""
+                    default_branch: str, framework: str, access_token: str | None,
+                    path_prefix: str = "") -> int:
+    """Upsert a site-to-repo link, keyed on domain + path prefix (not domain alone —
+    multiple sites can share one domain, e.g. two GitHub Pages project sites under
+    the same *.github.io host). Returns RepoLink.Id."""
     if not is_enabled() or _INIT_ERROR:
         raise RuntimeError("Database not available")
+    path_prefix = _normalize_path_prefix(path_prefix)
     conn = _conn()
     try:
         cur = conn.cursor()
@@ -3035,22 +3096,22 @@ def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
             UPDATE dbo.RepoLink
             SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?,
                 AccessToken = ?, Status = 'active'
-            WHERE UserId = ? AND Domain = ?
-        """, site_url, repo_url, default_branch, framework, access_token, user_id, domain)
+            WHERE UserId = ? AND Domain = ? AND PathPrefix = ?
+        """, site_url, repo_url, default_branch, framework, access_token, user_id, domain, path_prefix)
         if cur.rowcount == 0:
             cur.execute("""
                 INSERT INTO dbo.RepoLink
-                    (UserId, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken)
+                    (UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, user_id, domain, site_url, repo_url, default_branch, framework, access_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, user_id, domain, path_prefix, site_url, repo_url, default_branch, framework, access_token)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
         conn.commit()
         cur.execute("""
-            SELECT Id FROM dbo.RepoLink WHERE UserId = ? AND Domain = ?
-        """, user_id, domain)
+            SELECT Id FROM dbo.RepoLink WHERE UserId = ? AND Domain = ? AND PathPrefix = ?
+        """, user_id, domain, path_prefix)
         return int(cur.fetchone()[0])
     finally:
         conn.close()
@@ -3064,7 +3125,7 @@ def get_repo_links(user_id: int) -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, ConnectedAt
             FROM dbo.RepoLink
             WHERE UserId = ? AND Status = 'active'
             ORDER BY ConnectedAt DESC
@@ -3080,6 +3141,7 @@ def get_repo_links(user_id: int) -> list[dict]:
         out.append({
             "id": r.Id,
             "domain": r.Domain,
+            "path_prefix": r.PathPrefix,
             "site_url": r.SiteUrl,
             "repo_url": r.RepoUrl,
             "default_branch": r.DefaultBranch,
@@ -3097,7 +3159,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
             FROM dbo.RepoLink
             WHERE Id = ? AND UserId = ? AND Status = 'active'
         """, link_id, user_id)
@@ -3112,6 +3174,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     return {
         "id": r.Id,
         "domain": r.Domain,
+        "path_prefix": r.PathPrefix,
         "site_url": r.SiteUrl,
         "repo_url": r.RepoUrl,
         "default_branch": r.DefaultBranch,
@@ -3121,34 +3184,45 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     }
 
 
-def get_repo_link_by_domain(domain: str, user_id: int) -> dict | None:
-    """Fetch a single repo link by domain including its access token, verifying ownership."""
+def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
+    """
+    Find the repo link that best matches a page URL — same domain, and the
+    longest PathPrefix that's actually a prefix of the page's path. Needed
+    because Domain alone can't tell apart two sites sharing one host (e.g.
+    two GitHub Pages project sites under the same *.github.io domain).
+    """
     if not is_enabled() or _INIT_ERROR:
         return None
+    parsed = _urlparse(page_url)
+    domain = parsed.netloc
+    path = parsed.path or "/"
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
             FROM dbo.RepoLink
             WHERE Domain = ? AND UserId = ? AND Status = 'active'
         """, domain, user_id)
-        r = cur.fetchone()
+        rows = cur.fetchall()
     finally:
         conn.close()
-    if not r:
+    candidates = [r for r in rows if path.startswith(r.PathPrefix)]
+    if not candidates:
         return None
-    ts = r.ConnectedAt
+    best = max(candidates, key=lambda r: len(r.PathPrefix))
+    ts = best.ConnectedAt
     if hasattr(ts, "isoformat"):
         ts = ts.isoformat()
     return {
-        "id": r.Id,
-        "domain": r.Domain,
-        "site_url": r.SiteUrl,
-        "repo_url": r.RepoUrl,
-        "default_branch": r.DefaultBranch,
-        "framework": r.Framework,
-        "access_token": r.AccessToken,
+        "id": best.Id,
+        "domain": best.Domain,
+        "path_prefix": best.PathPrefix,
+        "site_url": best.SiteUrl,
+        "repo_url": best.RepoUrl,
+        "default_branch": best.DefaultBranch,
+        "framework": best.Framework,
+        "access_token": best.AccessToken,
         "connected_at": ts,
     }
 
@@ -3173,7 +3247,8 @@ def delete_repo_link(link_id: int, user_id: int) -> bool:
 # ── Fix history (Auto-Fix) ──────────────────────────────────────────────────────
 
 def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
-             branch_url: str | None, error_message: str | None) -> int:
+             branch_url: str | None, error_message: str | None, pr_url: str | None = None,
+             merged: bool = False, node_signature: str | None = None) -> int:
     """Record one Auto-Fix attempt. Returns Fix.Id."""
     if not is_enabled() or _INIT_ERROR:
         raise RuntimeError("Database not available")
@@ -3181,12 +3256,76 @@ def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, Status, BranchUrl, ErrorMessage)
+            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, NodeSignature, Status, BranchUrl, ErrorMessage, PrUrl, Merged)
             OUTPUT INSERTED.Id
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, user_id, page_url, rule_id, status, branch_url, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, user_id, page_url, rule_id, node_signature, status, branch_url, error_message, pr_url, 1 if merged else 0)
         row = cur.fetchone()
         conn.commit()
         return int(row[0])
     finally:
         conn.close()
+
+
+def get_fixes(user_id: int, limit: int = 50) -> list[dict]:
+    """Return recent Auto-Fix attempts for a user, newest first."""
+    if not is_enabled() or _INIT_ERROR:
+        return []
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT TOP (?) Id, PageUrl, RuleId, Status, BranchUrl, PrUrl, Merged, ErrorMessage, CreatedAt
+            FROM dbo.Fix
+            WHERE UserId = ?
+            ORDER BY CreatedAt DESC
+        """, limit, user_id)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        ts = r.CreatedAt
+        if hasattr(ts, "isoformat"):
+            ts = ts.isoformat()
+        out.append({
+            "id": r.Id,
+            "page_url": r.PageUrl,
+            "rule_id": r.RuleId,
+            "status": r.Status,
+            "branch_url": r.BranchUrl,
+            "pr_url": r.PrUrl,
+            "merged": bool(r.Merged),
+            "error_message": r.ErrorMessage,
+            "created_at": ts,
+        })
+    return out
+
+
+def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str | None) -> dict | None:
+    """
+    Most recent fix for this exact element (same page, rule, and node
+    signature) that already has an open, unmerged PR — used to avoid opening
+    a duplicate PR when Auto-Fix is clicked again before the existing one is
+    reviewed. Keyed on node_signature too, not just page+rule, so fixing
+    several different elements flagged by the same rule on the same page
+    (e.g. via "Fix All") isn't mistaken for re-fixing the same one.
+    """
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT TOP (1) PrUrl, BranchUrl
+            FROM dbo.Fix
+            WHERE UserId = ? AND PageUrl = ? AND RuleId = ? AND NodeSignature = ?
+                AND Status = 'verified' AND Merged = 0 AND PrUrl IS NOT NULL
+            ORDER BY CreatedAt DESC
+        """, user_id, page_url, rule_id, node_signature)
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl}

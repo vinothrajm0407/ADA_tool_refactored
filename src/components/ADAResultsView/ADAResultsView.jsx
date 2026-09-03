@@ -10,7 +10,7 @@ import { formatDateTime } from '../../utils/format'
 
 const IMPACT_ORDER = ['critical', 'serious', 'moderate', 'minor']
 
-const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch']
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch', 'Open PR', 'Auto-merge']
 
 const WCAG_AA_CRITERIA = new Set([
   '1.2.4','1.2.5','1.3.4','1.3.5','1.4.3','1.4.4','1.4.5',
@@ -384,7 +384,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
             <div className="flex flex-col gap-2">
               {autoFixResult.status === 'verified' ? (
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
-                  <CheckCircle2 size={14} /> Fix Verified
+                  <CheckCircle2 size={14} /> {autoFixResult.merged ? 'Fix Verified & Merged' : 'Fix Verified'}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-coral">
@@ -402,7 +402,13 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                   ))}
                 </div>
               )}
-              {autoFixResult.status === 'verified' && autoFixResult.branch_url && (
+              {autoFixResult.status === 'verified' && autoFixResult.pr_url && (
+                <a href={autoFixResult.pr_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal hover:underline w-fit">
+                  <GitBranch size={12} /> {autoFixResult.merged ? 'View merged Pull Request' : 'View Pull Request'}
+                </a>
+              )}
+              {autoFixResult.status === 'verified' && !autoFixResult.pr_url && autoFixResult.branch_url && (
                 <a href={autoFixResult.branch_url} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-[12px] font-medium text-teal hover:underline w-fit">
                   <GitBranch size={12} /> View branch

@@ -1,11 +1,11 @@
 import React from 'react';
 
 const colorClasses = {
-  teal: 'text-teal',
-  coral: 'text-coral',
-  amber: 'text-amber',
-  sage: 'text-sage',
-  terracotta: 'text-terracotta',
+  teal: 'text-teal-800 dark:text-teal-300',
+  coral: 'text-coral-700 dark:text-coral-300',
+  amber: 'text-amber-800 dark:text-amber-300',
+  sage: 'text-sage-700 dark:text-sage-300',
+  terracotta: 'text-terracotta-700 dark:text-terracotta-300',
 };
 
 export function MetricCard({ title, value, trend, icon: Icon, color = 'teal', loading = false }) {
@@ -33,7 +33,7 @@ export function MetricCard({ title, value, trend, icon: Icon, color = 'teal', lo
         <p className="text-sm text-body dark:text-gray-400">{title}</p>
         <p className="text-2xl font-bold font-heading text-ink dark:text-white mt-0.5">{value}</p>
         {trend && (
-          <p className="text-xs text-sage mt-0.5">{trend}</p>
+          <p className="text-xs text-sage-700 dark:text-sage-300 mt-0.5">{trend}</p>
         )}
       </div>
     </div>

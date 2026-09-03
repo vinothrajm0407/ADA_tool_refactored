@@ -3,6 +3,21 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 const CRAWL_ID_KEY = 'ada_crawl_id';
 const AUTH_KEY     = 'ada_auth';
 const POST_AUTH_REDIRECT_KEY = 'ada_post_auth_redirect';
+const THEME_KEY = 'ada-tool-theme';
+const REDUCED_MOTION_KEY = 'ada-tool-reduced-motion';
+
+function readInitialDark() {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark') return true;
+    if (saved === 'light') return false;
+  } catch {}
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return false;
+  }
+}
 
 const PAGE_TO_PATH = {
   landing:              '/',
@@ -79,6 +94,8 @@ function readStoredAuth() {
 export const AppContext = createContext({
   dark: false,
   setDark: () => {},
+  reducedMotion: false,
+  setReducedMotion: () => {},
   activePage: 'landing',
   navigate: () => {},
   crawlId: null,
@@ -100,6 +117,14 @@ export const AppContext = createContext({
   setPendingScanHistoryTab: () => {},
   assistiveResult: null,
   setAssistiveResult: () => {},
+  scanSessions: [],
+  activeScanSessionId: null,
+  setActiveScanSessionId: () => {},
+  createScanSession: () => {},
+  updateScanSession: () => {},
+  closeScanSession: () => {},
+  updateSessionAutoFix: () => {},
+  updateSessionAssistive: () => {},
   user: null,
   token: null,
   isAuthenticated: false,
@@ -108,7 +133,23 @@ export const AppContext = createContext({
 });
 
 export function AppProvider({ children }) {
-  const [dark, setDark] = useState(false);
+  const [dark, setDark] = useState(readInitialDark);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch {}
+  }, [dark]);
+
+  const [reducedMotion, setReducedMotion] = useState(() => {
+    try { return localStorage.getItem(REDUCED_MOTION_KEY) === 'true'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-reduced-motion', reducedMotion ? 'true' : 'false');
+    try { localStorage.setItem(REDUCED_MOTION_KEY, String(reducedMotion)); } catch {}
+  }, [reducedMotion]);
+
   const [activePage, setActivePage] = useState(getInitialPage);
   const [crawlId, setCrawlIdState] = useState(readStoredCrawlId);
   const [postAuthRedirect, setPostAuthRedirectState] = useState(readStoredPostAuthRedirect);
@@ -119,6 +160,70 @@ export function AppProvider({ children }) {
   const [pendingAssistiveModule, setPendingAssistiveModule] = useState(null);
   const [pendingScanHistoryTab, setPendingScanHistoryTab] = useState(null);
   const [assistiveResult, setAssistiveResult] = useState(null);
+
+  // Scan sessions — lives here (not inside NewScanPage) specifically so a scan's
+  // results and any in-progress Auto-Fix runs survive navigating to another
+  // sidebar section and back, instead of being destroyed when the page unmounts.
+  const [scanSessions, setScanSessions] = useState([]);
+  const [activeScanSessionId, setActiveScanSessionIdState] = useState(null);
+
+  const setActiveScanSessionId = useCallback((id) => {
+    setActiveScanSessionIdState(id);
+  }, []);
+
+  const createScanSession = useCallback((url, includeBestPractices) => {
+    const id = (crypto.randomUUID && crypto.randomUUID()) || `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const session = {
+      id, url, includeBestPractices,
+      phase: 'scanning', result: null, error: '',
+      autoFixState: {},
+      assistiveState: {},
+    };
+    setScanSessions(prev => [...prev, session]);
+    setActiveScanSessionIdState(id);
+    return id;
+  }, []);
+
+  const updateScanSession = useCallback((id, updater) => {
+    setScanSessions(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const patch = typeof updater === 'function' ? updater(s) : updater;
+      return { ...s, ...patch };
+    }));
+  }, []);
+
+  const closeScanSession = useCallback((id) => {
+    setScanSessions(prev => prev.filter(s => s.id !== id));
+    setActiveScanSessionIdState(prev => (prev === id ? null : prev));
+  }, []);
+
+  // Per-violation Auto-Fix state (idle/running/done + result), keyed by rule id +
+  // a hash of the element's HTML — same node-signature idea the backend uses for
+  // dedup. Backed by context (not component useState) so an in-flight fetch's
+  // state update still lands even if the component that started it has unmounted.
+  const updateSessionAutoFix = useCallback((sessionId, fixKey, updater) => {
+    setScanSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const prevFix = s.autoFixState[fixKey];
+      const patch = typeof updater === 'function' ? updater(prevFix) : updater;
+      return { ...s, autoFixState: { ...s.autoFixState, [fixKey]: patch } };
+    }));
+  }, []);
+
+  // Inline "Run Assistive Test" results, keyed by module id — same reasoning
+  // as autoFixState: lives here so results/in-flight state survive navigation.
+  // Passing undefined/null as the patch removes that module's card entirely.
+  const updateSessionAssistive = useCallback((sessionId, moduleId, updater) => {
+    setScanSessions(prev => prev.map(s => {
+      if (s.id !== sessionId) return s;
+      const prevState = s.assistiveState[moduleId];
+      const patch = typeof updater === 'function' ? updater(prevState) : updater;
+      const nextAssistiveState = { ...s.assistiveState };
+      if (patch == null) delete nextAssistiveState[moduleId];
+      else nextAssistiveState[moduleId] = patch;
+      return { ...s, assistiveState: nextAssistiveState };
+    }));
+  }, []);
 
   const stored = readStoredAuth();
   const [user, setUser] = useState(stored.user);
@@ -203,6 +308,8 @@ export function AppProvider({ children }) {
       value={{
         dark,
         setDark,
+        reducedMotion,
+        setReducedMotion,
         activePage,
         navigate,
         crawlId,
@@ -224,6 +331,14 @@ export function AppProvider({ children }) {
         setPendingScanHistoryTab,
         assistiveResult,
         setAssistiveResult,
+        scanSessions,
+        activeScanSessionId,
+        setActiveScanSessionId,
+        createScanSession,
+        updateScanSession,
+        closeScanSession,
+        updateSessionAutoFix,
+        updateSessionAssistive,
         user,
         token,
         isAuthenticated: !!token,

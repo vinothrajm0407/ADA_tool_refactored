@@ -3,9 +3,12 @@ import { Menu, Sun, Moon, Bell, LogOut, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
 
+// Every activePage App.jsx can route to needs an entry here — otherwise the
+// header silently falls back to "Dashboard", which is wrong on that page and
+// undermines the page-heading landmark screen readers rely on.
 const pageTitles = {
   dashboard:            'Dashboard',
-  'new-scan':           'New Scan',
+  'new-scan':           'Run Audit',
   'scan-history':       'Scan History',
   'crawl-results':      'Crawl Results',
   'crawl-schedules':    'Crawl Schedules',
@@ -13,7 +16,12 @@ const pageTitles = {
   alerts:               'Notifications',
   'assistive-test':     'Assistive Testing',
   'keyboard-test':      'Assistive Testing',
+  'assistive-results':  'Assistive Testing',
   'ai-fix':             'AI Fix Assistant',
+  'wcag-reference':     'WCAG Reference',
+  integrations:         'Channels & Apps',
+  'repo-links':         'Connected Repos',
+  'fix-history':        'Fix History',
   settings:             'Settings',
 };
 
@@ -21,6 +29,7 @@ export default function AppHeader() {
   const { activePage, navigate, setSidebarOpen, dark, setDark, user, logout } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const menuTriggerRef = useRef(null);
 
   const initials = user
     ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase()
@@ -29,6 +38,14 @@ export default function AppHeader() {
   const email = user?.email ?? '';
 
   const title = pageTitles[activePage] ?? 'Dashboard';
+
+  // Closing via Escape restores focus to the trigger, matching standard
+  // menu-button behavior — closing by picking "Sign out" navigates away
+  // instead, so there's nothing to restore focus to.
+  function closeMenu({ restoreFocus = false } = {}) {
+    setMenuOpen(false);
+    if (restoreFocus) menuTriggerRef.current?.focus();
+  }
 
   function handleLogout() {
     setMenuOpen(false);
@@ -43,8 +60,18 @@ export default function AppHeader() {
         setMenuOpen(false);
       }
     }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeMenu({ restoreFocus: true });
+      }
+    }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [menuOpen]);
 
   return (
@@ -67,10 +94,16 @@ export default function AppHeader() {
         <BrandLogo variant="compact" />
       </button>
 
-      {/* Page title */}
-      <span className="font-heading font-semibold text-ink dark:text-white text-lg whitespace-nowrap">
+      {/* Deliberately NOT an <h1> — 10 of the 14 shell-rendered pages already
+          render their own <h1> in the content area (verified by grep), so
+          making this one too would create duplicate top-level headings.
+          4 pages currently have no in-page h1 at all (AIFixPage,
+          CrawlResultsPage, DashboardPage, SettingsPage) and need one added
+          when those specific pages are next touched — that's a page-level
+          fix, out of scope for this shell-only pass. */}
+      <p className="font-heading font-semibold text-ink dark:text-white text-lg whitespace-nowrap m-0">
         {title}
-      </span>
+      </p>
 
       {/* Right action group */}
       <div className="flex items-center gap-2 ml-auto">
@@ -99,9 +132,11 @@ export default function AppHeader() {
         {/* User avatar + dropdown */}
         <div className="relative" ref={menuRef}>
           <button
+            ref={menuTriggerRef}
             onClick={() => setMenuOpen(o => !o)}
             className="w-8 h-8 rounded-full bg-teal flex items-center justify-center text-white text-xs font-bold select-none hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
             aria-label="User menu"
+            aria-haspopup="true"
             aria-expanded={menuOpen}
           >
             {initials}

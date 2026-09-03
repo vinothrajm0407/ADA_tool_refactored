@@ -23,6 +23,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import WcagReferencePage from './pages/WcagReferencePage'
 import IntegrationsPage from './pages/IntegrationsPage'
 import RepoLinkingPage from './pages/RepoLinkingPage'
+import FixHistoryPage from './pages/FixHistoryPage'
 
 const PUBLIC_PAGES = new Set(['landing', 'login', 'signup', 'verify-email', 'forgot-password', 'reset-password']);
 
@@ -32,6 +33,16 @@ function AppInner() {
   const toggleDark = useCallback(() => {
     setDark((prev) => !prev)
   }, [setDark])
+
+  // Escape closes the mobile sidebar from anywhere, not just its own backdrop click.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    function handleEscape(e) {
+      if (e.key === 'Escape') setSidebarOpen(false)
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [sidebarOpen, setSidebarOpen])
 
   if (activePage === 'landing') {
     return (
@@ -69,28 +80,23 @@ function AppInner() {
 
   return (
     <div className={`${dark ? 'dark' : ''} h-screen`}>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:px-4 focus:py-2.5 focus:rounded-xl focus:bg-teal focus:text-white focus:font-semibold focus:text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+      >
+        Skip to main content
+      </a>
       <div className="flex h-screen overflow-hidden bg-ivory dark:bg-night">
-        {/* Sidebar */}
-        <div
-          className={`${
-            sidebarOpen ? 'flex' : 'hidden'
-          } lg:flex flex-col w-72 flex-shrink-0 border-r border-gray-100 dark:border-white/[0.06]`}
-        >
-          <AppSidebar />
-        </div>
-
-        {/* Mobile sidebar backdrop */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-20 bg-black/30 lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+        {/* AppSidebar owns its own responsive layout (fixed+slide-in on mobile,
+            relative+w-64 on desktop) and its own backdrop — no wrapper needed
+            here. A second wrapper with its own width/backdrop previously
+            existed and both fought the sidebar's own mobile behavior. */}
+        <AppSidebar />
 
         {/* Main content area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <AppHeader />
-          <main className="flex-1 overflow-auto">
+          <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
             {activePage === 'dashboard' && <DashboardPage />}
             {activePage === 'new-scan' && <NewScanPage />}
             {activePage === 'scan-history' && scanHistoryId == null && (
@@ -113,6 +119,7 @@ function AppInner() {
             {activePage === 'wcag-reference' && <WcagReferencePage />}
             {activePage === 'integrations' && <IntegrationsPage />}
             {activePage === 'repo-links' && <RepoLinkingPage />}
+            {activePage === 'fix-history' && <FixHistoryPage />}
             {activePage === 'settings' && <SettingsPage />}
           </main>
         </div>

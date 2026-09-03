@@ -1,10 +1,28 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plug, CheckCircle2, Circle, Trash2, Plus, X,
   RefreshCw, Send, Hash, Lock, ChevronDown, ChevronUp,
   AlertTriangle, CheckCheck, Clock,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+
+// ── Shared dialog accessibility: focus first field on open, Escape to close, restore focus on close
+function useDialogA11y(onClose) {
+  const firstFieldRef = useRef(null);
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    firstFieldRef.current?.focus();
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
+  }, [onClose]);
+  return firstFieldRef;
+}
 
 // ── Slack SVG logo ────────────────────────────────────────────────────────────
 function SlackLogo({ size = 24 }) {
@@ -79,6 +97,7 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
   const [purpose, setPurpose]       = useState('general');
   const [saving, setSaving]         = useState(false);
   const [testing, setTesting]       = useState(false);
+  const firstFieldRef = useDialogA11y(onClose);
 
   useEffect(() => {
     apiFetch(`/api/integrations/slack/${integrationId}/channels/available`)
@@ -134,12 +153,12 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
+    <div className="dialog-overlay">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
+      <div role="dialog" aria-modal="true" aria-labelledby="add-slack-channel-title" className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
-          <h3 className="font-heading font-semibold text-base text-ink dark:text-white">Add Slack Channel</h3>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors">
+          <h3 id="add-slack-channel-title" className="font-heading font-semibold text-base text-ink dark:text-white">Add Slack Channel</h3>
+          <button onClick={onClose} aria-label="Close dialog" className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
             <X size={16} />
           </button>
         </div>
@@ -148,13 +167,15 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
             <p className="text-sm text-coral bg-coral/10 rounded-xl px-4 py-3 border border-coral/20">{error}</p>
           )}
           <div>
-            <label className="block text-sm font-medium text-ink dark:text-white mb-1.5">Search channels</label>
+            <label htmlFor="slack-channel-search" className="block text-sm font-medium text-ink dark:text-white mb-1.5">Search channels</label>
             <input
+              ref={firstFieldRef}
+              id="slack-channel-search"
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search…"
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
+              className="input-base"
             />
           </div>
           <div className="border border-gray-100 dark:border-white/[0.06] rounded-xl overflow-hidden max-h-52 overflow-y-auto">
@@ -180,11 +201,12 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
             ))}
           </div>
           <div>
-            <label className="block text-sm font-medium text-ink dark:text-white mb-1.5">Purpose</label>
+            <label htmlFor="slack-channel-purpose" className="block text-sm font-medium text-ink dark:text-white mb-1.5">Purpose</label>
             <select
+              id="slack-channel-purpose"
               value={purpose}
               onChange={e => setPurpose(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal"
+              className="select-base"
             >
               <option value="general">General Reports</option>
               <option value="alerts">Regression Alerts</option>
@@ -218,6 +240,7 @@ function ConnectTeamsModal({ onClose, onConnected }) {
   const [workspaceName, setWorkspaceName]   = useState('');
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState('');
+  const firstFieldRef = useDialogA11y(onClose);
 
   async function handleConnect() {
     setError('');
@@ -248,15 +271,15 @@ function ConnectTeamsModal({ onClose, onConnected }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
+    <div className="dialog-overlay">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
+      <div role="dialog" aria-modal="true" aria-labelledby="connect-teams-title" className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-2.5">
             <TeamsLogo size={20} />
-            <h3 className="font-heading font-semibold text-base text-ink dark:text-white">Connect Microsoft Teams</h3>
+            <h3 id="connect-teams-title" className="font-heading font-semibold text-base text-ink dark:text-white">Connect Microsoft Teams</h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors">
+          <button onClick={onClose} aria-label="Close dialog" className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
             <X size={16} />
           </button>
         </div>
@@ -274,34 +297,38 @@ function ConnectTeamsModal({ onClose, onConnected }) {
             </ol>
           </div>
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-ink dark:text-white">Webhook URL</label>
+            <label htmlFor="teams-webhook-url" className="block text-sm font-medium text-ink dark:text-white">Webhook URL</label>
             <input
+              ref={firstFieldRef}
+              id="teams-webhook-url"
               type="url"
               value={webhookUrl}
               onChange={e => setWebhookUrl(e.target.value)}
               placeholder="https://XXX.webhook.office.com/webhookb2/..."
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
+              className="input-base"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-ink dark:text-white">Channel name</label>
+              <label htmlFor="teams-channel-name" className="block text-sm font-medium text-ink dark:text-white">Channel name</label>
               <input
+                id="teams-channel-name"
                 type="text"
                 value={channelName}
                 onChange={e => setChannelName(e.target.value)}
                 placeholder="#accessibility"
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
+                className="input-base"
               />
             </div>
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-ink dark:text-white">Workspace label</label>
+              <label htmlFor="teams-workspace-label" className="block text-sm font-medium text-ink dark:text-white">Workspace label</label>
               <input
+                id="teams-workspace-label"
                 type="text"
                 value={workspaceName}
                 onChange={e => setWorkspaceName(e.target.value)}
                 placeholder="My Team"
-                className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
+                className="input-base"
               />
             </div>
           </div>
@@ -371,13 +398,15 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => onDisconnect(integration.id)}
-            className="flex items-center gap-1.5 text-xs font-medium text-body dark:text-gray-400 hover:text-coral transition-colors px-2.5 py-1.5 rounded-lg hover:bg-coral/5"
+            className="flex items-center gap-1.5 text-xs font-medium text-body dark:text-gray-400 hover:text-coral transition-colors px-2.5 py-1.5 rounded-lg hover:bg-coral/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
           >
             <Trash2 size={13} /> Disconnect
           </button>
           <button
             onClick={() => setExpanded(v => !v)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${integration.workspace_name} channels` : `Expand ${integration.workspace_name} channels`}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
           >
             {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -426,8 +455,9 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
               <button
                 onClick={() => handleRemoveChannel(ch.channel_id)}
                 disabled={removing === ch.channel_id}
-                className="p-1.5 rounded-lg text-gray-400 hover:text-coral transition-colors disabled:opacity-40"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-coral transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
                 title="Remove channel"
+                aria-label={`Remove channel ${ch.channel_name}`}
               >
                 <X size={14} />
               </button>
@@ -538,9 +568,9 @@ export default function IntegrationsPage() {
 
         {/* Header */}
         <div>
-          <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Integrations</h1>
+          <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Channels & apps</h1>
           <p className="text-body dark:text-gray-400 text-[0.9375rem]">
-            Connect ADA to Slack or Microsoft Teams and send accessibility reports directly to your team's channels.
+            Send scan results and alerts to the tools your team already uses.
           </p>
         </div>
 

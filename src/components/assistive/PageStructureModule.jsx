@@ -27,11 +27,11 @@ function IssueCard({ issue }) {
 
 const INDENT = { 1: 0, 2: 16, 3: 32, 4: 48, 5: 60, 6: 72 };
 const LEVEL_COLORS = {
-  1: 'bg-teal/10 text-teal border-teal/20',
-  2: 'bg-brand-blue/10 text-brand-blue border-brand-blue/20',
-  3: 'bg-sage/10 text-sage border-sage/20',
-  4: 'bg-amber/10 text-amber border-amber/20',
-  5: 'bg-terracotta/10 text-terracotta border-terracotta/20',
+  1: 'bg-teal/10 text-teal-800 dark:text-teal-300 border-teal/20',
+  2: 'bg-brand-blue/10 text-brand-blue-700 dark:text-brand-blue-300 border-brand-blue/20',
+  3: 'bg-sage/10 text-sage-700 dark:text-sage-300 border-sage/20',
+  4: 'bg-amber/10 text-amber-800 dark:text-amber-300 border-amber/20',
+  5: 'bg-terracotta/10 text-terracotta-700 dark:text-terracotta-300 border-terracotta/20',
   6: 'bg-gray-100 dark:bg-white/10 text-body dark:text-gray-400 border-gray-200 dark:border-white/10',
 };
 
@@ -52,11 +52,11 @@ function HeadingRow({ heading }) {
 // ─── Landmark badge ───────────────────────────────────────────────────────────
 
 const LANDMARK_COLORS = {
-  main:           'bg-teal/10 text-teal',
-  navigation:     'bg-brand-blue/10 text-brand-blue',
-  banner:         'bg-sage/10 text-sage',
-  contentinfo:    'bg-terracotta/10 text-terracotta',
-  complementary:  'bg-amber/10 text-amber',
+  main:           'bg-teal/10 text-teal-800 dark:text-teal-300',
+  navigation:     'bg-brand-blue/10 text-brand-blue-700 dark:text-brand-blue-300',
+  banner:         'bg-sage/10 text-sage-700 dark:text-sage-300',
+  contentinfo:    'bg-terracotta/10 text-terracotta-700 dark:text-terracotta-300',
+  complementary:  'bg-amber/10 text-amber-800 dark:text-amber-300',
   search:         'bg-violet-100 dark:bg-violet-900/20 text-violet-700 dark:text-violet-400',
   form:           'bg-gray-100 dark:bg-white/10 text-body dark:text-gray-400',
   region:         'bg-gray-100 dark:bg-white/10 text-body dark:text-gray-400',
