@@ -670,7 +670,7 @@ export default function ScanHistoryView({ onScanClick }) {
 
   return (
     <main className="flex-1 overflow-auto bg-ivory dark:bg-night page-content min-h-0" role="main">
-      <div className={activeTab === 'crawls' ? 'max-w-[1100px] mx-auto' : 'max-w-[1100px] mx-auto'}>
+      <div className="mx-auto max-w-[1100px]">
 
         <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-2">
           Scan History
@@ -680,7 +680,7 @@ export default function ScanHistoryView({ onScanClick }) {
         </p>
 
         {/* Tab switcher */}
-        <div role="tablist" aria-label="Scan history views" className="inline-flex bg-gray-100 dark:bg-charcoal/80 rounded-xl p-1 gap-0.5 mb-2 border border-gray-200 dark:border-white/[0.06]">
+        <div role="tablist" aria-label="Scan history views" className="inline-flex rounded-xl border border-gray-200 bg-white p-1 gap-0.5 mb-4 shadow-sm dark:border-white/[0.06] dark:bg-charcoal/80">
           {TABS.map(tab => (
             <button
               key={tab.id}
