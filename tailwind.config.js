@@ -8,21 +8,24 @@ export default {
   theme: {
     extend: {
       colors: {
-        ivory:      '#F4F6F9',
-        ink:        '#0F172A',
-        body:       '#475569',
+        ivory:      '#F5F6FA',
+        ink:        '#10121A',
+        body:       '#4A4F63',
+        // Brand scale (referenced app-wide as `teal-*`) remapped to electric
+        // indigo for the "precision instrument" identity. 300/700 remain
+        // WCAG-AA text-on-tint pairs (300 for dark, 700 for light).
         teal: {
-          DEFAULT:  '#0F766E',
-          50:       '#f0fdfa',
-          100:      '#ccfbf1',
-          200:      '#99f6e4',
-          300:      '#5eead4',
-          400:      '#2dd4bf',
-          500:      '#14b8a6',
-          600:      '#0d9488',
-          700:      '#0f766e',
-          800:      '#115e59',
-          900:      '#134e4a',
+          DEFAULT:  '#4F46E5',
+          50:       '#eef2ff',
+          100:      '#e0e7ff',
+          200:      '#c7d2fe',
+          300:      '#a5b4fc',
+          400:      '#818cf8',
+          500:      '#6366f1',
+          600:      '#4f46e5',
+          700:      '#4338ca',
+          800:      '#3730a3',
+          900:      '#312e81',
         },
         // 300/700 shades are WCAG-AA text-contrast pairs (verified >=4.5:1) for
         // using these colors as TEXT on a light tint of themselves (badges,
@@ -32,21 +35,22 @@ export default {
         sage:       { DEFAULT: '#6BA368', 300: '#8FCB8A', 700: '#3F6B3D' },
         amber:      { DEFAULT: '#F59E0B', 300: '#F6C453', 700: '#92640A', 800: '#7A5407' },
         coral:      { DEFAULT: '#E76F51', 300: '#F0947C', 700: '#B23D22' },
-        night:      '#0D1117',
-        charcoal:   '#161B22',
-        'brand-blue': { DEFAULT: '#2563EB', 300: '#93C5FD', 700: '#1E40AF' },
+        night:      '#0B0C12',
+        charcoal:   '#181A26',
+        'brand-blue': { DEFAULT: '#4F46E5', 300: '#A5B4FC', 700: '#3730A3' },
       },
       fontFamily: {
         heading: ['"Space Grotesk"', 'sans-serif'],
         body:    ['"Inter"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+        mono:    ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       boxShadow: {
-        soft: '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06)',
-        glow: '0 12px 40px rgba(15, 118, 110, 0.22)',
+        soft: '0 1px 2px rgba(16, 18, 26, 0.04), 0 8px 24px rgba(16, 18, 26, 0.06)',
+        glow: '0 12px 40px rgba(79, 70, 229, 0.24)',
       },
       borderRadius: {
-        '2xl': '1rem',
-        '3xl': '1.5rem',
+        '2xl': '0.875rem',
+        '3xl': '1.25rem',
       },
     },
   },

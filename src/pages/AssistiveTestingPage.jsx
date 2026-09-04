@@ -279,7 +279,7 @@ export default function AssistiveTestingPage() {
             {url.trim() ? (
               <>
                 <div className="flex justify-center mb-4">
-                  <ScoreGauge score={coverage.percentComplete} label="Complete" color="#0F766E" size={130} />
+                  <ScoreGauge score={coverage.percentComplete} label="Complete" color="#4F46E5" size={130} />
                 </div>
                 <div className="space-y-2.5">
                   <div className="flex items-center gap-2.5 text-sm">

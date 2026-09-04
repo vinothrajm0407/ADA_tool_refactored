@@ -25,13 +25,13 @@ export function MetricCard({ title, value, trend, icon: Icon, color = 'teal', lo
   }
 
   return (
-    <div className="card p-5 flex items-start gap-4">
-      <div className="w-10 h-10 rounded-xl bg-ivory dark:bg-night flex items-center justify-center flex-shrink-0">
+    <div className="card p-5 flex items-start gap-4 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+      <div className="w-10 h-10 rounded-xl bg-teal/10 flex items-center justify-center flex-shrink-0">
         {Icon && <Icon className={`w-5 h-5 ${iconColor}`} />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-body dark:text-gray-400">{title}</p>
-        <p className="text-2xl font-bold font-heading text-ink dark:text-white mt-0.5">{value}</p>
+        <p className="text-[11px] font-mono font-semibold uppercase tracking-[0.12em] text-body dark:text-gray-400">{title}</p>
+        <p className="stat-figure text-[1.75rem] leading-tight font-bold text-ink dark:text-white mt-1">{value}</p>
         {trend && (
           <p className="text-xs text-sage-700 dark:text-sage-300 mt-0.5">{trend}</p>
         )}

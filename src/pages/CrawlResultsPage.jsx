@@ -127,7 +127,7 @@ function SortableHeader({ label, sortKey: key, currentSort, currentDir, onSort }
 
 function ScoreMiniBar({ score }) {
   const colour =
-    score >= 80 ? '#0F766E' : score >= 60 ? '#F59E0B' : '#E76F51';
+    score >= 80 ? '#4F46E5' : score >= 60 ? '#F59E0B' : '#E76F51';
   return (
     <div className="flex items-center gap-2 min-w-[80px]">
       <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
@@ -172,7 +172,7 @@ function TopViolatingTable({ pages, onRowClick }) {
     <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
       {pages.map((p, idx) => {
         const pct = max > 0 ? Math.round((p.violations / max) * 100) : 0;
-        const scoreColor = p._score >= 80 ? '#0F766E' : p._score >= 60 ? '#F59E0B' : '#E76F51';
+        const scoreColor = p._score >= 80 ? '#4F46E5' : p._score >= 60 ? '#F59E0B' : '#E76F51';
         return (
           <button
             key={p.url}

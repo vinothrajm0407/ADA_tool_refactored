@@ -16,7 +16,7 @@ function ScoreRing({ score, size = 60 }) {
   const circ = 2 * Math.PI * r;
   const s = Math.min(Math.max(score ?? 0, 0), 100);
   const offset = circ - (s / 100) * circ;
-  const color = s >= 80 ? '#0F766E' : s >= 60 ? '#F59E0B' : '#F87171';
+  const color = s >= 80 ? '#4F46E5' : s >= 60 ? '#F59E0B' : '#F87171';
   return (
     <svg width={size} height={size} aria-hidden="true">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(0,0,0,0.07)" strokeWidth={sw} />
@@ -343,8 +343,8 @@ export default function DashboardPage() {
                   <AreaChart data={trendData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                     <defs>
                       <linearGradient id="passRateGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%"   stopColor="#0F766E" stopOpacity={0.15} />
-                        <stop offset="100%" stopColor="#0F766E" stopOpacity={0} />
+                        <stop offset="0%"   stopColor="#4F46E5" stopOpacity={0.15} />
+                        <stop offset="100%" stopColor="#4F46E5" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
@@ -352,14 +352,14 @@ export default function DashboardPage() {
                     <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#9CA3AF' }} axisLine={false} tickLine={false} />
                     <Tooltip
                       contentStyle={{ background: '#1F2937', border: 'none', borderRadius: 10, color: '#F8F6F1', fontSize: 12 }}
-                      cursor={{ stroke: '#0F766E', strokeWidth: 1, strokeDasharray: '4 2' }}
+                      cursor={{ stroke: '#4F46E5', strokeWidth: 1, strokeDasharray: '4 2' }}
                       formatter={(val) => [`${val}%`, 'Pass Rate']}
                     />
                     <Area
                       type="monotone" dataKey="avg_pass_rate"
-                      stroke="#0F766E" strokeWidth={2}
+                      stroke="#4F46E5" strokeWidth={2}
                       fill="url(#passRateGrad)"
-                      dot={false} activeDot={{ r: 4, fill: '#0F766E', strokeWidth: 0 }}
+                      dot={false} activeDot={{ r: 4, fill: '#4F46E5', strokeWidth: 0 }}
                     />
                   </AreaChart>
                 </ResponsiveContainer>

@@ -209,7 +209,7 @@ export default function ExecutiveSummaryPage() {
                 { key: 'major_risks', title: 'Major Risks', bullet: '#E76F51' },
                 { key: 'most_affected_areas', title: 'Most Affected Areas', bullet: '#F59E0B' },
                 { key: 'positive_findings', title: 'Positive Findings', bullet: '#6BA368' },
-                { key: 'recommended_priorities', title: 'Recommended Priorities', bullet: '#0F766E' },
+                { key: 'recommended_priorities', title: 'Recommended Priorities', bullet: '#4F46E5' },
               ].map(({ key, title, bullet }) =>
                 aiSummary[key]?.length ? (
                   <div key={key}>
