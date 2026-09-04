@@ -6,7 +6,7 @@
 /* ─── Tailwind component utilities ──────────────────────── */
 @layer components {
   .card {
-    @apply rounded-2xl border border-gray-100 bg-white shadow-soft dark:border-white/[0.06] dark:bg-charcoal;
+    @apply rounded-2xl border border-gray-200/70 bg-white shadow-soft transition-shadow duration-300 dark:border-white/[0.07] dark:bg-charcoal;
   }
   .section {
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
@@ -15,7 +15,7 @@
     @apply min-h-screen bg-ivory font-body dark:bg-night;
   }
   .btn-primary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-700 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal;
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal text-white font-semibold font-heading text-sm shadow-sm hover:bg-teal-700 hover:shadow-md hover:-translate-y-px active:translate-y-0 active:shadow-sm transition-all duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal disabled:hover:translate-y-0 disabled:hover:shadow-sm;
   }
   .btn-secondary {
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-ivory transition-colors duration-200 cursor-pointer dark:border-white/10 dark:bg-charcoal dark:text-white dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-charcoal;
@@ -39,7 +39,11 @@
     @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-body transition-colors duration-200 cursor-pointer hover:bg-ivory dark:text-gray-400 dark:hover:bg-white/5;
   }
   .nav-item-active {
-    @apply flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-teal-800 dark:text-teal-300 bg-teal/10 cursor-pointer;
+    @apply relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-teal-800 dark:text-teal-300 bg-teal/10 cursor-pointer;
+  }
+  .nav-item-active::before {
+    content: '';
+    @apply absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-full bg-teal;
   }
 
   /* Tabs (segmented control, e.g. New Scan's Single/HTML/Crawl switcher) */
@@ -93,6 +97,27 @@
   .error-text {
     @apply text-sm text-coral-700 dark:text-coral-300;
   }
+
+  /* Ambient brand glow — used behind the landing hero */
+  .hero-glow {
+    position: relative;
+    isolation: isolate;
+  }
+  .hero-glow::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 55% at 78% 22%, rgba(15, 118, 110, 0.10), transparent 70%),
+      radial-gradient(50% 50% at 12% 85%, rgba(15, 118, 110, 0.06), transparent 70%);
+  }
+  .dark .hero-glow::before {
+    background:
+      radial-gradient(60% 55% at 78% 22%, rgba(20, 184, 166, 0.14), transparent 70%),
+      radial-gradient(50% 50% at 12% 85%, rgba(20, 184, 166, 0.08), transparent 70%);
+  }
 }
 
 /* ─── Design tokens: light (default) and dark theme ─────── */
@@ -100,8 +125,8 @@
 :root,
 [data-theme="light"] {
   /* Core palette */
-  --bg-base:                #F8F6F1;
-  --bg-mid:                 #F8F6F1;
+  --bg-base:                #F4F6F9;
+  --bg-mid:                 #EDF1F6;
   --bg-card:                #FFFFFF;
 
   /* Brand */
@@ -125,13 +150,13 @@
   --critical-soft:          rgba(231, 111, 81, 0.12);
 
   /* Text */
-  --text-primary:           #1F2937;
-  --text-secondary:         #4B5563;
-  --text-muted:             #6B7280;
+  --text-primary:           #0F172A;
+  --text-secondary:         #475569;
+  --text-muted:             #64748B;
 
   /* Borders */
-  --border-subtle:          #E8E4DC;
-  --border-default:         #D4CFC6;
+  --border-subtle:          #E6EAF0;
+  --border-default:         #D3DAE3;
 
   /* Typography */
   --font-heading:           'Space Grotesk', sans-serif;
@@ -170,9 +195,9 @@
 
 [data-theme="dark"] {
   /* Core palette */
-  --bg-base:                #161616;
-  --bg-mid:                 #1F1F1F;
-  --bg-card:                #252525;
+  --bg-base:                #0D1117;
+  --bg-mid:                 #161B22;
+  --bg-card:                #1C222B;
 
   /* Accent — primary (teal, slightly brightened for dark) */
   --accent-primary:         #14B8A6;
@@ -427,7 +452,7 @@ html[data-reduced-motion="true"] *::after {
   background: #0F766E;
   border-radius: 50%;
   filter: blur(16px);
-  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.38);
+  box-shadow: -60px 0px 22px 6px rgba(15, 118, 110, 0.32);
   pointer-events: none;
   z-index: 0;
   transition: opacity 0.2s ease;
@@ -439,13 +464,13 @@ html[data-reduced-motion="true"] *::after {
 }
 
 .dark .glow-input-wrapper {
-  background: #1e2a2a;
+  background: #161B22;
   border-color: rgba(255, 255, 255, 0.14);
 }
 
 .dark .glow-input-wrapper::before {
   background: #14B8A6;
-  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.28);
+  box-shadow: -60px 0px 22px 6px rgba(20, 184, 166, 0.24);
 }
 
 .dark .glow-input-wrapper:focus-within {

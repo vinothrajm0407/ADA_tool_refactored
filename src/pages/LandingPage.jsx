@@ -238,7 +238,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
       <main id="main-content">
 
         {/* HERO */}
-        <section aria-label="Hero" className="min-h-[calc(100vh-4.5rem)] flex items-center bg-white dark:bg-night">
+        <section aria-label="Hero" className="hero-glow min-h-[calc(100vh-4.5rem)] flex items-center bg-white dark:bg-night">
           <div className="w-full max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center py-16">
             <div>
               <span className="bg-teal/10 text-teal text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 mb-6 tracking-wide">
