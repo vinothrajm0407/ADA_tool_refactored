@@ -100,8 +100,8 @@
 :root,
 [data-theme="light"] {
   /* Core palette */
-  --bg-base:                #F8F6F1;
-  --bg-mid:                 #F8F6F1;
+  --bg-base:                #F4F6F9;
+  --bg-mid:                 #EDF1F6;
   --bg-card:                #FFFFFF;
 
   /* Brand */
@@ -125,13 +125,13 @@
   --critical-soft:          rgba(231, 111, 81, 0.12);
 
   /* Text */
-  --text-primary:           #1F2937;
-  --text-secondary:         #4B5563;
-  --text-muted:             #6B7280;
+  --text-primary:           #0F172A;
+  --text-secondary:         #475569;
+  --text-muted:             #64748B;
 
   /* Borders */
-  --border-subtle:          #E8E4DC;
-  --border-default:         #D4CFC6;
+  --border-subtle:          #E6EAF0;
+  --border-default:         #D3DAE3;
 
   /* Typography */
   --font-heading:           'Space Grotesk', sans-serif;
@@ -170,9 +170,9 @@
 
 [data-theme="dark"] {
   /* Core palette */
-  --bg-base:                #161616;
-  --bg-mid:                 #1F1F1F;
-  --bg-card:                #252525;
+  --bg-base:                #0D1117;
+  --bg-mid:                 #161B22;
+  --bg-card:                #1C222B;
 
   /* Accent — primary (teal, slightly brightened for dark) */
   --accent-primary:         #14B8A6;
@@ -427,7 +427,7 @@ html[data-reduced-motion="true"] *::after {
   background: #0F766E;
   border-radius: 50%;
   filter: blur(16px);
-  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.38);
+  box-shadow: -60px 0px 22px 6px rgba(15, 118, 110, 0.32);
   pointer-events: none;
   z-index: 0;
   transition: opacity 0.2s ease;
@@ -439,13 +439,13 @@ html[data-reduced-motion="true"] *::after {
 }
 
 .dark .glow-input-wrapper {
-  background: #1e2a2a;
+  background: #161B22;
   border-color: rgba(255, 255, 255, 0.14);
 }
 
 .dark .glow-input-wrapper::before {
   background: #14B8A6;
-  box-shadow: -60px 0px 22px 6px rgba(231, 111, 81, 0.28);
+  box-shadow: -60px 0px 22px 6px rgba(20, 184, 166, 0.24);
 }
 
 .dark .glow-input-wrapper:focus-within {

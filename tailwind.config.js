@@ -8,9 +8,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        ivory:      '#F8F6F1',
-        ink:        '#1F2937',
-        body:       '#4B5563',
+        ivory:      '#F4F6F9',
+        ink:        '#0F172A',
+        body:       '#475569',
         teal: {
           DEFAULT:  '#0F766E',
           50:       '#f0fdfa',
@@ -32,8 +32,8 @@ export default {
         sage:       { DEFAULT: '#6BA368', 300: '#8FCB8A', 700: '#3F6B3D' },
         amber:      { DEFAULT: '#F59E0B', 300: '#F6C453', 700: '#92640A', 800: '#7A5407' },
         coral:      { DEFAULT: '#E76F51', 300: '#F0947C', 700: '#B23D22' },
-        night:      '#161616',
-        charcoal:   '#1F1F1F',
+        night:      '#0D1117',
+        charcoal:   '#161B22',
         'brand-blue': { DEFAULT: '#2563EB', 300: '#93C5FD', 700: '#1E40AF' },
       },
       fontFamily: {
@@ -41,8 +41,8 @@ export default {
         body:    ['"Inter"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },
       boxShadow: {
-        soft: '0 18px 60px rgba(31, 41, 55, 0.09)',
-        glow: '0 22px 80px rgba(15, 118, 110, 0.2)',
+        soft: '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06)',
+        glow: '0 12px 40px rgba(15, 118, 110, 0.22)',
       },
       borderRadius: {
         '2xl': '1rem',
