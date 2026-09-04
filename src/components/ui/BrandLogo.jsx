@@ -20,7 +20,7 @@ function ShieldMark({ size = 40 }) {
       {/* Shield body */}
       <path
         d="M20 2L37 9V28C37 36.5 20 44 20 44C20 44 3 36.5 3 28V9L20 2Z"
-        fill="#4F46E5"
+        fill="#0F766E"
       />
       {/* Head */}
       <circle cx="20" cy="13.5" r="3" fill="white" />

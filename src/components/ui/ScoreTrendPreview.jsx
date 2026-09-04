@@ -75,7 +75,7 @@ export default function ScoreTrendPreview() {
         <polyline
           points={POLY}
           fill="none"
-          stroke="#4F46E5"
+          stroke="#0F766E"
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -88,8 +88,8 @@ export default function ScoreTrendPreview() {
               cx={p.x.toFixed(1)}
               cy={p.y.toFixed(1)}
               r="3.5"
-              fill={i === PTS.length - 1 ? '#4F46E5' : 'white'}
-              stroke="#4F46E5"
+              fill={i === PTS.length - 1 ? '#0F766E' : 'white'}
+              stroke="#0F766E"
               strokeWidth="2"
             />
             <text
@@ -109,7 +109,7 @@ export default function ScoreTrendPreview() {
           x={(LAST.x - 14).toFixed(1)}
           y={(LAST.y - 20).toFixed(1)}
           width="28" height="14" rx="4"
-          fill="#4F46E5"
+          fill="#0F766E"
         />
         <text
           x={LAST.x.toFixed(1)}

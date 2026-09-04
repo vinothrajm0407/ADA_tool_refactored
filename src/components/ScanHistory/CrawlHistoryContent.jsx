@@ -112,7 +112,7 @@ function ScoreTimelineChart({ data, urlLabel }) {
             <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
             <Line
               type="monotone" dataKey="site_score" name="Site Score"
-              stroke="#4F46E5" strokeWidth={2} dot={{ r: 3, fill: '#4F46E5', strokeWidth: 0 }}
+              stroke="#0F766E" strokeWidth={2} dot={{ r: 3, fill: '#0F766E', strokeWidth: 0 }}
               activeDot={{ r: 5 }} connectNulls
             />
             <Line

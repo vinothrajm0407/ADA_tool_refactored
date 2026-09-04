@@ -1,7 +1,7 @@
 import React from "react";
 
 const getStrokeColor = (score) => {
-  if (score >= 80) return "#4F46E5";
+  if (score >= 80) return "#0F766E";
   if (score >= 60) return "#F59E0B";
   return "#E76F51";
 };

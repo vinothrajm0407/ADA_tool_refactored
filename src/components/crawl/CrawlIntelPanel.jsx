@@ -10,7 +10,7 @@ const SEVERITY_CONFIG = [
 ];
 
 const PRINCIPLE_COLORS = {
-  Perceivable:    '#4F46E5',
+  Perceivable:    '#0F766E',
   Operable:       '#6BA368',
   Understandable: '#F59E0B',
   Robust:         '#E76F51',
