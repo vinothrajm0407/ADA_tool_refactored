@@ -46,24 +46,24 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/20 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Drawer panel */}
       <div
-        className="relative h-full w-full max-w-md bg-white dark:bg-charcoal shadow-lg flex flex-col"
+        className="relative h-full w-full max-w-md bg-white flex flex-col"
         role="dialog"
         aria-modal="true"
         aria-label="Page Details"
       >
         {/* Header */}
-        <div className="p-5 border-b border-gray-100 dark:border-white/5 flex items-center justify-between shrink-0">
-          <h2 className="font-heading text-lg text-ink dark:text-ivory">Page Details</h2>
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between shrink-0">
+          <h2 className="font-heading text-lg text-ink">Page Details</h2>
           <button
             onClick={onClose}
-            className="btn-ghost p-1.5 rounded-xl text-body dark:text-ivory/60 hover:text-ink dark:hover:text-ivory transition-colors"
+            className="btn-ghost p-1.5 rounded-xl text-body hover:text-ink transition-colors"
             aria-label="Close drawer"
           >
             <X size={20} />
@@ -75,10 +75,10 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
 
           {/* URL */}
           <div>
-            <p className="text-xs font-body font-medium text-body dark:text-ivory/50 uppercase tracking-wide mb-1.5">
+            <p className="text-xs font-body font-medium text-body uppercase tracking-wide mb-1.5">
               URL
             </p>
-            <code className="block w-full bg-gray-50 dark:bg-night/60 text-ink dark:text-ivory text-sm font-mono px-3 py-2 rounded-2xl border border-gray-100 dark:border-white/5 break-all">
+            <code className="block w-full bg-gray-50 text-ink text-sm font-mono px-3 py-2 rounded-2xl border border-gray-100 break-all">
               {url}
             </code>
           </div>
@@ -88,55 +88,55 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
             <ScoreGauge score={score} size={80} />
             <div className="flex-1 min-w-0 space-y-1">
               <div>
-                <p className="text-xs font-body font-medium text-body dark:text-ivory/50 uppercase tracking-wide mb-0.5">
+                <p className="text-xs font-body font-medium text-body uppercase tracking-wide mb-0.5">
                   Accessibility Score
                 </p>
-                <p className="font-heading text-4xl text-ink dark:text-ivory leading-none">
+                <p className="font-heading text-4xl text-ink leading-none">
                   {score}
-                  <span className="text-base font-normal text-body dark:text-ivory/40 ml-1">/100</span>
+                  <span className="text-base font-normal text-body ml-1">/100</span>
                 </p>
               </div>
               {passRate != null && (
-                <p className="text-sm text-body dark:text-ivory/60">
-                  Pass rate: <span className="font-semibold text-ink dark:text-white">{passRate}%</span>
+                <p className="text-sm text-body">
+                  Pass rate: <span className="font-semibold text-ink">{passRate}%</span>
                 </p>
               )}
             </div>
           </div>
 
           {/* Violations count */}
-          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-gray-50 dark:bg-night/60 border border-gray-100 dark:border-white/5">
-            <span className="text-sm font-body font-medium text-body dark:text-ivory/60">
+          <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-gray-50 border border-gray-100">
+            <span className="text-sm font-body font-medium text-body">
               Violations Found
             </span>
-            <span className={`font-heading text-xl ${(violationCount ?? 0) > 0 ? 'text-coral-700 dark:text-coral-300' : 'text-sage-700 dark:text-sage-300'}`}>
+            <span className={`font-heading text-xl ${(violationCount ?? 0) > 0 ?'text-coral-700':'text-sage-700'}`}>
               {violationCount ?? 0}
             </span>
           </div>
 
           {/* Status */}
           <div className="flex items-center gap-3">
-            <span className="text-sm font-body font-medium text-body dark:text-ivory/60">Status</span>
+            <span className="text-sm font-body font-medium text-body">Status</span>
             <StatusBadge status={status} />
           </div>
 
           {/* Violation list */}
           {(violationCount ?? 0) > 0 && (
             <div>
-              <p className="text-xs font-body font-medium text-body dark:text-ivory/50 uppercase tracking-wide mb-2">
+              <p className="text-xs font-body font-medium text-body uppercase tracking-wide mb-2">
                 Violations
               </p>
 
               {violationsLoading && (
-                <div className="flex items-center gap-2 text-body dark:text-gray-400 text-sm py-4 justify-center">
+                <div className="flex items-center gap-2 text-body text-sm py-4 justify-center">
                   <Loader2 size={15} className="animate-spin text-teal" />
                   Loading violation details…
                 </div>
               )}
 
               {!violationsLoading && violations === null && (
-                <div className="flex items-center gap-2 text-body dark:text-gray-400 text-xs py-2">
-                  <AlertCircle size={14} className="text-amber-800 dark:text-amber-300 flex-shrink-0" />
+                <div className="flex items-center gap-2 text-body text-xs py-2">
+                  <AlertCircle size={14} className="text-amber-800 flex-shrink-0"/>
                   Violation detail unavailable — database not configured.
                 </div>
               )}
@@ -159,7 +159,7 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
               )}
 
               {!violationsLoading && violations !== null && !hasViolationDetail && violationCount > 0 && (
-                <p className="text-xs text-body dark:text-gray-400 py-2">
+                <p className="text-xs text-body py-2">
                   Violation data not yet available for this page.
                 </p>
               )}
@@ -167,18 +167,18 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
           )}
 
           {/* Recommended Next Step */}
-          <div className="rounded-2xl bg-teal/5 dark:bg-teal/10 border border-teal/20 p-4">
+          <div className="rounded-2xl bg-teal/5 border border-teal/20 p-4">
             <p className="text-xs font-body font-medium text-teal uppercase tracking-wide mb-1.5">
               Recommended Next Step
             </p>
-            <p className="text-sm font-body text-body dark:text-ivory/70 leading-relaxed">
+            <p className="text-sm font-body text-body leading-relaxed">
               {recommendedStep}
             </p>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-100 dark:border-white/5 shrink-0">
+        <div className="p-4 border-t border-gray-100 shrink-0">
           <button
             className="btn-primary w-full"
             onClick={onOpenFullReport}

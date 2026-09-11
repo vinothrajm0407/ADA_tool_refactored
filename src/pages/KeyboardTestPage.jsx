@@ -63,7 +63,7 @@ function ModuleCard({ id, label, subtitle, icon: Icon, active, activeColor, onCl
     ? activeColor === 'teal'
       ? 'border-teal bg-teal/5'
       : 'border-terracotta bg-terracotta/5'
-    : 'border-gray-200 dark:border-white/10 bg-transparent hover:border-gray-300 dark:hover:border-white/20';
+    :'border-gray-200 bg-transparent hover:border-gray-300';
 
   return (
     <button
@@ -78,18 +78,18 @@ function ModuleCard({ id, label, subtitle, icon: Icon, active, activeColor, onCl
               ? activeColor === 'teal'
                 ? 'text-teal'
                 : 'text-terracotta'
-              : 'text-body dark:text-gray-400'
+              :'text-body'
           }`}
         />
         <span
           className={`font-heading font-bold text-sm ${
-            active ? 'text-ink dark:text-white' : 'text-body dark:text-gray-300'
+            active ?'text-ink':'text-body'
           }`}
         >
           {label}
         </span>
       </div>
-      <p className="text-xs text-body dark:text-gray-400 mt-0.5">{subtitle}</p>
+      <p className="text-xs text-body mt-0.5">{subtitle}</p>
     </button>
   );
 }
@@ -104,12 +104,12 @@ function StatItem({ label, value, color }) {
       ? 'text-sage'
       : color === 'amber'
       ? 'text-amber'
-      : 'text-ink dark:text-white';
+      :'text-ink';
 
   return (
     <div className="text-center">
       <p className={`font-heading font-bold text-2xl ${colorClass}`}>{value}</p>
-      <p className="text-xs text-body dark:text-gray-400 mt-0.5">{label}</p>
+      <p className="text-xs text-body mt-0.5">{label}</p>
     </div>
   );
 }
@@ -130,17 +130,17 @@ function FocusStep({ index, element, status, isLast }) {
           {index + 1}
         </div>
         {!isLast && (
-          <div className="w-px flex-1 border-l-2 border-dashed border-gray-200 dark:border-white/10 mt-1" />
+          <div className="w-px flex-1 border-l-2 border-dashed border-gray-200 mt-1"/>
         )}
       </div>
 
       {/* Content */}
       <div className={`pb-4 flex-1 ${isLast ? '' : ''}`}>
-        <p className="text-sm font-medium text-ink dark:text-white leading-snug">
+        <p className="text-sm font-medium text-ink leading-snug">
           {element?.selector ?? element?.element ?? element?.tag ?? `Element ${index + 1}`}
         </p>
         {element?.description && (
-          <p className="text-xs text-body dark:text-gray-400 mt-0.5">
+          <p className="text-xs text-body mt-0.5">
             {element.description}
           </p>
         )}
@@ -180,7 +180,7 @@ function ContrastRow({ item }) {
   return (
     <div className="card p-4 flex flex-col gap-3">
       {/* Selector */}
-      <p className="text-xs font-mono text-body dark:text-gray-400 truncate" title={selector}>
+      <p className="text-xs font-mono text-body truncate"title={selector}>
         {selector}
       </p>
 
@@ -188,26 +188,26 @@ function ContrastRow({ item }) {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1.5">
           <span
-            className="w-5 h-5 rounded border border-black/10 dark:border-white/10 shrink-0"
+            className="w-5 h-5 rounded border border-black/10 shrink-0"
             style={{ backgroundColor: fg }}
             title={`Foreground: ${fg}`}
           />
-          <span className="text-xs text-body dark:text-gray-400">{fg}</span>
+          <span className="text-xs text-body">{fg}</span>
         </div>
-        <ArrowRight className="w-3 h-3 text-body dark:text-gray-500 shrink-0" />
+        <ArrowRight className="w-3 h-3 text-body shrink-0"/>
         <div className="flex items-center gap-1.5">
           <span
-            className="w-5 h-5 rounded border border-black/10 dark:border-white/10 shrink-0"
+            className="w-5 h-5 rounded border border-black/10 shrink-0"
             style={{ backgroundColor: bg }}
             title={`Background: ${bg}`}
           />
-          <span className="text-xs text-body dark:text-gray-400">{bg}</span>
+          <span className="text-xs text-body">{bg}</span>
         </div>
       </div>
 
       {/* Ratio + badge */}
       <div className="flex items-center justify-between">
-        <span className="font-heading font-bold text-lg text-ink dark:text-white">
+        <span className="font-heading font-bold text-lg text-ink">
           {ratio}:1
         </span>
         <StatusBadge status={passes ? 'Passed' : 'Failed'} />
@@ -226,12 +226,12 @@ function ContrastRow({ item }) {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-20 gap-4 text-body dark:text-gray-400">
+    <div className="flex flex-col items-center justify-center py-20 gap-4 text-body">
       <div className="w-16 h-16 rounded-full bg-teal/10 flex items-center justify-center">
         <Keyboard className="w-8 h-8 text-teal opacity-60" />
       </div>
       <div className="text-center">
-        <p className="font-heading font-semibold text-ink dark:text-white text-base">
+        <p className="font-heading font-semibold text-ink text-base">
           No test results yet
         </p>
         <p className="text-sm mt-1">
@@ -311,14 +311,14 @@ export default function KeyboardTestPage() {
   const contrastItems = result?.elements ?? result?.results ?? result?.items ?? [];
 
   return (
-    <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 space-y-6">
+    <div className="flex-1 overflow-auto bg-ivory p-6 space-y-6">
 
       {/* 1. HEADER */}
       <div>
-        <h2 className="font-heading font-bold text-2xl text-ink dark:text-white">
+        <h2 className="font-heading font-bold text-2xl text-ink">
           Keyboard &amp; Accessibility Testing
         </h2>
-        <p className="text-sm text-body dark:text-gray-400 mt-1">
+        <p className="text-sm text-body mt-1">
           Validate keyboard navigation, focus management, and color contrast compliance
           against WCAG standards.
         </p>
@@ -326,7 +326,7 @@ export default function KeyboardTestPage() {
 
       {/* 2. MODULE SELECTOR */}
       <div className="card p-4">
-        <p className="text-xs font-medium text-body dark:text-gray-400 mb-3 uppercase tracking-wide">
+        <p className="text-xs font-medium text-body mb-3 uppercase tracking-wide">
           Select test module
         </p>
         <div className="grid grid-cols-2 gap-3">
@@ -403,7 +403,7 @@ export default function KeyboardTestPage() {
 
       {/* 4. LOADING STATE */}
       {loading && (
-        <div className="card p-10 flex flex-col items-center justify-center gap-4 text-body dark:text-gray-400">
+        <div className="card p-10 flex flex-col items-center justify-center gap-4 text-body">
           <span className="w-10 h-10 border-4 border-teal/20 border-t-teal rounded-full animate-spin" />
           <p className="text-sm font-medium">Running test…</p>
           <p className="text-xs opacity-60">
@@ -417,7 +417,7 @@ export default function KeyboardTestPage() {
         <>
           {/* A. Keyboard Health Score */}
           <div className="card p-6">
-            <h3 className="font-heading font-bold text-base text-ink dark:text-white mb-4">
+            <h3 className="font-heading font-bold text-base text-ink mb-4">
               Keyboard Health Score
             </h3>
             <div className="flex items-center gap-8 flex-wrap">
@@ -458,7 +458,7 @@ export default function KeyboardTestPage() {
           {/* B. Focus Order Visualization */}
           {focusSteps.length > 0 && (
             <div className="card p-6">
-              <h3 className="font-heading font-bold text-base text-ink dark:text-white mb-4">
+              <h3 className="font-heading font-bold text-base text-ink mb-4">
                 Focus Order
               </h3>
               <div className="max-h-96 overflow-y-auto pr-1 space-y-0">
@@ -479,7 +479,7 @@ export default function KeyboardTestPage() {
           {kbIssues.length > 0 && (
             <div className="card p-5">
               <div className="flex items-center gap-2 mb-4">
-                <h3 className="font-heading font-bold text-base text-ink dark:text-white">
+                <h3 className="font-heading font-bold text-base text-ink">
                   Detected Issues
                 </h3>
                 <span className="bg-coral/15 text-coral text-xs font-semibold px-2.5 py-0.5 rounded-full">
@@ -504,10 +504,10 @@ export default function KeyboardTestPage() {
           {kbIssues.length === 0 && focusSteps.length === 0 && (
             <div className="card p-8 flex flex-col items-center justify-center gap-3 text-sage">
               <CheckCircle className="w-10 h-10" />
-              <p className="font-heading font-bold text-base text-ink dark:text-white">
+              <p className="font-heading font-bold text-base text-ink">
                 No keyboard issues detected
               </p>
-              <p className="text-sm text-body dark:text-gray-400">
+              <p className="text-sm text-body">
                 This page appears to have good keyboard accessibility.
               </p>
             </div>
@@ -519,7 +519,7 @@ export default function KeyboardTestPage() {
       {!loading && result && activeModule === 'color-contrast' && (
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-4">
-            <h3 className="font-heading font-bold text-base text-ink dark:text-white">
+            <h3 className="font-heading font-bold text-base text-ink">
               Contrast Results
             </h3>
             {contrastItems.length > 0 && (
@@ -537,7 +537,7 @@ export default function KeyboardTestPage() {
             </div>
           ) : (
             /* Fallback: show raw result summary if items array is empty */
-            <div className="flex flex-col items-center gap-3 py-8 text-body dark:text-gray-400">
+            <div className="flex flex-col items-center gap-3 py-8 text-body">
               <CheckCircle className="w-8 h-8 text-sage" />
               <p className="text-sm">
                 {result.message ?? 'Color contrast check complete. No elements returned.'}

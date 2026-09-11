@@ -1,3 +1,4 @@
+import { Shield } from 'lucide-react';
 import { BRAND } from '../../config/appConfig';
 
 /**
@@ -20,7 +21,7 @@ function ShieldMark({ size = 40 }) {
       {/* Shield body */}
       <path
         d="M20 2L37 9V28C37 36.5 20 44 20 44C20 44 3 36.5 3 28V9L20 2Z"
-        fill="#0F766E"
+        fill="#1a7a6a"
       />
       {/* Head */}
       <circle cx="20" cy="13.5" r="3" fill="white" />
@@ -55,7 +56,7 @@ function ShieldMark({ size = 40 }) {
 
 /**
  * BrandLogo — three variants:
- *   "sidebar"  — icon + product name + tagline + "Powered by United Techno"
+ *   "sidebar"  — teal icon tile + "ADA Tool" wordmark (matches the Figma redesign)
  *   "compact"  — icon only (mobile header)
  *   "landing"  — icon + product name (landing page header)
  */
@@ -64,32 +65,27 @@ export default function BrandLogo({ variant = 'sidebar' }) {
     return <ShieldMark size={30} />;
   }
 
-  const iconSize = variant === 'landing' ? 34 : 40;
+  if (variant === 'sidebar') {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="w-8 h-8 bg-teal rounded-md flex items-center justify-center shrink-0">
+          <Shield size={16} className="text-white" strokeWidth={2} />
+        </div>
+        <span className="font-heading font-bold text-ink text-[15px]">{BRAND.productName} Tool</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-3">
-      <ShieldMark size={iconSize} />
-      <div className="text-left leading-tight">
-        <span
-          className={[
-            'block font-heading font-bold text-ink dark:text-white',
-            variant === 'landing' ? 'text-xl tracking-tight' : 'text-[17px]',
-          ].join(' ')}
-        >
+      <ShieldMark size={34} />
+      <div>
+        <span className="block font-heading font-bold text-ink text-xl tracking-tight leading-none">
           {BRAND.productName}
         </span>
-
-        {variant === 'sidebar' && (
-          <>
-            <span className="block text-[11px] text-body dark:text-gray-400">
-              {BRAND.productTagline}
-            </span>
-            <span className="block text-[10px] text-body dark:text-gray-500 mt-0.5">
-              Powered by{' '}
-              <span className="font-semibold text-brand-blue-700 dark:text-brand-blue-300">{BRAND.companyName}</span>
-            </span>
-          </>
-        )}
+        <span className="block text-[11px] font-medium text-body tracking-wide mt-0.5">
+          {BRAND.companyName}
+        </span>
       </div>
     </div>
   );

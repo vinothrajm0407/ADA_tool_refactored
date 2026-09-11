@@ -8,30 +8,30 @@ export default {
   theme: {
     extend: {
       colors: {
-        ivory:      '#F4F6F9',
-        ink:        '#0F172A',
-        body:       '#475569',
+        // Exact palette from the Figma Make redesign — light-only, no dark variant.
+        ivory:      '#F9FAFB',
+        ink:        '#111827',
+        body:       '#6B7280',
         teal: {
-          DEFAULT:  '#0F766E',
-          50:       '#f0fdfa',
-          100:      '#ccfbf1',
-          200:      '#99f6e4',
-          300:      '#5eead4',
-          400:      '#2dd4bf',
-          500:      '#14b8a6',
-          600:      '#0d9488',
-          700:      '#0f766e',
-          800:      '#115e59',
-          900:      '#134e4a',
+          DEFAULT:  '#1a7a6a',
+          50:       '#f0faf8',
+          100:      '#e8f5f2',
+          200:      '#b2d8d0',
+          300:      '#8fcbc0',
+          400:      '#4fa696',
+          500:      '#2a9483',
+          600:      '#1f8874',
+          700:      '#1a7a6a',
+          800:      '#155f53',
+          900:      '#0f4a41',
         },
-        // 300/700 shades are WCAG-AA text-contrast pairs (verified >=4.5:1) for
-        // using these colors as TEXT on a light tint of themselves (badges,
-        // pills, alerts) — 700 for light mode, 300 for dark mode. DEFAULT is
-        // unchanged so every existing bg-x/text-x/border-x usage is untouched.
+        // Mapped to Tailwind's own red/emerald/orange scales so every existing
+        // bg-x/10 + text-x-700 badge/pill usage renders as the mockup's flat
+        // bg-red-100/text-red-700 etc. look without touching each call site.
         terracotta: { DEFAULT: '#D97757', 300: '#F0A583', 700: '#A3502F' },
-        sage:       { DEFAULT: '#6BA368', 300: '#8FCB8A', 700: '#3F6B3D' },
-        amber:      { DEFAULT: '#F59E0B', 300: '#F6C453', 700: '#92640A', 800: '#7A5407' },
-        coral:      { DEFAULT: '#E76F51', 300: '#F0947C', 700: '#B23D22' },
+        sage:       { DEFAULT: '#059669', 300: '#6ee7b7', 700: '#047857' },
+        amber:      { DEFAULT: '#ea580c', 300: '#fdba74', 700: '#c2410c', 800: '#9a3412' },
+        coral:      { DEFAULT: '#dc2626', 300: '#fca5a5', 700: '#b91c1c' },
         night:      '#0D1117',
         charcoal:   '#161B22',
         'brand-blue': { DEFAULT: '#2563EB', 300: '#93C5FD', 700: '#1E40AF' },
@@ -42,7 +42,7 @@ export default {
       },
       boxShadow: {
         soft: '0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.06)',
-        glow: '0 12px 40px rgba(15, 118, 110, 0.22)',
+        glow: '0 12px 40px rgba(26, 122, 106, 0.22)',
       },
       borderRadius: {
         '2xl': '1rem',

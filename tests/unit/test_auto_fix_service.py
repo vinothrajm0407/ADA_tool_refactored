@@ -27,6 +27,16 @@ class TestLocateSource:
         assert file_path == "Header.jsx"
         assert line_no == 2
 
+    def test_finds_plain_html_class_attribute(self, tmp_path):
+        # A static site writes class="..." in its source too, not just the
+        # JSX className="..." the violation's rendered outerHTML always uses.
+        (tmp_path / "index.html").write_text(
+            '<body>\n  <button class="menu-btn"><svg></svg></button>\n</body>\n',
+            encoding="utf-8",
+        )
+        result = locate_source(tmp_path, '<button class="menu-btn"><svg></svg></button>')
+        assert result == ("index.html", 2)
+
     def test_no_class_attribute_falls_back_to_tag_name(self, tmp_path):
         (tmp_path / "ProductCard.jsx").write_text(
             'export default function ProductCard() {\n'
@@ -153,6 +163,13 @@ class TestFallbackPatch:
         patch = _fallback_patch(self.RULE, self.NODE, file_content)
         assert patch["after"] == '<button className="menu-btn" aria-label="Menu" />'
 
+    def test_plain_html_class_attribute(self):
+        file_content = '<body>\n  <button class="menu-btn"><svg></svg></button>\n</body>\n'
+        patch = _fallback_patch(self.RULE, self.NODE, file_content)
+        assert patch is not None
+        assert patch["after"] == '<button class="menu-btn" aria-label="Menu">'
+        assert validate_patch(file_content, patch["before"], patch["after"]) is True
+
 
 class TestFallbackPatchImageAlt:
     RULE = {"id": "image-alt"}
@@ -256,6 +273,15 @@ class TestLocateSourceHtmlHasLang:
     def test_no_html_file_returns_none(self, tmp_path):
         (tmp_path / "Header.jsx").write_text("<button>x</button>", encoding="utf-8")
         assert locate_source(tmp_path, "<html>", rule_id="html-has-lang") is None
+
+    def test_picks_the_one_page_missing_lang_in_a_multi_page_site(self, tmp_path):
+        # A bare <html> tag-name needle would match every page and bail as
+        # ambiguous, even though only one of them actually lacks lang=.
+        (tmp_path / "index.html").write_text('<html lang="en">\n<body></body>\n</html>', encoding="utf-8")
+        (tmp_path / "contact.html").write_text('<html lang="en">\n<body></body>\n</html>', encoding="utf-8")
+        (tmp_path / "media.html").write_text("<html>\n<body></body>\n</html>", encoding="utf-8")
+        result = locate_source(tmp_path, "<html>", rule_id="html-has-lang")
+        assert result == ("media.html", 1)
 
 
 class TestFallbackPatchHtmlHasLang:
@@ -391,6 +417,16 @@ class TestLocateSourceColorContrast:
     def test_ignores_jsx_files(self, tmp_path):
         (tmp_path / "Widget.jsx").write_text('<p className="fine-print">x</p>', encoding="utf-8")
         assert locate_source(tmp_path, '<p class="fine-print">x</p>', rule_id="color-contrast") is None
+
+    def test_finds_rule_in_inline_style_block_of_html_file(self, tmp_path):
+        # Static sites often keep CSS in a <style> tag on the page itself
+        # rather than a separate stylesheet.
+        (tmp_path / "index.html").write_text(
+            "<html>\n<head>\n<style>\n.fine-print {\n  color: #cfcfcf;\n}\n</style>\n</head>\n</html>\n",
+            encoding="utf-8",
+        )
+        result = locate_source(tmp_path, '<p class="fine-print">x</p>', rule_id="color-contrast")
+        assert result == ("index.html", 4)
 
 
 class TestFallbackPatchColorContrast:

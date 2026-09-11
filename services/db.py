@@ -9,9 +9,10 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse as _urlparse
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,31 @@ _CONNECTION_STRING = (os.getenv("MSSQL_CONN_STR") or "").strip()
 _DATABASE = os.getenv("MSSQL_DATABASE", "ADA_DB")
 _INIT_DONE = False
 _INIT_ERROR = ""
+
+_TOKEN_KEY = (os.getenv("REPO_TOKEN_ENCRYPTION_KEY") or "").strip()
+_fernet = Fernet(_TOKEN_KEY.encode()) if _TOKEN_KEY else None
+
+
+def _encrypt_token(token: str | None) -> str | None:
+    """Encrypt a repo access token for storage. No-op (plaintext) if
+    REPO_TOKEN_ENCRYPTION_KEY isn't set — same optional-feature pattern as
+    GEMINI_API_KEY, so dev environments without a key still work."""
+    if not token or not _fernet:
+        return token
+    return _fernet.encrypt(token.encode()).decode()
+
+
+def _decrypt_token(value: str | None) -> str | None:
+    """Decrypt a stored token. Falls back to the raw value on InvalidToken —
+    this is the whole migration story for rows written before a key was
+    configured: they keep working on read, and get encrypted the next time
+    save_repo_link writes that row."""
+    if not value or not _fernet:
+        return value
+    try:
+        return _fernet.decrypt(value.encode()).decode()
+    except InvalidToken:
+        return value
 
 
 def _validate_database_name(name: str) -> None:
@@ -266,8 +292,11 @@ def _ensure_table() -> None:
         conn.commit()
         # ── CrawlSchedule schema evolution ─────────────────────────────────────
         _crawl_schedule_columns = [
-            ("Name",       "NVARCHAR(120) NULL"),
-            ("TimeOfDay",  "TIME NULL"),
+            ("Name",            "NVARCHAR(120) NULL"),
+            ("TimeOfDay",       "TIME NULL"),
+            ("UserId",          "INT NULL"),
+            ("ScheduleType",    "NVARCHAR(10) NOT NULL DEFAULT 'simple'"),
+            ("CronExpression",  "NVARCHAR(100) NULL"),
         ]
         for col, defn in _crawl_schedule_columns:
             cur.execute(f"""
@@ -463,6 +492,7 @@ def _ensure_table() -> None:
                 RepoUrl       NVARCHAR(500)  NOT NULL,
                 DefaultBranch NVARCHAR(100)  NOT NULL DEFAULT 'main',
                 Framework     NVARCHAR(30)   NOT NULL DEFAULT 'react',
+                Provider      NVARCHAR(20)   NOT NULL DEFAULT 'github',
                 AccessToken   NVARCHAR(2000) NULL,
                 ConnectedAt   DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
                 Status        NVARCHAR(20)   NOT NULL DEFAULT 'active'
@@ -475,6 +505,14 @@ def _ensure_table() -> None:
                 WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'PathPrefix'
             )
             ALTER TABLE dbo.RepoLink ADD PathPrefix NVARCHAR(200) NOT NULL DEFAULT ''
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'Provider'
+            )
+            ALTER TABLE dbo.RepoLink ADD Provider NVARCHAR(20) NOT NULL DEFAULT 'github'
         """)
         conn.commit()
         cur.execute("""
@@ -591,7 +629,7 @@ def create_user(first_name: str, last_name: str, email: str, password_hash: str)
             "firstName": row[1],
             "lastName": row[2],
             "email": row[3],
-            "createdAtUtc": row[4].isoformat() if row[4] else None,
+            "createdAtUtc": _ts(row[4]),
         }
     except Exception as e:
         if "UX_Users_Email" in str(e) or "unique" in str(e).lower() or "duplicate" in str(e).lower():
@@ -622,7 +660,7 @@ def get_user_by_email(email: str) -> dict | None:
             "email": row[3],
             "passwordHash": row[4],
             "isActive": bool(row[5]),
-            "createdAtUtc": row[6].isoformat() if row[6] else None,
+            "createdAtUtc": _ts(row[6]),
             "emailVerified": bool(row[7]),
         }
     finally:
@@ -647,7 +685,7 @@ def get_user_by_id(user_id: int) -> dict | None:
             "lastName": row[2],
             "email": row[3],
             "isActive": bool(row[4]),
-            "createdAtUtc": row[5].isoformat() if row[5] else None,
+            "createdAtUtc": _ts(row[5]),
         }
     finally:
         conn.close()
@@ -688,7 +726,7 @@ def get_user_by_verify_token(token: str) -> dict | None:
             "lastName": row[2],
             "email": row[3],
             "emailVerified": bool(row[4]),
-            "verifyTokenExpiry": row[5].isoformat() if row[5] else None,
+            "verifyTokenExpiry": _ts(row[5]),
         }
     finally:
         conn.close()
@@ -761,7 +799,7 @@ def get_user_by_reset_token(token: str) -> dict | None:
             "firstName": row[1],
             "lastName": row[2],
             "email": row[3],
-            "resetTokenExpiry": row[4].isoformat() if row[4] else None,
+            "resetTokenExpiry": _ts(row[4]),
         }
     finally:
         conn.close()
@@ -845,9 +883,9 @@ def _row_to_dict(row):
         "status": row.Status,
         "worker_name": row.WorkerName,
         "attempt": row.Attempt,
-        "created_at": row.CreatedAt.isoformat() if row.CreatedAt else None,
-        "started_at": row.StartedAt.isoformat() if row.StartedAt else None,
-        "ended_at": row.EndedAt.isoformat() if row.EndedAt else None,
+        "created_at": _ts(row.CreatedAt),
+        "started_at": _ts(row.StartedAt),
+        "ended_at": _ts(row.EndedAt),
         "duration_seconds": row.DurationSeconds,
         "failure_reason": row.FailureReason,
         "result_payload": json.loads(row.ResultPayload) if row.ResultPayload else None,
@@ -1032,9 +1070,7 @@ def get_scan_history(limit: int = 500):
             rows = cur.fetchall()
         out = []
         for r in rows:
-            ts = r.TimestampUtc
-            if hasattr(ts, "isoformat"):
-                ts = ts.isoformat()
+            ts = _ts(r.TimestampUtc)
             out.append({
                 "id": f"SCAN-{r.Id}",
                 "url": r.Url or "",
@@ -1101,9 +1137,7 @@ def get_prev_scan_summary_for_url(url: str) -> dict | None:
             return None
 
         prev = rows[1]
-        ts = prev.TimestampUtc
-        if hasattr(ts, 'isoformat'):
-            ts = ts.isoformat()
+        ts = _ts(prev.TimestampUtc)
 
         score = 0
         try:
@@ -1218,7 +1252,7 @@ def get_scan_trends(
             for r in cur.fetchall():
                 bucket = r[0]
                 data.append({
-                    "date": bucket.isoformat() if hasattr(bucket, "isoformat") else str(bucket),
+                    "date": _ts(bucket),
                     "scan_count": int(r[1] or 0),
                     "avg_pass_rate": round(float(r[2] or 0), 1),
                     "total_violations": int(r[3] or 0),
@@ -1237,6 +1271,48 @@ def get_scan_trends(
                 "total_passes": int(row[3] or 0),
             }
 
+        # Per-day severity breakdown (critical/serious/moderate/minor), parsed from
+        # each scan's stored axe payload the same way get_violation_intel does.
+        # Only meaningful at daily granularity — matching SQL Server's own
+        # week/month bucketing exactly in Python isn't worth the risk for a path
+        # the trends dashboard doesn't currently request.
+        if granularity == "daily" and data:
+            severity_by_date: dict[str, dict[str, int]] = {}
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT CAST(TimestampUtc AS DATE), ResultPayload
+                    FROM dbo.ScanHistory
+                    WHERE TimestampUtc >= ? AND TimestampUtc < ? AND ResultPayload IS NOT NULL
+                    """,
+                    (start_str, end_str),
+                )
+                for bucket_date, payload_raw in cur.fetchall():
+                    try:
+                        payload = json.loads(payload_raw) if payload_raw else None
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    axe = payload.get("axeResult") or {}
+                    if not isinstance(axe, dict):
+                        continue
+                    bucket = severity_by_date.setdefault(
+                        bucket_date.isoformat(), {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
+                    )
+                    for v in (axe.get("violations") or []):
+                        if not isinstance(v, dict):
+                            continue
+                        impact = (v.get("impact") or "minor").lower()
+                        if impact not in bucket:
+                            impact = "minor"
+                        bucket[impact] += max(len(v.get("nodes") or []), 1)
+            for item in data:
+                sev = severity_by_date.get(
+                    (item["date"] or "")[:10], {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
+                )
+                item.update(sev)
+
         return {"data": data, "summary": summary}
     finally:
         conn.close()
@@ -1245,10 +1321,23 @@ def get_scan_trends(
 # ── Crawler persistence ────────────────────────────────────────────────────────
 
 def _ts(value) -> str | None:
-    """Convert a datetime to ISO string or return None."""
+    """Convert a datetime to an ISO string (UTC) or return None.
+
+    Every datetime stored by this module is UTC (GETUTCDATE() / datetime.now
+    (timezone.utc)), but pyodbc returns DATETIME2 columns as timezone-naive —
+    so without this, the ISO string carries no timezone marker and a browser's
+    `new Date(...)` silently reinterprets it as *local* time instead of UTC,
+    shifting every displayed date/time by the viewer's UTC offset (e.g. a
+    schedule computed to fire in 1 hour could render as already overdue)."""
     if value is None:
         return None
-    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+    if not hasattr(value, "isoformat"):
+        return str(value)
+    # Plain date objects (as opposed to datetime) have no tzinfo/timezone
+    # concept at all — only attach the UTC marker to actual datetimes.
+    if isinstance(value, datetime) and value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
 
 
 def save_crawl_job(
@@ -2142,6 +2231,17 @@ def get_crawl_score_timeline(root_url: str, limit: int = 20) -> list[dict]:
 def _compute_next_run(frequency: str, from_dt=None, time_of_day=None):
     from datetime import timezone, timedelta
     now = from_dt or datetime.now(timezone.utc)
+    if frequency == "hourly":
+        if time_of_day is not None:
+            # Only the minute component means anything for an hourly cadence
+            # ("always run at :15 past the hour") — the hour part of
+            # time_of_day is ignored. If that minute already passed within
+            # the current hour, roll forward to the next hour's occurrence.
+            candidate = now.replace(minute=time_of_day.minute, second=0, microsecond=0)
+            if candidate <= now:
+                candidate += timedelta(hours=1)
+            return candidate
+        return now + timedelta(hours=1)
     if frequency == "daily":
         next_run = now + timedelta(days=1)
     elif frequency == "monthly":
@@ -2153,6 +2253,16 @@ def _compute_next_run(frequency: str, from_dt=None, time_of_day=None):
             hour=time_of_day.hour, minute=time_of_day.minute, second=0, microsecond=0
         )
     return next_run
+
+
+def _compute_next_run_cron(cron_expression: str, from_dt=None):
+    """Next fire time for a 5-field cron expression, always in UTC — cron mode
+    is explicitly UTC (no local-time conversion), unlike the Simple Time path
+    above, to keep the math unambiguous for wraparound-heavy patterns."""
+    from datetime import timezone
+    from croniter import croniter
+    now = from_dt or datetime.now(timezone.utc)
+    return croniter(cron_expression, now).get_next(datetime)
 
 
 def _time_str(value) -> str | None:
@@ -2177,21 +2287,28 @@ def parse_time_of_day(value: str):
 
 
 def create_crawl_schedule(root_url: str, frequency: str = "weekly", name: str | None = None,
-                           time_of_day=None) -> dict | None:
+                           time_of_day=None, user_id: int | None = None,
+                           schedule_type: str = "simple", cron_expression: str | None = None) -> dict | None:
     if not is_enabled() or _INIT_ERROR:
         return None
-    frequency = frequency if frequency in ("daily", "weekly", "monthly") else "weekly"
-    next_run = _compute_next_run(frequency, time_of_day=time_of_day)
+    schedule_type = schedule_type if schedule_type in ("simple", "cron") else "simple"
+    if schedule_type == "cron":
+        next_run = _compute_next_run_cron(cron_expression)
+        frequency = "cron"
+    else:
+        frequency = frequency if frequency in ("hourly", "daily", "weekly", "monthly") else "weekly"
+        next_run = _compute_next_run(frequency, time_of_day=time_of_day)
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO dbo.CrawlSchedule (RootUrl, Frequency, Enabled, NextRunAt, Name, TimeOfDay)
+                INSERT INTO dbo.CrawlSchedule
+                    (RootUrl, Frequency, Enabled, NextRunAt, Name, TimeOfDay, UserId, ScheduleType, CronExpression)
                 OUTPUT INSERTED.Id, INSERTED.CreatedAt
-                VALUES (?, ?, 1, ?, ?, ?)
+                VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
                 """,
-                (root_url, frequency, next_run, name, time_of_day),
+                (root_url, frequency, next_run, name, time_of_day, user_id, schedule_type, cron_expression),
             )
             row = cur.fetchone()
             conn.commit()
@@ -2202,6 +2319,8 @@ def create_crawl_schedule(root_url: str, frequency: str = "weekly", name: str | 
             "enabled": True,
             "name": name,
             "time_of_day": _time_str(time_of_day),
+            "schedule_type": schedule_type,
+            "cron_expression": cron_expression,
             "last_run_at": None,
             "next_run_at": _ts(next_run),
             "created_at": _ts(row[1]),
@@ -2210,7 +2329,7 @@ def create_crawl_schedule(root_url: str, frequency: str = "weekly", name: str | 
         conn.close()
 
 
-def get_crawl_schedules() -> list[dict]:
+def get_crawl_schedules(user_id: int) -> list[dict]:
     if not is_enabled() or _INIT_ERROR:
         return []
     conn = _conn()
@@ -2225,10 +2344,13 @@ def get_crawl_schedules() -> list[dict]:
                        (SELECT TOP 1 cj2.Status FROM dbo.CrawlJob cj2
                         WHERE cj2.RootUrl = s.RootUrl ORDER BY cj2.CreatedAt DESC) AS LastRunStatus,
                        (SELECT TOP 1 cj3.CrawlId FROM dbo.CrawlJob cj3
-                        WHERE cj3.RootUrl = s.RootUrl ORDER BY cj3.CreatedAt DESC) AS LastRunCrawlId
+                        WHERE cj3.RootUrl = s.RootUrl ORDER BY cj3.CreatedAt DESC) AS LastRunCrawlId,
+                       s.ScheduleType, s.CronExpression
                 FROM dbo.CrawlSchedule s
+                WHERE s.UserId = ?
                 ORDER BY s.CreatedAt DESC
-                """
+                """,
+                (user_id,),
             )
             rows = cur.fetchall()
         result = []
@@ -2247,21 +2369,24 @@ def get_crawl_schedules() -> list[dict]:
                 "status": "running" if is_running else ("active" if bool(r[3]) else "paused"),
                 "last_run_status": r[10],
                 "last_run_crawl_id": r[11],
+                "schedule_type": r[12],
+                "cron_expression": r[13],
             })
         return result
     finally:
         conn.close()
 
 
-def get_crawl_schedule(schedule_id: int) -> dict | None:
+def get_crawl_schedule(schedule_id: int, user_id: int) -> dict | None:
     if not is_enabled() or _INIT_ERROR:
         return None
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT Id, RootUrl, Frequency, Enabled, Name, TimeOfDay FROM dbo.CrawlSchedule WHERE Id = ?",
-                (schedule_id,),
+                "SELECT Id, RootUrl, Frequency, Enabled, Name, TimeOfDay, ScheduleType, CronExpression "
+                "FROM dbo.CrawlSchedule WHERE Id = ? AND UserId = ?",
+                (schedule_id, user_id),
             )
             row = cur.fetchone()
         if not row:
@@ -2273,6 +2398,8 @@ def get_crawl_schedule(schedule_id: int) -> dict | None:
             "enabled": bool(row[3]),
             "name": row[4],
             "time_of_day": _time_str(row[5]),
+            "schedule_type": row[6],
+            "cron_expression": row[7],
         }
     finally:
         conn.close()
@@ -2341,21 +2468,31 @@ def get_due_schedules() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT Id, RootUrl, Frequency, TimeOfDay
+                SELECT Id, RootUrl, Frequency, TimeOfDay, UserId, ScheduleType, CronExpression
                 FROM dbo.CrawlSchedule
                 WHERE Enabled = 1 AND NextRunAt <= GETUTCDATE()
                 """
             )
             rows = cur.fetchall()
-        return [{"id": r[0], "root_url": r[1], "frequency": r[2], "time_of_day": r[3]} for r in rows]
+        return [
+            {
+                "id": r[0], "root_url": r[1], "frequency": r[2], "time_of_day": r[3], "user_id": r[4],
+                "schedule_type": r[5], "cron_expression": r[6],
+            }
+            for r in rows
+        ]
     finally:
         conn.close()
 
 
-def mark_schedule_ran(schedule_id: int, frequency: str, time_of_day=None) -> bool:
+def mark_schedule_ran(schedule_id: int, frequency: str, time_of_day=None,
+                       schedule_type: str = "simple", cron_expression: str | None = None) -> bool:
     if not is_enabled() or _INIT_ERROR:
         return False
-    next_run = _compute_next_run(frequency, time_of_day=time_of_day)
+    if schedule_type == "cron":
+        next_run = _compute_next_run_cron(cron_expression)
+    else:
+        next_run = _compute_next_run(frequency, time_of_day=time_of_day)
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -2376,8 +2513,8 @@ def mark_schedule_ran(schedule_id: int, frequency: str, time_of_day=None) -> boo
         conn.close()
 
 
-def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
-    """Update Name, Enabled, Frequency, and/or TimeOfDay for a schedule."""
+def update_crawl_schedule(schedule_id: int, user_id: int, **kwargs) -> bool:
+    """Update Name, Enabled, Frequency, and/or TimeOfDay for a schedule owned by user_id."""
     if not is_enabled() or _INIT_ERROR:
         return False
     allowed = {}
@@ -2386,15 +2523,23 @@ def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
     if "name" in kwargs:
         allowed["Name"] = kwargs["name"]
 
-    freq_changed = "frequency" in kwargs and kwargs["frequency"] in ("daily", "weekly", "monthly")
+    freq_changed = "frequency" in kwargs and kwargs["frequency"] in ("hourly", "daily", "weekly", "monthly")
     tod_changed = "time_of_day" in kwargs
-    if freq_changed or tod_changed:
+    type_changed = "schedule_type" in kwargs and kwargs["schedule_type"] in ("simple", "cron")
+    cron_changed = "cron_expression" in kwargs
+    if type_changed:
+        allowed["ScheduleType"] = kwargs["schedule_type"]
+    if cron_changed:
+        allowed["CronExpression"] = kwargs["cron_expression"]
+
+    if freq_changed or tod_changed or type_changed or cron_changed:
         conn = _conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT Frequency, TimeOfDay FROM dbo.CrawlSchedule WHERE Id = ?",
-                    (schedule_id,),
+                    "SELECT Frequency, TimeOfDay, ScheduleType, CronExpression FROM dbo.CrawlSchedule "
+                    "WHERE Id = ? AND UserId = ?",
+                    (schedule_id, user_id),
                 )
                 row = cur.fetchone()
         finally:
@@ -2403,25 +2548,30 @@ def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
             return False
         frequency = kwargs["frequency"] if freq_changed else row[0]
         time_of_day = kwargs["time_of_day"] if tod_changed else row[1]
+        schedule_type = kwargs["schedule_type"] if type_changed else row[2]
+        cron_expression = kwargs["cron_expression"] if cron_changed else row[3]
         if freq_changed:
             allowed["Frequency"] = frequency
         if tod_changed:
             allowed["TimeOfDay"] = time_of_day
-        allowed["NextRunAt"] = _compute_next_run(frequency, time_of_day=time_of_day)
+        if schedule_type == "cron":
+            allowed["NextRunAt"] = _compute_next_run_cron(cron_expression)
+        else:
+            allowed["NextRunAt"] = _compute_next_run(frequency, time_of_day=time_of_day)
 
     if not allowed:
         return False
     set_parts = ", ".join(f"{k} = ?" for k in allowed)
-    values = list(allowed.values()) + [schedule_id]
+    values = list(allowed.values()) + [schedule_id, user_id]
     conn = _conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"UPDATE dbo.CrawlSchedule SET {set_parts}, UpdatedAt = GETUTCDATE() WHERE Id = ?",
+                f"UPDATE dbo.CrawlSchedule SET {set_parts}, UpdatedAt = GETUTCDATE() WHERE Id = ? AND UserId = ?",
                 values,
             )
             conn.commit()
-        return True
+            return cur.rowcount > 0
     except Exception:
         logger.exception("update_crawl_schedule failed for id=%s", schedule_id)
         return False
@@ -2429,15 +2579,15 @@ def update_crawl_schedule(schedule_id: int, **kwargs) -> bool:
         conn.close()
 
 
-def delete_crawl_schedule(schedule_id: int) -> bool:
+def delete_crawl_schedule(schedule_id: int, user_id: int) -> bool:
     if not is_enabled() or _INIT_ERROR:
         return False
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM dbo.CrawlSchedule WHERE Id = ?", (schedule_id,))
+            cur.execute("DELETE FROM dbo.CrawlSchedule WHERE Id = ? AND UserId = ?", (schedule_id, user_id))
             conn.commit()
-        return True
+            return cur.rowcount > 0
     except Exception:
         logger.exception("delete_crawl_schedule failed for id=%s", schedule_id)
         return False
@@ -2798,9 +2948,7 @@ def get_assistive_scans(
             rows = cur.fetchall()
         out = []
         for r in rows:
-            ts = r.TimestampUtc
-            if hasattr(ts, "isoformat"):
-                ts = ts.isoformat()
+            ts = _ts(r.TimestampUtc)
             out.append({
                 "id": r.Id,
                 "scan_type": r.ScanType,
@@ -2867,9 +3015,7 @@ def get_integrations(user_id: int) -> list[dict]:
         conn.close()
     out = []
     for r in rows:
-        ts = r.ConnectedAt
-        if hasattr(ts, "isoformat"):
-            ts = ts.isoformat()
+        ts = _ts(r.ConnectedAt)
         out.append({
             "id": r.Id,
             "platform": r.Platform,
@@ -2898,9 +3044,7 @@ def get_integration(integration_id: int, user_id: int) -> dict | None:
         conn.close()
     if not r:
         return None
-    ts = r.ConnectedAt
-    if hasattr(ts, "isoformat"):
-        ts = ts.isoformat()
+    ts = _ts(r.ConnectedAt)
     return {
         "id": r.Id,
         "platform": r.Platform,
@@ -2980,9 +3124,7 @@ def get_integration_channels(integration_id: int) -> list[dict]:
         conn.close()
     out = []
     for r in rows:
-        ts = r.AddedAt
-        if hasattr(ts, "isoformat"):
-            ts = ts.isoformat()
+        ts = _ts(r.AddedAt)
         out.append({
             "id": r.Id,
             "channel_id": r.ChannelId,
@@ -3050,9 +3192,7 @@ def get_integration_deliveries(user_id: int, limit: int = 20) -> list[dict]:
         conn.close()
     out = []
     for r in rows:
-        ts = r.SentAt
-        if hasattr(ts, "isoformat"):
-            ts = ts.isoformat()
+        ts = _ts(r.SentAt)
         out.append({
             "id": r.Id,
             "report_type": r.ReportType,
@@ -3082,29 +3222,57 @@ def _normalize_path_prefix(path: str) -> str:
 
 def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
                     default_branch: str, framework: str, access_token: str | None,
-                    path_prefix: str = "") -> int:
-    """Upsert a site-to-repo link, keyed on domain + path prefix (not domain alone —
-    multiple sites can share one domain, e.g. two GitHub Pages project sites under
-    the same *.github.io host). Returns RepoLink.Id."""
+                    path_prefix: str = "", provider: str = "github", link_id: int | None = None) -> int:
+    """Create or update a site-to-repo link. Returns RepoLink.Id.
+
+    Two distinct paths, not one upsert-by-domain for both:
+    - link_id given (editing an existing row from the UI): update that exact
+      row by Id, regardless of what site_url/domain the edit changes it to.
+      Matching by (domain, path_prefix) here would silently miss the row the
+      instant an edit changes the domain, and insert a duplicate instead of
+      updating — that's the actual bug this parameter fixes.
+    - link_id omitted (connecting a new site): upsert keyed on domain + path
+      prefix, so re-connecting the same site reuses its existing row instead
+      of creating a duplicate (multiple sites can share one domain, e.g. two
+      GitHub Pages project sites under the same *.github.io host, hence path
+      prefix as part of the key, not domain alone).
+
+    access_token=None (or "") on an existing row keeps its currently stored
+    token unchanged instead of clearing it (see the COALESCE below) — lets the
+    edit flow update other fields without forcing the token to be re-entered."""
     if not is_enabled() or _INIT_ERROR:
         raise RuntimeError("Database not available")
     path_prefix = _normalize_path_prefix(path_prefix)
+    encrypted_token = _encrypt_token(access_token)
     conn = _conn()
     try:
         cur = conn.cursor()
+        if link_id is not None:
+            cur.execute("""
+                UPDATE dbo.RepoLink
+                SET Domain = ?, PathPrefix = ?, SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?,
+                    Framework = ?, Provider = ?, AccessToken = COALESCE(?, AccessToken), Status = 'active'
+                WHERE Id = ? AND UserId = ?
+            """, domain, path_prefix, site_url, repo_url, default_branch, framework, provider,
+                 encrypted_token, link_id, user_id)
+            conn.commit()
+            if cur.rowcount == 0:
+                raise ValueError(f"Repo link {link_id} not found for this user")
+            return link_id
+
         cur.execute("""
             UPDATE dbo.RepoLink
-            SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?,
-                AccessToken = ?, Status = 'active'
+            SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?, Provider = ?,
+                AccessToken = COALESCE(?, AccessToken), Status = 'active'
             WHERE UserId = ? AND Domain = ? AND PathPrefix = ?
-        """, site_url, repo_url, default_branch, framework, access_token, user_id, domain, path_prefix)
+        """, site_url, repo_url, default_branch, framework, provider, encrypted_token, user_id, domain, path_prefix)
         if cur.rowcount == 0:
             cur.execute("""
                 INSERT INTO dbo.RepoLink
-                    (UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken)
+                    (UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, user_id, domain, path_prefix, site_url, repo_url, default_branch, framework, access_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, user_id, domain, path_prefix, site_url, repo_url, default_branch, framework, provider, encrypted_token)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
@@ -3125,7 +3293,7 @@ def get_repo_links(user_id: int) -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, ConnectedAt
             FROM dbo.RepoLink
             WHERE UserId = ? AND Status = 'active'
             ORDER BY ConnectedAt DESC
@@ -3135,9 +3303,7 @@ def get_repo_links(user_id: int) -> list[dict]:
         conn.close()
     out = []
     for r in rows:
-        ts = r.ConnectedAt
-        if hasattr(ts, "isoformat"):
-            ts = ts.isoformat()
+        ts = _ts(r.ConnectedAt)
         out.append({
             "id": r.Id,
             "domain": r.Domain,
@@ -3146,6 +3312,7 @@ def get_repo_links(user_id: int) -> list[dict]:
             "repo_url": r.RepoUrl,
             "default_branch": r.DefaultBranch,
             "framework": r.Framework,
+            "provider": r.Provider,
             "connected_at": ts,
         })
     return out
@@ -3159,7 +3326,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken, ConnectedAt
             FROM dbo.RepoLink
             WHERE Id = ? AND UserId = ? AND Status = 'active'
         """, link_id, user_id)
@@ -3168,9 +3335,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
         conn.close()
     if not r:
         return None
-    ts = r.ConnectedAt
-    if hasattr(ts, "isoformat"):
-        ts = ts.isoformat()
+    ts = _ts(r.ConnectedAt)
     return {
         "id": r.Id,
         "domain": r.Domain,
@@ -3179,7 +3344,8 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
         "repo_url": r.RepoUrl,
         "default_branch": r.DefaultBranch,
         "framework": r.Framework,
-        "access_token": r.AccessToken,
+        "provider": r.Provider,
+        "access_token": _decrypt_token(r.AccessToken),
         "connected_at": ts,
     }
 
@@ -3200,20 +3366,21 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken, ConnectedAt
             FROM dbo.RepoLink
             WHERE Domain = ? AND UserId = ? AND Status = 'active'
         """, domain, user_id)
         rows = cur.fetchall()
     finally:
         conn.close()
-    candidates = [r for r in rows if path.startswith(r.PathPrefix)]
+    # PathPrefix is always "" or trailing-slashed (see _normalize_path_prefix), but a
+    # scanned page's own path never has one — append "/" before comparing so a repo
+    # link's own root page matches itself, not just its sub-pages.
+    candidates = [r for r in rows if (path + "/").startswith(r.PathPrefix)]
     if not candidates:
         return None
     best = max(candidates, key=lambda r: len(r.PathPrefix))
-    ts = best.ConnectedAt
-    if hasattr(ts, "isoformat"):
-        ts = ts.isoformat()
+    ts = _ts(best.ConnectedAt)
     return {
         "id": best.Id,
         "domain": best.Domain,
@@ -3222,20 +3389,23 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
         "repo_url": best.RepoUrl,
         "default_branch": best.DefaultBranch,
         "framework": best.Framework,
-        "access_token": best.AccessToken,
+        "provider": best.Provider,
+        "access_token": _decrypt_token(best.AccessToken),
         "connected_at": ts,
     }
 
 
 def delete_repo_link(link_id: int, user_id: int) -> bool:
-    """Soft-delete a repo link."""
+    """Soft-delete a repo link and clear its stored token — disconnecting
+    should actually revoke the credential, not leave it sitting in the table
+    indefinitely under a flipped status flag."""
     if not is_enabled() or _INIT_ERROR:
         return False
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            UPDATE dbo.RepoLink SET Status = 'disconnected'
+            UPDATE dbo.RepoLink SET Status = 'disconnected', AccessToken = NULL
             WHERE Id = ? AND UserId = ?
         """, link_id, user_id)
         conn.commit()
@@ -3285,9 +3455,7 @@ def get_fixes(user_id: int, limit: int = 50) -> list[dict]:
         conn.close()
     out = []
     for r in rows:
-        ts = r.CreatedAt
-        if hasattr(ts, "isoformat"):
-            ts = ts.isoformat()
+        ts = _ts(r.CreatedAt)
         out.append({
             "id": r.Id,
             "page_url": r.PageUrl,

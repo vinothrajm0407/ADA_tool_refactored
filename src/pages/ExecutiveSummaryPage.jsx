@@ -96,9 +96,9 @@ export default function ExecutiveSummaryPage() {
 
   if (loading) {
     return (
-      <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
+      <main className="flex-1 overflow-auto bg-ivory p-6">
         <div className="max-w-4xl mx-auto space-y-4">
-          {[1,2,3].map((i) => <div key={i} className="h-24 bg-gray-200 dark:bg-white/10 rounded-xl animate-pulse" />)}
+          {[1,2,3].map((i) => <div key={i} className="h-24 bg-gray-200 rounded-xl animate-pulse"/>)}
         </div>
       </main>
     );
@@ -106,9 +106,9 @@ export default function ExecutiveSummaryPage() {
 
   if (error || !job) {
     return (
-      <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
+      <main className="flex-1 overflow-auto bg-ivory p-6">
         <div className="max-w-4xl mx-auto">
-          <button onClick={() => navigate('crawl-results')} className="flex items-center gap-2 text-sm text-body dark:text-gray-400 hover:text-teal mb-4">
+          <button onClick={() => navigate('crawl-results')} className="flex items-center gap-2 text-sm text-body hover:text-teal mb-4">
             <ArrowLeft size={14} /> Back to results
           </button>
           <p className="text-coral">{error || 'Crawl not found.'}</p>
@@ -127,18 +127,18 @@ export default function ExecutiveSummaryPage() {
   const printDate = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
-    <main className="flex-1 overflow-auto bg-white dark:bg-night print:bg-white" role="main">
+    <main className="flex-1 overflow-auto bg-white print:bg-white"role="main">
       {/* Screen-only controls */}
-      <div className="print:hidden sticky top-0 z-10 bg-white dark:bg-charcoal border-b border-gray-100 dark:border-white/[0.06] px-6 py-3 flex items-center justify-between gap-4">
+      <div className="print:hidden sticky top-0 z-10 bg-white border-b border-gray-100 px-6 py-3 flex items-center justify-between gap-4">
         <button
           onClick={() => navigate('crawl-results')}
-          className="flex items-center gap-2 text-sm text-body dark:text-gray-400 hover:text-teal transition-colors"
+          className="flex items-center gap-2 text-sm text-body hover:text-teal transition-colors"
         >
           <ArrowLeft size={14} />
           Back to Crawl Results
         </button>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-body dark:text-gray-500 hidden sm:block">
+          <span className="text-xs text-body hidden sm:block">
             Use browser print (Ctrl+P / Cmd+P) to save as PDF
           </span>
           <button

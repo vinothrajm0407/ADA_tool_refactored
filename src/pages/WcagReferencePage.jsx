@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
-import { Search, X, ChevronRight, ChevronDown, BookOpen, Code2, Wrench, ExternalLink } from 'lucide-react'
+import { Search, X, ChevronRight, ChevronDown, ChevronUp, Check, BookOpen, Wrench, ExternalLink } from 'lucide-react'
 import { WCAG_CRITERIA, WCAG_PRINCIPLES, getWcagCriterion } from '../data/wcag'
 import { useApp } from '../context/AppContext'
 
@@ -9,8 +9,8 @@ function LevelBadge({ level }) {
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide border ${
       level === 'A'
-        ? 'bg-teal/10 text-teal-800 dark:text-teal-300 border-teal/20'
-        : 'bg-amber/10 text-amber-800 dark:text-amber-300 border-amber/20'
+        ?'bg-teal/10 text-teal-800 border-teal/20'
+        :'bg-amber/10 text-amber-800 border-amber/20'
     }`}>
       {level === 'A' ? 'Level A' : 'Level AA'}
     </span>
@@ -20,10 +20,10 @@ function LevelBadge({ level }) {
 // ─── Principle badge ──────────────────────────────────────────────────────────
 
 const PRINCIPLE_COLORS = {
-  Perceivable:    'bg-brand-blue/10 text-brand-blue-700 dark:text-brand-blue-300 border-brand-blue/20',
-  Operable:       'bg-teal/10 text-teal-800 dark:text-teal-300 border-teal/20',
-  Understandable: 'bg-sage/10 text-sage-700 dark:text-sage-300 border-sage/20',
-  Robust:         'bg-terracotta/10 text-terracotta-700 dark:text-terracotta-300 border-terracotta/20',
+  Perceivable:'bg-brand-blue/10 text-brand-blue-700 border-brand-blue/20',
+  Operable:'bg-teal/10 text-teal-800 border-teal/20',
+  Understandable:'bg-sage/10 text-sage-700 border-sage/20',
+  Robust:'bg-terracotta/10 text-terracotta-700 border-terracotta/20',
 }
 
 function PrincipleBadge({ principle }) {
@@ -38,7 +38,7 @@ function PrincipleBadge({ principle }) {
 
 function AxeChip({ rule }) {
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 dark:bg-white/[0.06] text-body dark:text-gray-400 border border-gray-200 dark:border-white/[0.06]">
+    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-mono bg-gray-100 text-body border border-gray-200">
       {rule}
     </span>
   )
@@ -58,10 +58,11 @@ function CodeBlock({ label, code, variant }) {
           ? 'border-coral/20 text-coral bg-coral/10'
           : 'border-sage/20 text-sage bg-sage/10'
       }`}>
-        <span>{variant === 'bad' ? '✗ Fails' : '✓ Passes'}</span>
+        {variant === 'bad' ? <X size={12} /> : <Check size={12} />}
+        <span>{variant === 'bad' ? 'Does not meet the standard' : 'Meets the standard'}</span>
         {label && <span className="text-inherit opacity-60">— {label}</span>}
       </div>
-      <pre className="px-4 py-3 text-[11px] font-mono text-ink dark:text-gray-200 overflow-x-auto leading-relaxed whitespace-pre-wrap">
+      <pre className="px-4 py-3 text-[11px] font-mono text-ink overflow-x-auto leading-relaxed whitespace-pre-wrap">
         {code.trim()}
       </pre>
     </div>
@@ -74,20 +75,20 @@ function CriterionDetail({ criterion, onClose }) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-start justify-between px-6 py-5 border-b border-gray-100 dark:border-white/[0.06] flex-shrink-0">
+      <div className="flex items-start justify-between px-6 py-5 border-b border-gray-100 flex-shrink-0">
         <div className="flex-1 min-w-0 pr-4">
           <div className="flex items-center gap-2 flex-wrap mb-2">
             <span className="font-mono text-sm font-bold text-teal">{criterion.id}</span>
             <LevelBadge level={criterion.level} />
             <PrincipleBadge principle={criterion.principle} />
           </div>
-          <h2 className="text-lg font-heading font-bold text-ink dark:text-white leading-snug">
+          <h2 className="text-lg font-heading font-bold text-ink leading-snug">
             {criterion.title}
           </h2>
         </div>
         <button
           onClick={onClose}
-          className="p-2 rounded-lg text-body hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors flex-shrink-0"
+          className="p-2 rounded-lg text-body hover:bg-gray-100 transition-colors flex-shrink-0"
           aria-label="Close detail panel"
         >
           <X size={16} />
@@ -97,26 +98,25 @@ function CriterionDetail({ criterion, onClose }) {
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
 
-        {/* Issue */}
+        {/* Plain language */}
         <section>
-          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-body dark:text-gray-500 mb-2">
-            <BookOpen size={12} />
-            The Issue
+          <h3 className="text-sm font-heading font-bold text-ink mb-2">
+            Plain language
           </h3>
-          <p className="text-sm text-ink dark:text-gray-200 leading-relaxed">
+          <p className="text-sm text-ink leading-relaxed">
             {criterion.issue}
           </p>
         </section>
 
         {/* How to Fix */}
         <section>
-          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-body dark:text-gray-500 mb-3">
+          <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-body mb-3">
             <Wrench size={12} />
             How to Fix
           </h3>
           <ul className="space-y-2">
             {criterion.howToFix.map((tip, i) => (
-              <li key={i} className="flex gap-3 text-sm text-ink dark:text-gray-200 leading-relaxed">
+              <li key={i} className="flex gap-3 text-sm text-ink leading-relaxed">
                 <span className="flex-shrink-0 mt-0.5 w-5 h-5 rounded-full bg-teal/10 text-teal text-[10px] font-bold flex items-center justify-center">
                   {i + 1}
                 </span>
@@ -129,13 +129,12 @@ function CriterionDetail({ criterion, onClose }) {
         {/* Code Examples */}
         {criterion.codeExamples && (
           <section>
-            <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-body dark:text-gray-500 mb-3">
-              <Code2 size={12} />
-              Code Example
+            <h3 className="text-sm font-heading font-bold text-ink mb-3">
+              Common examples
             </h3>
             <div className="space-y-3">
-              <CodeBlock variant="bad" code={criterion.codeExamples.bad} />
               <CodeBlock variant="good" code={criterion.codeExamples.good} />
+              <CodeBlock variant="bad" code={criterion.codeExamples.bad} />
             </div>
           </section>
         )}
@@ -143,7 +142,7 @@ function CriterionDetail({ criterion, onClose }) {
         {/* Axe Rules */}
         {criterion.axeRules.length > 0 && (
           <section>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-body dark:text-gray-500 mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-body mb-2">
               Triggered by axe-core rules
             </h3>
             <div className="flex flex-wrap gap-1.5">
@@ -155,12 +154,12 @@ function CriterionDetail({ criterion, onClose }) {
         )}
 
         {/* W3C link */}
-        <section className="pt-2 border-t border-gray-100 dark:border-white/[0.06]">
+        <section className="pt-2 border-t border-gray-100">
           <a
             href={`https://www.w3.org/WAI/WCAG22/Understanding/${criterion.id.replace(/\./g, '')}.html`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-body dark:text-gray-400 hover:text-teal transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs text-body hover:text-teal transition-colors"
           >
             <ExternalLink size={11} />
             WCAG 2.2 official guidance
@@ -180,8 +179,8 @@ function CriterionCard({ criterion, isSelected, onClick }) {
       onClick={onClick}
       className={`w-full text-left rounded-2xl border p-4 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/50 ${
         isSelected
-          ? 'border-teal bg-teal/5 dark:bg-teal/10 shadow-glow'
-          : 'border-gray-100 dark:border-white/[0.06] bg-white dark:bg-charcoal hover:border-teal/30 hover:shadow-soft'
+          ?'border-teal bg-teal/5 shadow-glow'
+          :'border-gray-100 bg-white hover:border-teal/30 hover:'
       }`}
       aria-pressed={isSelected}
     >
@@ -192,11 +191,11 @@ function CriterionCard({ criterion, isSelected, onClick }) {
         </div>
       </div>
 
-      <p className="font-heading font-semibold text-[13px] text-ink dark:text-white leading-snug mb-1.5">
+      <p className="font-heading font-semibold text-[13px] text-ink leading-snug mb-1.5">
         {criterion.title}
       </p>
 
-      <p className="text-[11px] text-body dark:text-gray-400 leading-snug line-clamp-2 mb-3">
+      <p className="text-[11px] text-body leading-snug line-clamp-2 mb-3">
         {criterion.issue}
       </p>
 
@@ -206,7 +205,7 @@ function CriterionCard({ criterion, isSelected, onClick }) {
             <AxeChip key={rule} rule={rule} />
           ))}
           {criterion.axeRules.length > 3 && (
-            <span className="text-[10px] text-body dark:text-gray-500 px-1.5 py-0.5">
+            <span className="text-[10px] text-body px-1.5 py-0.5">
               +{criterion.axeRules.length - 3} more
             </span>
           )}
@@ -223,8 +222,10 @@ export default function WcagReferencePage() {
 
   const [search, setSearch]         = useState('')
   const [filterLevel, setFilterLevel]         = useState('All')
-  const [filterPrinciple, setFilterPrinciple] = useState('All')
   const [selectedId, setSelectedId] = useState(wcagCriterionId ?? null)
+  const [expandedGroups, setExpandedGroups] = useState(() =>
+    Object.fromEntries(WCAG_PRINCIPLES.map(p => [p, true]))
+  )
 
   // Sync incoming deep-link from ADAResultsView
   useEffect(() => {
@@ -235,7 +236,6 @@ export default function WcagReferencePage() {
     const q = search.toLowerCase()
     return WCAG_CRITERIA.filter(c => {
       if (filterLevel !== 'All' && c.level !== filterLevel) return false
-      if (filterPrinciple !== 'All' && c.principle !== filterPrinciple) return false
       if (q) {
         return (
           c.id.includes(q) ||
@@ -246,7 +246,23 @@ export default function WcagReferencePage() {
       }
       return true
     })
-  }, [search, filterLevel, filterPrinciple])
+  }, [search, filterLevel])
+
+  // Group filtered criteria by principle, preserving WCAG_PRINCIPLES order.
+  const grouped = useMemo(() => {
+    return WCAG_PRINCIPLES
+      .map(p => ({ principle: p, items: filtered.filter(c => c.principle === p) }))
+      .filter(g => g.items.length > 0)
+  }, [filtered])
+
+  // While a search/filter is active, force every group open so matches are
+  // never hidden behind a manual collapse — simplest way to keep filtering
+  // reliable without tracking per-criterion match state.
+  const isFiltering = Boolean(search || filterLevel !== 'All')
+
+  function toggleGroup(principle) {
+    setExpandedGroups(prev => ({ ...prev, [principle]: !prev[principle] }))
+  }
 
   const selectedCriterion = selectedId ? getWcagCriterion(selectedId) : null
 
@@ -265,19 +281,19 @@ export default function WcagReferencePage() {
     <div className="flex h-full overflow-hidden">
 
       {/* ── Left: list ── */}
-      <div className={`flex flex-col ${selectedCriterion ? 'hidden lg:flex lg:w-[420px]' : 'flex-1'} flex-shrink-0 border-r border-gray-100 dark:border-white/[0.06] overflow-hidden`}>
+      <div className={`flex flex-col ${selectedCriterion ?'hidden lg:flex lg:w-[420px]':'flex-1'} flex-shrink-0 border-r border-gray-100 overflow-hidden`}>
 
         {/* Page header */}
         <div className="px-6 pt-6 pb-4 flex-shrink-0">
           <div className="flex items-center gap-3 mb-1">
-            <h1 className="font-heading font-bold text-2xl text-ink dark:text-white">
+            <h1 className="font-heading font-bold text-2xl text-ink">
               WCAG Reference
             </h1>
-            <span className="px-2 py-0.5 rounded-full bg-teal/10 text-teal-800 dark:text-teal-300 text-xs font-semibold">
+            <span className="px-2 py-0.5 rounded-full bg-teal/10 text-teal-800 text-xs font-semibold">
               {WCAG_CRITERIA.length} criteria
             </span>
           </div>
-          <p className="text-sm text-body dark:text-gray-400">
+          <p className="text-sm text-body">
             Developer-focused guidance on the most common WCAG 2.2 violations.
           </p>
         </div>
@@ -290,62 +306,40 @@ export default function WcagReferencePage() {
               type="search"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search criteria, rules, or keywords…"
+              placeholder="Search WCAG criteria, rules, or keywords"
               className="input-base pl-9 text-sm"
             />
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold text-body dark:text-gray-400">Filter by:</span>
+            <span className="text-xs font-semibold text-body">Filter by:</span>
 
-            <button
-              onClick={() => setFilterPrinciple('All')}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                filterPrinciple === 'All'
-                  ? 'bg-teal text-white'
-                  : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
-              }`}
-            >
-              All principles
-            </button>
-            {WCAG_PRINCIPLES.map(p => (
-              <button
-                key={p}
-                onClick={() => setFilterPrinciple(p)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                  filterPrinciple === p
-                    ? 'bg-teal text-white'
-                    : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
-                }`}
-              >
-                {p}
-              </button>
-            ))}
+            <span className="px-3 py-1.5 rounded-full text-xs font-semibold bg-teal text-white">
+              Principle
+            </span>
 
-            <span className="w-px h-4 bg-gray-200 dark:bg-white/10 mx-1" aria-hidden="true" />
-
-            {['All', 'A', 'AA'].map(opt => (
+            {['A', 'AA', 'AAA'].map(opt => (
               <button
                 key={opt}
-                onClick={() => setFilterLevel(opt)}
+                onClick={() => setFilterLevel(prev => prev === opt ? 'All' : opt)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                   filterLevel === opt
                     ? 'bg-teal text-white'
-                    : 'border border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5'
+                    :'border border-gray-200 text-body hover:bg-gray-50'
                 }`}
               >
-                {opt === 'All' ? 'All Levels' : `Level ${opt}`}
+                {`Level ${opt}`}
               </button>
             ))}
           </div>
 
           <div className="flex items-center justify-between">
-            <p className="text-xs text-body dark:text-gray-400">
+            <p className="text-xs text-body">
               Showing {filtered.length} of {WCAG_CRITERIA.length} criteria
             </p>
-            {(search || filterLevel !== 'All' || filterPrinciple !== 'All') && (
+            {(search || filterLevel !== 'All') && (
               <button
-                onClick={() => { setSearch(''); setFilterLevel('All'); setFilterPrinciple('All') }}
+                onClick={() => { setSearch(''); setFilterLevel('All') }}
                 className="text-xs text-teal hover:underline"
               >
                 Clear filters
@@ -358,24 +352,54 @@ export default function WcagReferencePage() {
         <div className="flex-1 overflow-y-auto px-6 pb-6">
           {filtered.length === 0 ? (
             <div className="py-12 text-center">
-              <p className="text-body dark:text-gray-400 text-sm">No criteria match your filters.</p>
+              <p className="text-body text-sm">No criteria match your filters.</p>
               <button
-                onClick={() => { setSearch(''); setFilterLevel('All'); setFilterPrinciple('All') }}
+                onClick={() => { setSearch(''); setFilterLevel('All') }}
                 className="mt-2 text-sm text-teal hover:underline"
               >
                 Clear all filters
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3">
-              {filtered.map(c => (
-                <CriterionCard
-                  key={c.id}
-                  criterion={c}
-                  isSelected={selectedId === c.id}
-                  onClick={() => handleSelect(c.id)}
-                />
-              ))}
+            <div className="space-y-4">
+              {grouped.map(({ principle, items }) => {
+                const isExpanded = isFiltering || !!expandedGroups[principle]
+                return (
+                  <div key={principle}>
+                    <button
+                      onClick={() => toggleGroup(principle)}
+                      className="w-full flex items-center justify-between gap-2 px-2 py-2 rounded-lg text-left hover:bg-gray-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/50"
+                      aria-expanded={isExpanded}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-teal/10 text-teal text-[11px] font-bold flex-shrink-0">
+                          {WCAG_PRINCIPLES.indexOf(principle) + 1}
+                        </span>
+                        <span className="text-sm font-heading font-semibold text-ink">
+                          {principle}
+                        </span>
+                      </span>
+                      {isExpanded ? (
+                        <ChevronUp size={16} className="text-body flex-shrink-0"/>
+                      ) : (
+                        <ChevronDown size={16} className="text-body flex-shrink-0"/>
+                      )}
+                    </button>
+                    {isExpanded && (
+                      <div className="grid grid-cols-1 gap-3 mt-2">
+                        {items.map(c => (
+                          <CriterionCard
+                            key={c.id}
+                            criterion={c}
+                            isSelected={selectedId === c.id}
+                            onClick={() => handleSelect(c.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -390,12 +414,12 @@ export default function WcagReferencePage() {
         <div className="hidden lg:flex flex-1 items-center justify-center text-center px-8">
           <div>
             <div className="w-12 h-12 rounded-2xl bg-teal/10 flex items-center justify-center mx-auto mb-4">
-              <BookOpen size={22} className="text-teal" />
+              <BookOpen size={22} className="text-teal"/>
             </div>
-            <p className="font-heading font-semibold text-ink dark:text-white mb-1">
+            <p className="font-heading font-semibold text-ink mb-1">
               Select a criterion
             </p>
-            <p className="text-sm text-body dark:text-gray-400 max-w-xs">
+            <p className="text-sm text-body max-w-xs">
               Click any card to see the issue, how to fix it, and code examples.
             </p>
           </div>

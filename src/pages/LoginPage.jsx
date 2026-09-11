@@ -10,6 +10,7 @@ export default function LoginPage({ dark, toggleDark }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw]     = useState(false);
+  const [remember, setRemember] = useState(false);
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
 
@@ -38,7 +39,7 @@ export default function LoginPage({ dark, toggleDark }) {
         }
         return;
       }
-      login(data.user, data.token);
+      login(data.user, data.token, remember);
       navigate(postAuthRedirect || 'dashboard');
       setPostAuthRedirect(null);
     } catch {
@@ -65,9 +66,9 @@ export default function LoginPage({ dark, toggleDark }) {
   }
 
   return (
-    <div className={`${dark ? 'dark' : ''} min-h-screen bg-ivory dark:bg-night flex flex-col`}>
+    <div className={`${dark ?'dark':''} min-h-screen bg-ivory flex flex-col`}>
       {/* Header */}
-      <header className="h-16 flex items-center justify-between px-8 bg-white dark:bg-charcoal border-b border-gray-100 dark:border-white/[0.06]">
+      <header className="h-16 flex items-center justify-between px-8 bg-white border-b border-gray-100">
         <button
           onClick={() => navigate('landing')}
           className="hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl"
@@ -78,7 +79,7 @@ export default function LoginPage({ dark, toggleDark }) {
         <button
           onClick={toggleDark}
           aria-label="Toggle dark mode"
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-body hover:bg-gray-100 transition-colors"
         >
           {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
@@ -88,8 +89,13 @@ export default function LoginPage({ dark, toggleDark }) {
       <main className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-sm">
           <div className="card p-8">
-            <h1 className="font-heading font-bold text-2xl text-ink dark:text-white mb-1">Welcome back</h1>
-            <p className="text-sm text-body dark:text-gray-400 mb-7">Sign in to your ADA account</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-teal mb-3">
+              Secure workspace access
+            </p>
+            <h1 className="font-heading font-bold text-2xl text-ink mb-1">Welcome back</h1>
+            <p className="text-sm text-body mb-7">
+              Sign in to review audits, fix issues, and monitor your workspace.
+            </p>
 
             <form onSubmit={handleSubmit} noValidate className="space-y-5">
               {error && (
@@ -99,7 +105,7 @@ export default function LoginPage({ dark, toggleDark }) {
               )}
 
               {unverified && (
-                <div className="rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+                <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
                   <p className="font-semibold mb-1">Email not verified</p>
                   <p className="mb-2">Please verify your email before signing in.</p>
                   {resendSent ? (
@@ -118,7 +124,7 @@ export default function LoginPage({ dark, toggleDark }) {
               )}
 
               <div className="space-y-1.5">
-                <label htmlFor="email" className="block text-sm font-medium text-ink dark:text-white">
+                <label htmlFor="email"className="block text-sm font-medium text-ink">
                   Email
                 </label>
                 <GlowInput
@@ -135,7 +141,7 @@ export default function LoginPage({ dark, toggleDark }) {
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label htmlFor="password" className="block text-sm font-medium text-ink dark:text-white">
+                  <label htmlFor="password"className="block text-sm font-medium text-ink">
                     Password
                   </label>
                   <button
@@ -161,7 +167,7 @@ export default function LoginPage({ dark, toggleDark }) {
                   <button
                     type="button"
                     onClick={() => setShowPw(p => !p)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-ink dark:hover:text-white z-10"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-ink z-10"
                     aria-label={showPw ? 'Hide password' : 'Show password'}
                   >
                     {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -169,24 +175,39 @@ export default function LoginPage({ dark, toggleDark }) {
                 </div>
               </div>
 
+              <label className="flex items-center gap-2 text-sm text-body select-none">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={e => setRemember(e.target.checked)}
+                  className="checkbox-base"
+                />
+                Keep me signed in
+              </label>
+
               <button
                 type="submit"
                 disabled={loading}
                 className="btn-primary w-full py-3 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {loading ? 'Signing in…' : 'Sign In'}
+                {loading ? 'Signing in…' : 'Sign in to Dashboard'}
               </button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-body dark:text-gray-400">
-              Don't have an account?{' '}
+            <p className="mt-6 text-center text-sm text-body">
+              New to ADA?{' '}
               <button
                 onClick={() => navigate('signup')}
                 className="text-teal font-semibold hover:underline focus:outline-none"
               >
-                Sign up
+                Create an account
               </button>
             </p>
+          </div>
+
+          <div className="mt-5 rounded-xl border-l-4 border-teal bg-teal/5 px-5 py-4 text-sm text-ink">
+            <span className="font-semibold">From first scan to verified fix.</span>{' '}
+            ADA gives engineering and QA teams one place to understand accessibility health, inspect WCAG violations, and ship repository-backed fixes.
           </div>
         </div>
       </main>

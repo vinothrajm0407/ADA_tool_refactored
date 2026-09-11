@@ -71,7 +71,12 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
     axe = Axe()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        context = browser.new_context(viewport=SCREENSHOT_VIEWPORT, ignore_https_errors=True)
+        context = browser.new_context(
+            viewport=SCREENSHOT_VIEWPORT, ignore_https_errors=True,
+            # Harmless on every other site — only an ngrok-tunneled dev URL checks
+            # for this header, to skip its free-tier browser-warning interstitial.
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+        )
         page = context.new_page()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)

@@ -30,7 +30,6 @@ PAGES = [
     ("Schedules",         "/crawl-schedules",  True),
     ("Notifications",     "/alerts",           True),
     ("Assistive Testing", "/assistive-test",   True),
-    ("AI Fix Assistant",  "/ai-fix",           True),
     ("WCAG Reference",    "/wcag-reference",   True),
     ("Channels & Apps",   "/integrations",     True),
     ("Settings",          "/settings",         True),
@@ -52,7 +51,7 @@ def login():
     return body["user"], body["token"]
 
 
-def run():
+def run(themes=("light", "dark")):
     from playwright.sync_api import sync_playwright
     from axe_playwright_python.sync_playwright import Axe
 
@@ -64,36 +63,44 @@ def run():
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
-        ctx.add_init_script(
-            f'window.sessionStorage.setItem("ada_auth", JSON.stringify({auth_payload}));'
-        )
-        page = ctx.new_page()
 
-        # Connected Repos has no direct URL — reach it via sidebar nav from Dashboard.
-        page.goto(f"{FRONTEND_URL}/dashboard", wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(500)
-        try:
-            page.get_by_role("button", name="Connected Repos").click()
+        for theme in themes:
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+            # ada-tool-theme is the real localStorage key AppContext.jsx reads on
+            # boot — same persistence mechanism a real user's theme toggle uses.
+            ctx.add_init_script(
+                f'window.sessionStorage.setItem("ada_auth", JSON.stringify({auth_payload}));'
+                f'window.localStorage.setItem("ada-tool-theme", "{theme}");'
+            )
+            page = ctx.new_page()
+
+            # Connected Repos has no direct URL — reach it via sidebar nav from Dashboard.
+            page.goto(f"{FRONTEND_URL}/dashboard", wait_until="networkidle", timeout=30000)
             page.wait_for_timeout(500)
-            axe_result = axe.run(page, options=AXE_OPTIONS)
-            data = axe_result.response if hasattr(axe_result, "response") else {}
-            results.append(_summarize("Connected Repos", "/repo-links (via sidebar)", data))
-        except Exception as e:
-            results.append({"page": "Connected Repos", "path": "/repo-links (via sidebar)", "error": str(e)})
-
-        for label, path, needs_auth in PAGES:
-            url = f"{FRONTEND_URL}{path}"
             try:
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(600)
+                page.get_by_role("button", name="Connected Repos").click()
+                page.wait_for_timeout(500)
                 axe_result = axe.run(page, options=AXE_OPTIONS)
                 data = axe_result.response if hasattr(axe_result, "response") else {}
-                results.append(_summarize(label, path, data))
-                print(f"scanned {label:20s} {path}")
+                results.append(_summarize(f"Connected Repos [{theme}]", "/repo-links (via sidebar)", data))
             except Exception as e:
-                results.append({"page": label, "path": path, "error": str(e)})
-                print(f"FAILED  {label:20s} {path}: {e}")
+                results.append({"page": f"Connected Repos [{theme}]", "path": "/repo-links (via sidebar)", "error": str(e)})
+
+            for label, path, needs_auth in PAGES:
+                url = f"{FRONTEND_URL}{path}"
+                tagged_label = f"{label} [{theme}]"
+                try:
+                    page.goto(url, wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(600)
+                    axe_result = axe.run(page, options=AXE_OPTIONS)
+                    data = axe_result.response if hasattr(axe_result, "response") else {}
+                    results.append(_summarize(tagged_label, path, data))
+                    print(f"scanned {tagged_label:30s} {path}")
+                except Exception as e:
+                    results.append({"page": tagged_label, "path": path, "error": str(e)})
+                    print(f"FAILED  {tagged_label:30s} {path}: {e}")
+
+            ctx.close()
 
         browser.close()
 

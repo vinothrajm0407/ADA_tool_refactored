@@ -118,15 +118,15 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
+      <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <Send size={16} className="text-teal" />
-            <h3 className="font-heading font-semibold text-base text-ink dark:text-white">Send Report to Channel</h3>
+            <h3 className="font-heading font-semibold text-base text-ink">Send Report to Channel</h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors">
+          <button onClick={onClose} className="p-1 rounded-lg text-gray-400 hover:text-ink transition-colors">
             <X size={16} />
           </button>
         </div>
@@ -137,7 +137,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
           {sent && (
             <div className="flex flex-col items-center py-4 gap-3 text-center">
               <CheckCircle2 size={40} className="text-sage" />
-              <p className="font-semibold text-ink dark:text-white">Report sent successfully!</p>
+              <p className="font-semibold text-ink">Report sent successfully!</p>
             </div>
           )}
 
@@ -148,13 +148,13 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
               )}
 
               {loading && (
-                <p className="text-sm text-body dark:text-gray-400 animate-pulse text-center py-4">Loading integrations…</p>
+                <p className="text-sm text-body animate-pulse text-center py-4">Loading integrations…</p>
               )}
 
               {!loading && integrations.length === 0 && (
                 <div className="text-center py-4 space-y-2">
-                  <p className="text-sm text-body dark:text-gray-400">No integrations connected.</p>
-                  <p className="text-xs text-body dark:text-gray-500">Go to Integrations to connect Slack or Teams first.</p>
+                  <p className="text-sm text-body">No integrations connected.</p>
+                  <p className="text-xs text-body">Go to Integrations to connect Slack or Teams first.</p>
                 </div>
               )}
 
@@ -162,7 +162,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
                 <>
                   {/* Workspace selector */}
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-ink dark:text-white">Workspace</label>
+                    <label className="block text-sm font-medium text-ink">Workspace</label>
                     <div className="flex flex-wrap gap-2">
                       {integrations.map(int => (
                         <button
@@ -171,7 +171,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
                           className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
                             selectedInt?.id === int.id
                               ? 'border-teal bg-teal/10 text-teal'
-                              : 'border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:border-teal/50'
+                              :'border-gray-200 text-body hover:border-teal/50'
                           }`}
                         >
                           {int.platform === 'slack' ? <SlackIcon size={14} /> : <TeamsIcon size={14} />}
@@ -183,10 +183,10 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
 
                   {/* Channel selector */}
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-ink dark:text-white">Channel</label>
-                    {chLoading && <p className="text-xs text-body dark:text-gray-400 animate-pulse">Loading channels…</p>}
+                    <label className="block text-sm font-medium text-ink">Channel</label>
+                    {chLoading && <p className="text-xs text-body animate-pulse">Loading channels…</p>}
                     {!chLoading && channels.length === 0 && (
-                      <p className="text-xs text-body dark:text-gray-400">
+                      <p className="text-xs text-body">
                         No channels configured for this workspace. Add one on the Integrations page.
                       </p>
                     )}
@@ -199,7 +199,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
                               selectedCh?.channel_id === ch.channel_id
                                 ? 'border-teal bg-teal/10 text-teal'
-                                : 'border-gray-200 dark:border-white/10 text-body dark:text-gray-400 hover:border-teal/50'
+                                :'border-gray-200 text-body hover:border-teal/50'
                             }`}
                           >
                             <Hash size={12} />
@@ -212,7 +212,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
 
                   {/* Report type */}
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-ink dark:text-white">Report type</label>
+                    <label className="block text-sm font-medium text-ink">Report type</label>
                     <div className="space-y-2">
                       {REPORT_TYPES.map(rt => (
                         <label
@@ -220,7 +220,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
                           className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
                             reportType === rt.id
                               ? 'border-teal bg-teal/5'
-                              : 'border-gray-100 dark:border-white/[0.06] hover:border-teal/30'
+                              :'border-gray-100 hover:border-teal/30'
                           }`}
                         >
                           <input
@@ -232,8 +232,8 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
                             className="mt-0.5 accent-teal flex-shrink-0"
                           />
                           <div>
-                            <p className="text-sm font-semibold text-ink dark:text-white">{rt.label}</p>
-                            <p className="text-xs text-body dark:text-gray-400">{rt.desc}</p>
+                            <p className="text-sm font-semibold text-ink">{rt.label}</p>
+                            <p className="text-xs text-body">{rt.desc}</p>
                           </div>
                         </label>
                       ))}
@@ -242,26 +242,26 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
 
                   {/* Optional note */}
                   <div className="space-y-1.5">
-                    <label className="block text-sm font-medium text-ink dark:text-white">
-                      Note <span className="text-body dark:text-gray-500 font-normal">(optional)</span>
+                    <label className="block text-sm font-medium text-ink">
+                      Note <span className="text-body font-normal">(optional)</span>
                     </label>
                     <textarea
                       value={note}
                       onChange={e => setNote(e.target.value)}
                       rows={2}
                       placeholder="e.g. Post-deploy scan for homepage redesign"
-                      className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal resize-none"
+                      className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-ink text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal resize-none"
                     />
                   </div>
 
                   {/* Preview strip */}
                   {context.url && (
-                    <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-3 text-xs text-body dark:text-gray-400 space-y-1">
-                      <p className="font-semibold text-ink dark:text-white text-[11px] uppercase tracking-widest">Preview</p>
-                      <p><span className="font-medium text-ink dark:text-white">Site:</span> {context.url}</p>
-                      {context.score != null && <p><span className="font-medium text-ink dark:text-white">Score:</span> {context.score}/100</p>}
-                      {context.violations != null && <p><span className="font-medium text-ink dark:text-white">Violations:</span> {context.violations}</p>}
-                      {context.pass_rate != null && <p><span className="font-medium text-ink dark:text-white">Pass Rate:</span> {context.pass_rate}%</p>}
+                    <div className="bg-gray-50 rounded-xl px-4 py-3 text-xs text-body space-y-1">
+                      <p className="font-semibold text-ink text-[11px] uppercase tracking-widest">Preview</p>
+                      <p><span className="font-medium text-ink">Site:</span> {context.url}</p>
+                      {context.score != null && <p><span className="font-medium text-ink">Score:</span> {context.score}/100</p>}
+                      {context.violations != null && <p><span className="font-medium text-ink">Violations:</span> {context.violations}</p>}
+                      {context.pass_rate != null && <p><span className="font-medium text-ink">Pass Rate:</span> {context.pass_rate}%</p>}
                     </div>
                   )}
                 </>
@@ -272,7 +272,7 @@ export default function SendReportModal({ onClose, defaultReportType = 'scan_sum
 
         {/* Footer */}
         {!sent && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 dark:border-white/[0.06]">
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
             <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
             <button
               onClick={handleSend}

@@ -59,18 +59,22 @@ def _tick() -> None:
         url = sched["root_url"]
         freq = sched["frequency"]
         time_of_day = sched.get("time_of_day")
+        schedule_type = sched.get("schedule_type", "simple")
+        cron_expression = sched.get("cron_expression")
 
         if db.has_active_crawl_for_url(url):
             logger.info(
                 "Scheduler: skipping schedule id=%s url=%s — crawl already active",
                 sid, url,
             )
-            db.mark_schedule_ran(sid, freq, time_of_day=time_of_day)  # advance NextRunAt so we don't retry in the same window
+            db.mark_schedule_ran(sid, freq, time_of_day=time_of_day,  # advance NextRunAt so we don't retry in the same window
+                                  schedule_type=schedule_type, cron_expression=cron_expression)
             continue
 
         try:
-            job = create_crawl_job(url, {})
-            db.mark_schedule_ran(sid, freq, time_of_day=time_of_day)
+            job = create_crawl_job(url, {"user_id": sched.get("user_id")})
+            db.mark_schedule_ran(sid, freq, time_of_day=time_of_day,
+                                  schedule_type=schedule_type, cron_expression=cron_expression)
             logger.info(
                 "Scheduler: triggered crawl_id=%s for schedule id=%s url=%s freq=%s",
                 job.get("crawl_id"), sid, url, freq,

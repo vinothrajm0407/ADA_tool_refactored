@@ -3,21 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 const CRAWL_ID_KEY = 'ada_crawl_id';
 const AUTH_KEY     = 'ada_auth';
 const POST_AUTH_REDIRECT_KEY = 'ada_post_auth_redirect';
-const THEME_KEY = 'ada-tool-theme';
 const REDUCED_MOTION_KEY = 'ada-tool-reduced-motion';
-
-function readInitialDark() {
-  try {
-    const saved = localStorage.getItem(THEME_KEY);
-    if (saved === 'dark') return true;
-    if (saved === 'light') return false;
-  } catch {}
-  try {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  } catch {
-    return false;
-  }
-}
 
 const PAGE_TO_PATH = {
   landing:              '/',
@@ -36,7 +22,6 @@ const PAGE_TO_PATH = {
   'keyboard-test':      '/keyboard-test',   // legacy route — kept for backward compat
   'assistive-test':     '/assistive-test',
   'assistive-results':  '/assistive-results',
-  'ai-fix':             '/ai-fix',
   'wcag-reference':     '/wcag-reference',
   integrations:         '/integrations',
   settings:             '/settings',
@@ -83,7 +68,7 @@ function readStoredAuth() {
   } catch {}
 
   try {
-    const raw = sessionStorage.getItem(AUTH_KEY);
+    const raw = localStorage.getItem(AUTH_KEY) || sessionStorage.getItem(AUTH_KEY);
     if (!raw) return { user: null, token: null };
     return JSON.parse(raw);
   } catch {
@@ -121,6 +106,7 @@ export const AppContext = createContext({
   activeScanSessionId: null,
   setActiveScanSessionId: () => {},
   createScanSession: () => {},
+  createDraftScanSession: () => {},
   updateScanSession: () => {},
   closeScanSession: () => {},
   updateSessionAutoFix: () => {},
@@ -133,13 +119,10 @@ export const AppContext = createContext({
 });
 
 export function AppProvider({ children }) {
-  const [dark, setDark] = useState(readInitialDark);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-    try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch {}
-  }, [dark]);
+  // Light-only app — no dark mode. `dark`/`setDark` stay in context as an
+  // always-false, no-op pair so any not-yet-updated consumer keeps working.
+  const dark = false;
+  const setDark = useCallback(() => {}, []);
 
   const [reducedMotion, setReducedMotion] = useState(() => {
     try { return localStorage.getItem(REDUCED_MOTION_KEY) === 'true'; } catch { return false; }
@@ -176,6 +159,23 @@ export function AppProvider({ children }) {
     const session = {
       id, url, includeBestPractices,
       phase: 'scanning', result: null, error: '',
+      autoFixState: {},
+      assistiveState: {},
+    };
+    setScanSessions(prev => [...prev, session]);
+    setActiveScanSessionIdState(id);
+    return id;
+  }, []);
+
+  // An empty, not-yet-run tab — lets someone open several "new scan" tabs at
+  // once (each keeping its own typed-but-unsubmitted URL) instead of there
+  // only ever being one shared blank compose form. Converts in place into a
+  // real running session (via updateScanSession) once its scan actually starts.
+  const createDraftScanSession = useCallback(() => {
+    const id = (crypto.randomUUID && crypto.randomUUID()) || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const session = {
+      id, url: '', includeBestPractices: false,
+      phase: 'draft', result: null, error: '',
       autoFixState: {},
       assistiveState: {},
     };
@@ -229,16 +229,28 @@ export function AppProvider({ children }) {
   const [user, setUser] = useState(stored.user);
   const [token, setToken] = useState(stored.token);
 
-  const login = useCallback((userData, tokenValue) => {
+  const login = useCallback((userData, tokenValue, remember) => {
     setUser(userData);
     setToken(tokenValue);
-    try { sessionStorage.setItem(AUTH_KEY, JSON.stringify({ user: userData, token: tokenValue })); } catch {}
+    const payload = JSON.stringify({ user: userData, token: tokenValue });
+    try {
+      if (remember) {
+        localStorage.setItem(AUTH_KEY, payload);
+        sessionStorage.removeItem(AUTH_KEY);
+      } else {
+        sessionStorage.setItem(AUTH_KEY, payload);
+        localStorage.removeItem(AUTH_KEY);
+      }
+    } catch {}
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     setToken(null);
-    try { sessionStorage.removeItem(AUTH_KEY); } catch {}
+    try {
+      sessionStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(AUTH_KEY);
+    } catch {}
   }, []);
 
   function setCrawlId(id) {
@@ -276,6 +288,23 @@ export function AppProvider({ children }) {
       const targetPage = params.get('_ext_page') ?? 'scan-history';
       const cleanPath  = PAGE_TO_PATH[targetPage] ?? '/scan-history';
       window.history.replaceState({ page: targetPage }, '', cleanPath);
+    }
+  }, []);
+
+  // Deep link from a Slack/Teams report ("View Report" button): ?crawlId=X or ?scanId=X.
+  // Safe to run pre-auth — state set here survives the SPA's own login flow.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const linkedCrawlId = params.get('crawlId');
+    const linkedScanId  = params.get('scanId');
+    if (linkedCrawlId) {
+      setCrawlId(linkedCrawlId);
+      setActivePage('crawl-results');
+      window.history.replaceState({ page: 'crawl-results' }, '', '/crawl-results');
+    } else if (linkedScanId) {
+      setScanHistoryId(linkedScanId);
+      setActivePage('scan-history');
+      window.history.replaceState({ page: 'scan-history' }, '', '/scan-history');
     }
   }, []);
 
@@ -335,6 +364,7 @@ export function AppProvider({ children }) {
         activeScanSessionId,
         setActiveScanSessionId,
         createScanSession,
+        createDraftScanSession,
         updateScanSession,
         closeScanSession,
         updateSessionAutoFix,

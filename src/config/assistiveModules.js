@@ -6,7 +6,7 @@ import {
 export const MODULES = [
   {
     id: 'keyboard',
-    label: 'Keyboard Navigation',
+    label: 'Keyboard navigation',
     icon: Keyboard,
     status: 'active',
     description: 'Tab order, focus traps, skip links, visible focus indicators',
@@ -14,7 +14,7 @@ export const MODULES = [
   },
   {
     id: 'color-contrast',
-    label: 'Color Contrast',
+    label: 'Color contrast',
     icon: Eye,
     status: 'active',
     description: 'WCAG 1.4.3 contrast ratio analysis across all text elements',
@@ -51,7 +51,7 @@ export const MODULES = [
   },
   {
     id: 'page-structure',
-    label: 'Page Structure',
+    label: 'Page structure',
     icon: AlignLeft,
     status: 'active',
     description: 'Heading hierarchy, landmark regions, document outline',

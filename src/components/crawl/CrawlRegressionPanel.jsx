@@ -16,11 +16,11 @@ function DeltaChip({ delta, good = false }) {
 
 function CardHeader({ icon: Icon, iconClass, title, badge }) {
   return (
-    <div className="px-5 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2">
+    <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
       <Icon className={`w-4 h-4 flex-shrink-0 ${iconClass}`} />
-      <p className="font-heading font-semibold text-sm text-ink dark:text-white">{title}</p>
+      <p className="font-heading font-semibold text-sm text-ink">{title}</p>
       {badge != null && badge > 0 && (
-        <span className="ml-auto text-xs font-semibold text-body dark:text-gray-400">{badge}</span>
+        <span className="ml-auto text-xs font-semibold text-body">{badge}</span>
       )}
     </div>
   );
@@ -29,8 +29,8 @@ function CardHeader({ icon: Icon, iconClass, title, badge }) {
 function RowSkeleton() {
   return (
     <div className="px-5 py-3.5 space-y-1.5">
-      <div className="h-3 bg-gray-100 dark:bg-white/5 rounded animate-pulse w-40" />
-      <div className="h-2.5 bg-gray-100 dark:bg-white/5 rounded animate-pulse w-24" />
+      <div className="h-3 bg-gray-100 rounded animate-pulse w-40"/>
+      <div className="h-2.5 bg-gray-100 rounded animate-pulse w-24"/>
     </div>
   );
 }
@@ -60,7 +60,7 @@ export default function CrawlRegressionPanel({ crawlId, isComplete }) {
   const improvements = data?.improvements ?? [];
   const newPages = data?.new_pages ?? [];
 
-  const cardBase = "bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft";
+  const cardBase ="bg-white rounded-2xl border border-gray-100";
 
   return (
     <div className="grid lg:grid-cols-2 gap-4">
@@ -70,7 +70,7 @@ export default function CrawlRegressionPanel({ crawlId, isComplete }) {
         <CardHeader icon={AlertTriangle} iconClass="text-coral" title="Needs Attention" />
 
         {loading ? (
-          <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+          <div className="divide-y divide-gray-50">
             <RowSkeleton /><RowSkeleton /><RowSkeleton />
           </div>
         ) : regressions.length === 0 ? (
@@ -78,20 +78,20 @@ export default function CrawlRegressionPanel({ crawlId, isComplete }) {
             <div className="w-10 h-10 rounded-full bg-sage/10 flex items-center justify-center mb-2">
               <TrendingUp className="w-5 h-5 text-sage" />
             </div>
-            <p className="text-sm font-medium text-ink dark:text-white">No regressions</p>
-            <p className="text-xs text-body dark:text-gray-500 mt-1">
+            <p className="text-sm font-medium text-ink">No regressions</p>
+            <p className="text-xs text-body mt-1">
               All pages stable or improved vs previous crawl
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+          <div className="divide-y divide-gray-50">
             {regressions.slice(0, 7).map((item, idx) => (
               <div key={idx} className="px-5 py-3.5 flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium text-ink dark:text-white truncate" title={item.url}>
+                  <p className="text-xs font-medium text-ink truncate"title={item.url}>
                     {formatUrl(item.url)}
                   </p>
-                  <p className="text-[11px] text-body dark:text-gray-500 mt-0.5">
+                  <p className="text-[11px] text-body mt-0.5">
                     <span className="text-coral font-semibold">{item.current_violations}</span>
                     {' violations · was '}
                     <span>{item.previous_violations}</span>
@@ -110,22 +110,22 @@ export default function CrawlRegressionPanel({ crawlId, isComplete }) {
         <div className={cardBase}>
           <CardHeader icon={TrendingDown} iconClass="text-sage" title="Improvements" badge={improvements.length} />
           {loading ? (
-            <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+            <div className="divide-y divide-gray-50">
               <RowSkeleton /><RowSkeleton />
             </div>
           ) : improvements.length === 0 ? (
-            <p className="px-5 py-4 text-xs text-body dark:text-gray-500">
+            <p className="px-5 py-4 text-xs text-body">
               No improvements detected vs previous crawl
             </p>
           ) : (
-            <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+            <div className="divide-y divide-gray-50">
               {improvements.slice(0, 5).map((item, idx) => (
                 <div key={idx} className="px-5 py-3 flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium text-ink dark:text-white truncate" title={item.url}>
+                    <p className="text-xs font-medium text-ink truncate"title={item.url}>
                       {formatUrl(item.url)}
                     </p>
-                    <p className="text-[11px] text-body dark:text-gray-500 mt-0.5">
+                    <p className="text-[11px] text-body mt-0.5">
                       <span className="text-sage font-semibold">{item.current_violations}</span>
                       {' · was '}{item.previous_violations}
                     </p>
@@ -140,10 +140,10 @@ export default function CrawlRegressionPanel({ crawlId, isComplete }) {
         {!loading && newPages.length > 0 && (
           <div className={cardBase}>
             <CardHeader icon={Plus} iconClass="text-teal" title="New Pages" badge={newPages.length} />
-            <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+            <div className="divide-y divide-gray-50">
               {newPages.slice(0, 5).map((item, idx) => (
                 <div key={idx} className="px-5 py-3 flex items-center justify-between gap-2">
-                  <p className="text-xs font-medium text-ink dark:text-white truncate" title={item.url}>
+                  <p className="text-xs font-medium text-ink truncate"title={item.url}>
                     {formatUrl(item.url)}
                   </p>
                   {item.violations > 0 && (

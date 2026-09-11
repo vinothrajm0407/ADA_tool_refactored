@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CheckCircle2, XCircle, GitBranch, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+import PageHeader from '../components/ui/PageHeader';
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -28,10 +29,10 @@ function StatusBadge({ status }) {
 
 function FixRow({ fix }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 py-4 bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+    <div className="flex items-start justify-between gap-4 px-5 py-4 bg-white rounded-2xl border border-gray-100">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap mb-1">
-          <span className="font-mono text-[11px] font-semibold text-ink dark:text-white bg-gray-100 dark:bg-white/[0.06] px-2 py-0.5 rounded">
+          <span className="font-mono text-[11px] font-semibold text-ink bg-gray-100 px-2 py-0.5 rounded">
             {fix.rule_id}
           </span>
           <StatusBadge status={fix.status} />
@@ -41,7 +42,7 @@ function FixRow({ fix }) {
             </span>
           )}
         </div>
-        <p className="text-[12px] text-body dark:text-gray-500 truncate">{fix.page_url}</p>
+        <p className="text-[12px] text-body truncate">{fix.page_url}</p>
         {fix.status !== 'verified' && fix.error_message && (
           <p className="text-[12px] text-coral mt-1">{fix.error_message}</p>
         )}
@@ -60,7 +61,7 @@ function FixRow({ fix }) {
           )}
         </div>
       </div>
-      <span className="text-[11px] text-body dark:text-gray-500 whitespace-nowrap flex-shrink-0 pt-0.5">
+      <span className="text-[11px] text-body whitespace-nowrap flex-shrink-0 pt-0.5">
         {formatDate(fix.created_at)}
       </span>
     </div>
@@ -83,37 +84,34 @@ export default function FixHistoryPage() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0"role="main">
       <div className="max-w-[900px] mx-auto space-y-8">
 
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Fix History</h1>
-            <p className="text-body dark:text-gray-400 text-[0.9375rem]">
-              Every Auto Fix attempt — verified and failed — across all your connected repos.
-            </p>
-          </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="btn-secondary text-sm flex items-center gap-2 flex-shrink-0 disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-          </button>
-        </div>
+        <PageHeader
+          title="Fix History"
+          description="Every Auto Fix attempt — verified and failed — across all your connected repos."
+          actions={
+            <button
+              onClick={load}
+              disabled={loading}
+              className="btn-secondary text-sm flex items-center gap-2 flex-shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+            </button>
+          }
+        />
 
         {/* List */}
         {loading ? (
           <div className="space-y-3">
             {[0, 1, 2].map(i => (
-              <div key={i} className="h-[84px] rounded-2xl bg-gray-100 dark:bg-white/5 animate-pulse" />
+              <div key={i} className="h-[84px] rounded-2xl bg-gray-100 animate-pulse"/>
             ))}
           </div>
         ) : fixes.length === 0 ? (
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-10 text-center">
-            <GitBranch size={28} className="text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p className="text-sm text-body dark:text-gray-400">No Auto Fix attempts yet. Click Auto Fix on a violation to get started.</p>
+          <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
+            <GitBranch size={28} className="text-gray-300 mx-auto mb-3"/>
+            <p className="text-sm text-body">No Auto Fix attempts yet. Click Auto Fix on a violation to get started.</p>
           </div>
         ) : (
           <div className="space-y-3">

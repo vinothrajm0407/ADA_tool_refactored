@@ -26,6 +26,48 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _aggregate_crawl_violations(crawl_id: str, max_pages: int = 60) -> list[dict]:
+    """
+    Tally violations by rule id across every scanned page in the crawl, for the
+    full-detail Slack/Teams report. Reads each page's stored axe result (already
+    persisted by save_scan_history during the crawl) rather than re-scanning.
+    Best-effort: any DB error here must not break crawl completion.
+    """
+    tally: dict[str, dict] = {}
+    try:
+        pages = db.get_crawl_pages(crawl_id)[:max_pages]
+        for page in pages:
+            raw_id = page.get("scan_history_id")
+            if not raw_id:
+                continue
+            try:
+                scan_id = int(str(raw_id).removeprefix("SCAN-"))
+                result = db.get_scan_result(scan_id)
+            except Exception:
+                continue
+            for v in ((result or {}).get("axeResult") or {}).get("violations") or []:
+                rule_id = v.get("id", "")
+                if not rule_id:
+                    continue
+                entry = tally.setdefault(rule_id, {
+                    "rule_id": rule_id,
+                    "impact": v.get("impact"),
+                    "description": v.get("description") or v.get("help"),
+                    "wcag_tags": [t for t in (v.get("tags") or []) if t.startswith("wcag")],
+                    "help_url": v.get("helpUrl"),
+                    "affected_count": 0,
+                    "pages_affected": 0,
+                    "example_selector": None,
+                })
+                entry["affected_count"] += len(v.get("nodes") or [])
+                entry["pages_affected"] += 1
+                if not entry["example_selector"]:
+                    entry["example_selector"] = (((v.get("nodes") or [{}])[0]).get("target") or [None])[0]
+    except Exception:
+        logger.exception("Failed to aggregate crawl violations for %s", crawl_id)
+    return sorted(tally.values(), key=lambda e: e["affected_count"], reverse=True)
+
+
 def _duration(started: str, ended: str) -> float | None:
     try:
         return (
@@ -42,6 +84,7 @@ def crawl_site_task(
     max_depth: int,
     max_pages: int,
     notify_email: str = None,
+    user_id: int = None,
 ) -> dict:
     """
     BFS site crawl: navigate each page with a shared Playwright browser,
@@ -260,6 +303,42 @@ def crawl_site_task(
         generate_and_store_summary(crawl_id)
     except Exception as _ai_exc:
         logger.warning("AI summary failed | crawl_id=%s error=%s", crawl_id, _ai_exc)
+
+    # Phase 3 — report delivery (non-blocking, best-effort). Runs after the AI
+    # summary step above so the Executive Summary PDF can include it when
+    # available. The PDF is sent to Slack as a single file+comment message;
+    # Teams always gets its rich-text card (no file-attachment capability),
+    # and Slack only falls back to that card if the PDF wasn't delivered.
+    if user_id:
+        try:
+            violations_detail = _aggregate_crawl_violations(crawl_id)
+            score = summary.get("site_score") if summary.get("site_score") is not None else "—"
+            pass_rate = summary.get("avg_pass_rate") if summary.get("avg_pass_rate") is not None else "—"
+            violations = summary.get("total_violations", 0)
+
+            from backend.services.notify_service import auto_share_report, has_slack_integration, send_report_pdf
+            pdf_sent = False
+            if has_slack_integration(user_id):
+                from backend.services.report_pdf_service import render_crawl_executive_summary
+                pdf_bytes = render_crawl_executive_summary(crawl_id)
+                if pdf_bytes:
+                    comment = f"*ADA Crawl Report — {root_url}*\nScore: {score}/100 · Pass rate: {pass_rate}% · Violations: {violations}"
+                    pdf_sent = send_report_pdf(user_id, f"executive-summary-{crawl_id}.pdf", pdf_bytes,
+                                                reference=crawl_id, initial_comment=comment)
+
+            auto_share_report(user_id, "crawl_summary", {
+                "url": root_url,
+                "score": score,
+                "violations": violations,
+                "pass_rate": pass_rate,
+                "pages": total_scanned,
+                "violations_detail": violations_detail,
+                "crawl_id": crawl_id,
+                "reference": crawl_id,
+                "skip_slack_card": pdf_sent,
+            })
+        except Exception as _notify_exc:
+            logger.warning("Report delivery failed | crawl_id=%s error=%s", crawl_id, _notify_exc)
 
     # Phase 3 — Alert evaluation (non-blocking, best-effort)
     try:

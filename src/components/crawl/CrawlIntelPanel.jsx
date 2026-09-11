@@ -24,10 +24,10 @@ function formatRuleId(id) {
 
 function SectionCard({ title, subtitle, children }) {
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
-      <div className="px-5 py-4 border-b border-gray-100 dark:border-white/[0.06]">
-        <p className="font-heading font-semibold text-sm text-ink dark:text-white">{title}</p>
-        {subtitle && <p className="text-xs text-body dark:text-gray-500 mt-0.5">{subtitle}</p>}
+    <div className="bg-white rounded-2xl border border-gray-100">
+      <div className="px-5 py-4 border-b border-gray-100">
+        <p className="font-heading font-semibold text-sm text-ink">{title}</p>
+        {subtitle && <p className="text-xs text-body mt-0.5">{subtitle}</p>}
       </div>
       {children}
     </div>
@@ -40,10 +40,10 @@ function LoadingSkeleton({ rows = 4 }) {
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="space-y-1.5">
           <div className="flex justify-between">
-            <div className="h-3 bg-gray-100 dark:bg-white/5 rounded animate-pulse" style={{ width: `${48 + (i % 3) * 16}px` }} />
-            <div className="h-3 w-6 bg-gray-100 dark:bg-white/5 rounded animate-pulse" />
+            <div className="h-3 bg-gray-100 rounded animate-pulse"style={{ width:`${48 + (i % 3) * 16}px`}} />
+            <div className="h-3 w-6 bg-gray-100 rounded animate-pulse"/>
           </div>
-          <div className="h-1.5 bg-gray-100 dark:bg-white/5 rounded-full animate-pulse" />
+          <div className="h-1.5 bg-gray-100 rounded-full animate-pulse"/>
         </div>
       ))}
     </div>
@@ -56,12 +56,12 @@ function BarRow({ label, sub, count, max, barColor, textColor }) {
     <div className="space-y-1.5">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <span className="text-xs font-medium text-ink dark:text-white">{label}</span>
-          {sub && <span className="ml-1.5 text-[10px] text-body dark:text-gray-500">{sub}</span>}
+          <span className="text-xs font-medium text-ink">{label}</span>
+          {sub && <span className="ml-1.5 text-[10px] text-body">{sub}</span>}
         </div>
-        <span className={`text-xs font-semibold flex-shrink-0 ${count > 0 ? textColor : 'text-gray-400 dark:text-gray-600'}`}>{count}</span>
+        <span className={`text-xs font-semibold flex-shrink-0 ${count > 0 ? textColor :'text-gray-400'}`}>{count}</span>
       </div>
-      <div className="h-1.5 rounded-full bg-gray-100 dark:bg-white/5 overflow-hidden">
+      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
         <div className="h-full rounded-full transition-all duration-300" style={{ width: `${pct}%`, backgroundColor: barColor, opacity: 0.75 }} />
       </div>
     </div>
@@ -71,7 +71,7 @@ function BarRow({ label, sub, count, max, barColor, textColor }) {
 function EmptyState({ message = 'No data available' }) {
   return (
     <div className="flex items-center justify-center py-12">
-      <p className="text-sm text-body dark:text-gray-500">{message}</p>
+      <p className="text-sm text-body">{message}</p>
     </div>
   );
 }
@@ -112,7 +112,7 @@ export default function CrawlIntelPanel({ crawlId, isComplete }) {
 
   if (error) {
     return (
-      <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] p-4 flex items-center gap-3 text-sm text-body dark:text-gray-400">
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-3 text-sm text-body">
         <AlertCircle size={16} className="text-amber flex-shrink-0" />
         Accessibility intelligence unavailable: {error}
       </div>
@@ -122,8 +122,8 @@ export default function CrawlIntelPanel({ crawlId, isComplete }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Activity className="w-4 h-4 text-body dark:text-gray-500" />
-        <span className="font-heading font-semibold text-sm uppercase tracking-wider text-body dark:text-gray-400 leading-none">
+        <Activity className="w-4 h-4 text-body"/>
+        <span className="font-heading font-semibold text-sm uppercase tracking-wider text-body leading-none">
           Accessibility Intelligence
         </span>
       </div>
@@ -164,20 +164,20 @@ export default function CrawlIntelPanel({ crawlId, isComplete }) {
                     count={principles[p] ?? 0}
                     max={maxPrinciple}
                     barColor={PRINCIPLE_COLORS[p]}
-                    textColor="text-ink dark:text-white"
+                    textColor="text-ink"
                   />
                 ))}
               </div>
               {wcagCriteria.length > 0 && (
-                <div className="px-5 pb-4 border-t border-gray-100 dark:border-white/5 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-body dark:text-gray-500 mb-2">
+                <div className="px-5 pb-4 border-t border-gray-100 pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-body mb-2">
                     Top Criteria
                   </p>
                   <div className="space-y-1.5">
                     {wcagCriteria.slice(0, 5).map(c => (
                       <div key={c.criterion} className="flex items-center justify-between gap-2">
-                        <span className="text-xs text-ink dark:text-gray-300 truncate" title={c.name}>
-                          <span className="font-mono text-[10px] text-body dark:text-gray-500 mr-1">{c.criterion}</span>
+                        <span className="text-xs text-ink truncate"title={c.name}>
+                          <span className="font-mono text-[10px] text-body mr-1">{c.criterion}</span>
                           {c.name}
                         </span>
                         <span className="text-xs font-semibold text-coral flex-shrink-0">{c.count}</span>
@@ -202,16 +202,16 @@ export default function CrawlIntelPanel({ crawlId, isComplete }) {
                   <div key={item.rule_id}>
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="min-w-0">
-                        <p className="text-xs font-medium text-ink dark:text-white truncate" title={item.rule_id}>
+                        <p className="text-xs font-medium text-ink truncate"title={item.rule_id}>
                           {formatRuleId(item.rule_id)}
                         </p>
-                        <p className="text-[10px] text-body dark:text-gray-500">
+                        <p className="text-[10px] text-body">
                           {item.affected_pages} page{item.affected_pages !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <span className="text-xs font-semibold text-coral flex-shrink-0">{item.count}</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-gray-100 dark:bg-white/5 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                       <div className="h-full rounded-full bg-coral/50 transition-all duration-300" style={{ width: `${pct}%` }} />
                     </div>
                   </div>

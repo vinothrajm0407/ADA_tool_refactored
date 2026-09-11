@@ -95,14 +95,26 @@ class TestTick:
             {"id": 10, "root_url": "https://example.com", "frequency": "weekly"}
         ])
         create = _tick(db)
-        create.assert_called_once_with("https://example.com", {})
+        create.assert_called_once_with("https://example.com", {"user_id": None})
+
+    def test_passes_schedule_owner_to_crawl_job(self):
+        """The schedule's owner must be threaded through so the crawl can
+        notify that user's Slack/Teams channels when it completes — a schedule
+        triggered with no user_id silently skips all notification delivery."""
+        db = _make_db(due_schedules=[
+            {"id": 11, "root_url": "https://example.com", "frequency": "weekly", "user_id": 42}
+        ])
+        create = _tick(db)
+        create.assert_called_once_with("https://example.com", {"user_id": 42})
 
     def test_marks_schedule_ran_after_crawl(self):
         db = _make_db(due_schedules=[
             {"id": 10, "root_url": "https://example.com", "frequency": "weekly"}
         ])
         _tick(db)
-        db.mark_schedule_ran.assert_called_once_with(10, "weekly", time_of_day=None)
+        db.mark_schedule_ran.assert_called_once_with(
+            10, "weekly", time_of_day=None, schedule_type="simple", cron_expression=None
+        )
 
     def test_skips_create_when_crawl_already_active(self):
         db = _make_db(
@@ -119,7 +131,9 @@ class TestTick:
             active=True,
         )
         _tick(db)
-        db.mark_schedule_ran.assert_called_once_with(30, "monthly", time_of_day=None)
+        db.mark_schedule_ran.assert_called_once_with(
+            30, "monthly", time_of_day=None, schedule_type="simple", cron_expression=None
+        )
 
     def test_processes_multiple_due_schedules(self):
         db = _make_db(due_schedules=[

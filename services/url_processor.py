@@ -112,7 +112,12 @@ def run_keyboard_assisted_test(url: str) -> dict:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1366, "height": 768})
+        context = browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            # Harmless on every other site — only an ngrok-tunneled dev URL checks
+            # for this header, to skip its free-tier browser-warning interstitial.
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+        )
         page = context.new_page()
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -305,7 +310,9 @@ def run_color_contrast_assisted_test(url: str) -> dict:
             samples.append({
                 "target": target_text or "Unknown target",
                 "summary": _extract_fix_text(failure_summary),
-                "html": (node.get("html") or "")[:220],
+                # Full (untruncated) outerHTML — Auto-Fix needs an exact match
+                # against the real source, a truncated snippet would weaken that.
+                "html": node.get("html") or "",
                 "ratio": ratio,
                 "fgColor": fg_color,
                 "bgColor": bg_color,
@@ -319,6 +326,7 @@ def run_color_contrast_assisted_test(url: str) -> dict:
                     "target": key,
                     "count": 0,
                     "summary": _extract_fix_text(failure_summary),
+                    "html": node.get("html") or "",
                     "ratio": ratio,
                     "fgColor": fg_color,
                     "bgColor": bg_color,
@@ -383,7 +391,12 @@ def run_page_structure_assisted_test(url: str) -> dict:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1366, "height": 768})
+            context = browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            # Harmless on every other site — only an ngrok-tunneled dev URL checks
+            # for this header, to skip its free-tier browser-warning interstitial.
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+        )
             page = context.new_page()
             try:
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
@@ -397,6 +410,7 @@ def run_page_structure_assisted_test(url: str) -> dict:
                         text: (h.innerText || h.textContent || '').trim().slice(0, 120),
                         id: h.id || '',
                         visible: h.offsetParent !== null || h.offsetWidth > 0 || h.offsetHeight > 0,
+                        outerHTML: h.outerHTML || '',
                     }));
                 }""")
 
@@ -428,6 +442,7 @@ def run_page_structure_assisted_test(url: str) -> dict:
                             label: ariaLabel,
                             labelledby: ariaLabelledby,
                             visible: el.offsetParent !== null,
+                            outerHTML: el.outerHTML || '',
                         };
                     });
                 }""")
@@ -465,6 +480,10 @@ def run_page_structure_assisted_test(url: str) -> dict:
                 "severity": "error",
                 "message": f"Heading level skips from H{prev_level} to H{h['level']}",
                 "detail": f'Near: "{h["text"][:60]}"',
+                # One specific heading is responsible here (unlike no_h1/multiple_h1,
+                # which describe the whole page) — real outerHTML lets Auto-Fix
+                # locate and patch this exact element.
+                "html": h.get("outerHTML", ""),
             })
         prev_level = h["level"]
 
@@ -551,7 +570,12 @@ def run_forms_accessibility_test(url: str) -> dict:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context(viewport={"width": 1366, "height": 768})
+            context = browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            # Harmless on every other site — only an ngrok-tunneled dev URL checks
+            # for this header, to skip its free-tier browser-warning interstitial.
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+        )
             page = context.new_page()
             try:
                 page.goto(url, timeout=45000, wait_until="domcontentloaded")
@@ -646,6 +670,7 @@ def run_forms_accessibility_test(url: str) -> dict:
                             needsAutocomplete,
                             inFieldset: !!el.closest('fieldset'),
                             selector,
+                            outerHTML: el.outerHTML || '',
                         };
                     });
                 }""")
@@ -670,6 +695,7 @@ def run_forms_accessibility_test(url: str) -> dict:
                         return {
                             hasLegend: !!legend,
                             legendText: legend ? (legend.innerText || legend.textContent || '').trim().slice(0, 80) : '',
+                            outerHTML: fs.outerHTML || '',
                         };
                     });
 
@@ -746,6 +772,11 @@ def run_forms_accessibility_test(url: str) -> dict:
         },
     ]
 
+    # Each issue below is tied to one specific input/fieldset element, so its
+    # real outerHTML rides along for Auto-Fix to locate and patch it — except
+    # missing_fieldset, which describes several existing inputs needing a new
+    # *wrapping* element, not one existing element to patch; no single outerHTML
+    # applies there, so it's left out (Auto-Fix has nothing to anchor a match to).
     issues = []
     for f in unlabelled:
         issues.append({
@@ -755,6 +786,7 @@ def run_forms_accessibility_test(url: str) -> dict:
             "detail": f"{f['selector']} (type: {f['type']}) has no associated label",
             "wcag": "1.3.1",
             "selector": f["selector"],
+            "html": f.get("outerHTML", ""),
         })
     for f in placeholder_only:
         issues.append({
@@ -764,6 +796,7 @@ def run_forms_accessibility_test(url: str) -> dict:
             "detail": f"{f['selector']} uses \"{f['labelText']}\" as its only label — placeholder disappears on input",
             "wcag": "1.3.1",
             "selector": f["selector"],
+            "html": f.get("outerHTML", ""),
         })
     for f in needs_autocomplete:
         issues.append({
@@ -773,6 +806,7 @@ def run_forms_accessibility_test(url: str) -> dict:
             "detail": f"{f['selector']} (label: \"{f.get('labelText', '')}\") should have autocomplete=\"{f['suggestedAutocomplete']}\"",
             "wcag": "1.3.5",
             "selector": f["selector"],
+            "html": f.get("outerHTML", ""),
         })
     for g in missing_fieldset_groups:
         issues.append({
@@ -791,6 +825,7 @@ def run_forms_accessibility_test(url: str) -> dict:
             "detail": "A <fieldset> element has no <legend> to describe the group",
             "wcag": "1.3.1",
             "selector": "fieldset",
+            "html": fs.get("outerHTML", ""),
         })
 
     passed_count = sum(1 for c in checks if c["passed"])

@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Globe, ChevronLeft, ChevronRight, Search, RefreshCw,
   TrendingUp, TrendingDown, Minus, BarChart2, X, GitCompareArrows,
-  CheckSquare, Square,
+  CheckSquare, Square, AlertTriangle, CheckCircle,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -13,6 +13,8 @@ import { useApp } from '../../context/AppContext';
 import { formatDateTime, formatShortDate, formatDuration } from '../../utils/format';
 import GlowInput from '../ui/GlowInput';
 import { StatusBadge } from '../ui/StatusBadge';
+import MetricCard from '../ui/MetricCard';
+import { NoResultsInRange } from './ScanHistoryView';
 
 const PAGE_SIZE = 25;
 
@@ -20,13 +22,13 @@ const PAGE_SIZE = 25;
 // Shared helpers
 // ---------------------------------------------------------------------------
 function ScorePill({ value }) {
-  if (value == null) return <span className="text-body dark:text-gray-500 text-xs">—</span>;
+  if (value == null) return <span className="text-body text-xs">—</span>;
   const cls =
     value >= 80
-      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+      ?'bg-sage/15 text-sage-700'
       : value >= 60
-      ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-      : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400';
+      ?'bg-amber/15 text-amber-700'
+      :'bg-coral/15 text-coral-700';
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
       {value}
@@ -35,13 +37,13 @@ function ScorePill({ value }) {
 }
 
 function ViolationPill({ value }) {
-  if (value == null) return <span className="text-body dark:text-gray-500 text-xs">—</span>;
+  if (value == null) return <span className="text-body text-xs">—</span>;
   const cls =
     value === 0
-      ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'
+      ?'bg-sage/15 text-sage-700'
       : value <= 20
-      ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
-      : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400';
+      ?'bg-amber/15 text-amber-700'
+      :'bg-coral/15 text-coral-700';
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
       {value}
@@ -72,29 +74,20 @@ function normaliseStatus(s) {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
-function KpiMini({ label, value, color = 'text-ink dark:text-white' }) {
-  return (
-    <div className="bg-white dark:bg-charcoal rounded-xl border border-gray-100 dark:border-white/[0.06] p-4 shadow-soft">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">{label}</p>
-      <p className={`font-heading font-bold text-2xl mt-1 leading-none ${color}`}>{value ?? '—'}</p>
-    </div>
-  );
-}
-
 function ScoreTimelineChart({ data, urlLabel }) {
   if (data.length < 2) return null;
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-5">
+    <div className="bg-white rounded-2xl border border-gray-100 p-5">
       <div className="mb-4 flex items-start justify-between gap-2">
         <div>
-          <p className="font-heading font-semibold text-sm text-ink dark:text-white">
+          <p className="font-heading font-semibold text-sm text-ink">
             Accessibility Health Trend
           </p>
-          <p className="text-xs text-body dark:text-gray-500 mt-0.5 truncate max-w-xs" title={urlLabel}>
+          <p className="text-xs text-body mt-0.5 truncate max-w-xs"title={urlLabel}>
             {urlLabel}
           </p>
         </div>
-        <span className="text-[10px] text-body dark:text-gray-500 flex-shrink-0 mt-1">
+        <span className="text-[10px] text-body flex-shrink-0 mt-1">
           {data.length} run{data.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -131,17 +124,17 @@ function ScoreTimelineChart({ data, urlLabel }) {
 function ComparePanel({ data, loading, error, onClose }) {
   if (loading) {
     return (
-      <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6 animate-pulse space-y-4">
-        <div className="h-4 bg-gray-100 dark:bg-white/5 rounded w-48" />
+      <div className="bg-white rounded-2xl border border-gray-100 p-6 animate-pulse space-y-4">
+        <div className="h-4 bg-gray-100 rounded w-48"/>
         <div className="grid grid-cols-2 gap-4">
-          {[0,1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 dark:bg-white/5 rounded-xl" />)}
+          {[0,1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl"/>)}
         </div>
       </div>
     );
   }
   if (error) {
     return (
-      <div className="bg-white dark:bg-charcoal rounded-2xl border border-coral/20 p-4 text-sm text-coral">
+      <div className="bg-white rounded-2xl border border-coral/20 p-4 text-sm text-coral">
         Comparison error: {error}
       </div>
     );
@@ -153,11 +146,11 @@ function ComparePanel({ data, loading, error, onClose }) {
   function CompareMetric({ label, valueA, valueB, delta, invertGood = false }) {
     return (
       <div className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-body dark:text-gray-500">{label}</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-body">{label}</p>
         <div className="flex items-center gap-3">
-          <span className="font-heading font-bold text-lg text-ink dark:text-white">{valueA ?? '—'}</span>
-          <span className="text-body dark:text-gray-500 text-sm">→</span>
-          <span className="font-heading font-bold text-lg text-ink dark:text-white">{valueB ?? '—'}</span>
+          <span className="font-heading font-bold text-lg text-ink">{valueA ??'—'}</span>
+          <span className="text-body text-sm">→</span>
+          <span className="font-heading font-bold text-lg text-ink">{valueB ??'—'}</span>
           <DeltaBadge delta={delta} invertGood={invertGood} />
         </div>
       </div>
@@ -165,19 +158,19 @@ function ComparePanel({ data, loading, error, onClose }) {
   }
 
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft overflow-hidden">
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center justify-between gap-3">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <GitCompareArrows size={16} className="text-teal flex-shrink-0" />
-          <p className="font-heading font-semibold text-sm text-ink dark:text-white">Crawl Comparison</p>
+          <p className="font-heading font-semibold text-sm text-ink">Crawl Comparison</p>
         </div>
-        <div className="flex items-center gap-4 text-[11px] text-body dark:text-gray-500">
+        <div className="flex items-center gap-4 text-[11px] text-body">
           <span>A: {formatShortDate(crawl_a.created_at)}</span>
           <span>B: {formatShortDate(crawl_b.created_at)}</span>
         </div>
-        <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">
-          <X size={15} className="text-body dark:text-gray-400" />
+        <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors">
+          <X size={15} className="text-body"/>
         </button>
       </div>
 
@@ -210,7 +203,7 @@ function ComparePanel({ data, loading, error, onClose }) {
           {[
             { label: `${summary.pages_improved} improved`, cls: 'bg-sage/10 text-sage' },
             { label: `${summary.pages_regressed} regressed`, cls: 'bg-coral/10 text-coral' },
-            { label: `${summary.pages_unchanged} unchanged`, cls: 'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400' },
+            { label:`${summary.pages_unchanged} unchanged`, cls:'bg-gray-100 text-body'},
             summary.pages_only_in_b > 0 && { label: `${summary.pages_only_in_b} new in B`, cls: 'bg-teal/10 text-teal' },
           ].filter(Boolean).map(({ label, cls }) => (
             <span key={label} className={`text-xs font-semibold px-3 py-1 rounded-full ${cls}`}>{label}</span>
@@ -220,14 +213,14 @@ function ComparePanel({ data, loading, error, onClose }) {
         {/* Top regressions in B */}
         {data.regressed.length > 0 && (
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-body dark:text-gray-500 mb-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-body mb-2">
               Biggest Regressions (A → B)
             </p>
-            <div className="divide-y divide-gray-50 dark:divide-white/[0.04] rounded-xl border border-gray-100 dark:border-white/[0.06] overflow-hidden">
+            <div className="divide-y divide-gray-50 rounded-xl border border-gray-100 overflow-hidden">
               {data.regressed.slice(0, 5).map((r, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                  <p className="text-xs text-ink dark:text-white truncate flex-1" title={r.url}>{r.url}</p>
-                  <span className="text-xs text-body dark:text-gray-400 flex-shrink-0">
+                  <p className="text-xs text-ink truncate flex-1"title={r.url}>{r.url}</p>
+                  <span className="text-xs text-body flex-shrink-0">
                     {r.violations_a} → {r.violations_b}
                   </span>
                   <DeltaBadge delta={r.delta} invertGood />
@@ -240,14 +233,14 @@ function ComparePanel({ data, loading, error, onClose }) {
         {/* Top improvements */}
         {data.improved.length > 0 && (
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-body dark:text-gray-500 mb-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-body mb-2">
               Most Improved (A → B)
             </p>
-            <div className="divide-y divide-gray-50 dark:divide-white/[0.04] rounded-xl border border-gray-100 dark:border-white/[0.06] overflow-hidden">
+            <div className="divide-y divide-gray-50 rounded-xl border border-gray-100 overflow-hidden">
               {data.improved.slice(0, 5).map((r, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                  <p className="text-xs text-ink dark:text-white truncate flex-1" title={r.url}>{r.url}</p>
-                  <span className="text-xs text-body dark:text-gray-400 flex-shrink-0">
+                  <p className="text-xs text-ink truncate flex-1"title={r.url}>{r.url}</p>
+                  <span className="text-xs text-body flex-shrink-0">
                     {r.violations_a} → {r.violations_b}
                   </span>
                   <DeltaBadge delta={r.delta} />
@@ -445,38 +438,43 @@ export function CrawlHistoryContent() {
         {showAnalytics && (
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-body dark:text-gray-500" />
-              <p className="font-heading font-semibold text-sm uppercase tracking-wider text-body dark:text-gray-400 leading-none">
+              <BarChart2 className="w-4 h-4 text-body"/>
+              <p className="font-heading font-semibold text-sm uppercase tracking-wider text-body leading-none">
                 Site Analytics
               </p>
             </div>
 
             {/* KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <KpiMini
-                label="Current Site Score"
-                value={latestCompleted?.site_score}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <MetricCard
+                title="Current Site Score"
+                value={latestCompleted?.site_score ?? '—'}
+                icon={BarChart2}
                 color={
                   latestCompleted?.site_score >= 80
-                    ? 'text-sage'
+                    ? 'sage'
                     : latestCompleted?.site_score >= 60
-                    ? 'text-amber'
-                    : 'text-coral'
+                    ? 'amber'
+                    : 'coral'
                 }
               />
-              <KpiMini
-                label="Avg Pass Rate"
-                value={latestCompleted?.avg_pass_rate != null ? `${latestCompleted.avg_pass_rate}%` : null}
+              <MetricCard
+                title="Avg Pass Rate"
+                value={latestCompleted?.avg_pass_rate != null ? `${latestCompleted.avg_pass_rate}%` : '—'}
+                icon={CheckCircle}
+                color="sage"
               />
-              <KpiMini
-                label="Total Violations"
-                value={latestCompleted?.total_violations}
-                color="text-coral"
+              <MetricCard
+                title="Total Violations"
+                value={latestCompleted?.total_violations ?? '—'}
+                icon={AlertTriangle}
+                color="coral"
               />
-              <KpiMini
-                label="Crawl Runs"
+              <MetricCard
+                title="Crawl Runs"
                 value={items.length}
-                color="text-teal"
+                icon={Globe}
+                color="teal"
               />
             </div>
 
@@ -485,9 +483,9 @@ export function CrawlHistoryContent() {
               <div className="space-y-2">
                 {eligibleUrls.length > 1 && (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-body dark:text-gray-400">Timeline for:</span>
+                    <span className="text-xs text-body">Timeline for:</span>
                     <select
-                      className="text-xs bg-white dark:bg-charcoal border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1 text-ink dark:text-white focus:outline-none focus:ring-1 focus:ring-teal"
+                      className="text-xs bg-white border border-gray-200 rounded-lg px-2 py-1 text-ink focus:outline-none focus:ring-1 focus:ring-teal"
                       value={analyticsUrl || ''}
                       onChange={e => setAnalyticsUrl(e.target.value)}
                     >
@@ -507,8 +505,8 @@ export function CrawlHistoryContent() {
         {!loading && !error && message && (
           <p className={
             available
-              ? 'text-[0.95rem] text-body dark:text-gray-400'
-              : 'text-[0.95rem] text-ink dark:text-white bg-teal/10 dark:bg-teal/[0.15] px-4 py-3 rounded-xl border border-teal'
+              ?'text-[0.95rem] text-body'
+              :'text-[0.95rem] text-ink bg-teal/10 px-4 py-3 rounded-xl border border-teal'
           } role={available ? undefined : 'status'}>
             {message}
           </p>
@@ -517,13 +515,13 @@ export function CrawlHistoryContent() {
         {loading && (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-14 bg-gray-200 dark:bg-white/10 rounded-xl animate-pulse" />
+              <div key={i} className="h-14 bg-gray-200 rounded-xl animate-pulse"/>
             ))}
           </div>
         )}
 
         {error && (
-          <p className="text-[0.95rem] text-ink dark:text-white bg-coral/10 px-4 py-3 rounded-xl border border-coral/30" role="alert">
+          <p className="text-[0.95rem] text-ink bg-coral/10 px-4 py-3 rounded-xl border border-coral/30"role="alert">
             {error}
           </p>
         )}
@@ -533,8 +531,8 @@ export function CrawlHistoryContent() {
             <div className="w-16 h-16 rounded-2xl bg-teal/10 flex items-center justify-center">
               <Globe className="w-8 h-8 text-teal" />
             </div>
-            <p className="font-heading font-bold text-xl text-ink dark:text-white">No crawls yet</p>
-            <p className="text-sm text-body dark:text-gray-400 max-w-xs leading-relaxed">
+            <p className="font-heading font-bold text-xl text-ink">No crawls yet</p>
+            <p className="text-sm text-body max-w-xs leading-relaxed">
               Start a site crawl from New Scan and results will appear here.
             </p>
             <button className="btn-primary mt-2" onClick={() => navigate('new-scan')}>
@@ -560,7 +558,7 @@ export function CrawlHistoryContent() {
               {/* Task 4: Compare controls */}
               {selectedForCompare.length > 0 && (
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-body dark:text-gray-400">
+                  <span className="text-xs text-body">
                     {selectedForCompare.length} of 2 selected
                   </span>
                   {compareReady && (
@@ -575,7 +573,7 @@ export function CrawlHistoryContent() {
                   )}
                   <button
                     onClick={clearCompare}
-                    className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-coral hover:bg-coral/10 transition-colors"
+                    className="p-1.5 rounded-lg text-body hover:text-coral hover:bg-coral/10 transition-colors"
                   >
                     <X size={14} />
                   </button>
@@ -584,9 +582,10 @@ export function CrawlHistoryContent() {
             </div>
 
             {filtered.length === 0 && (
-              <p className="text-[0.95rem] text-body dark:text-gray-400">
-                No results match <strong>&ldquo;{searchQuery}&rdquo;</strong>.
-              </p>
+              <NoResultsInRange
+                message={`No crawls match "${searchQuery}".`}
+                hint="Try adjusting your search to see more results."
+              />
             )}
 
             {/* ── Task 4: Compare result panel ────────────────────────── */}
@@ -601,17 +600,14 @@ export function CrawlHistoryContent() {
 
             {filtered.length > 0 && (
               <>
-                <div className="bg-white dark:bg-charcoal border border-gray-100 dark:border-white/[0.06] rounded-xl shadow-soft overflow-hidden">
+                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse text-sm">
-                      <thead className="bg-gray-50 dark:bg-night border-b border-gray-100 dark:border-white/[0.06]">
+                    <table className="table-base">
+                      <thead>
                         <tr>
-                          <th className="py-3 px-3.5 w-8" />
+                          <th scope="col" className="w-8" />
                           {['Site URL', 'Date', 'Pages', 'Violations', 'Avg Pass Rate', 'Site Score', 'Duration', 'Status', ''].map((h) => (
-                            <th
-                              key={h}
-                              className="py-3 px-3.5 text-left text-xs font-semibold text-body dark:text-gray-400 uppercase tracking-wide whitespace-nowrap"
-                            >
+                            <th key={h} scope="col" className="whitespace-nowrap">
                               {h}
                             </th>
                           ))}
@@ -623,37 +619,37 @@ export function CrawlHistoryContent() {
                           return (
                             <tr
                               key={item.crawl_id}
-                              className={`border-b border-gray-100 dark:border-white/[0.06] last:border-b-0 hover:bg-teal/[0.04] dark:hover:bg-teal/[0.07] cursor-pointer transition-colors ${
-                                isSelected ? 'bg-teal/[0.06] dark:bg-teal/[0.10]' : ''
+                              className={`hover:bg-teal/[0.04] cursor-pointer transition-colors ${
+                                isSelected ?'bg-teal/[0.06]':''
                               }`}
                               onClick={() => openCrawl(item)}
                             >
                               {/* Compare checkbox — Task 4 */}
-                              <td className="py-3 px-3.5" onClick={(e) => toggleCompare(e, item.crawl_id)}>
+                              <td onClick={(e) => toggleCompare(e, item.crawl_id)}>
                                 {isSelected
                                   ? <CheckSquare size={15} className="text-teal" />
-                                  : <Square size={15} className="text-gray-300 dark:text-gray-600 hover:text-teal transition-colors" />
+                                  : <Square size={15} className="text-gray-300 hover:text-teal transition-colors"/>
                                 }
                               </td>
 
                               {/* Site URL */}
-                              <td className="py-3 px-3.5 max-w-[200px]">
+                              <td className="max-w-[200px]">
                                 <span className="block truncate text-teal text-sm font-medium" title={item.root_url}>
                                   {item.root_url || '—'}
                                 </span>
-                                <span className="block text-[10px] font-mono text-body dark:text-gray-500 truncate mt-0.5">
+                                <span className="block text-[10px] font-mono text-body truncate mt-0.5">
                                   {item.crawl_id}
                                 </span>
                               </td>
 
                               {/* Date */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-body dark:text-gray-400 text-xs">
+                              <td className="whitespace-nowrap text-body text-xs">
                                 {formatDateTime(item.created_at)}
                               </td>
 
                               {/* Pages */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-center">
-                                <span className="font-semibold text-ink dark:text-white text-sm">
+                              <td className="whitespace-nowrap text-center">
+                                <span className="font-semibold text-ink text-sm">
                                   {item.total_scanned ?? 0}
                                 </span>
                                 {(item.total_failed ?? 0) > 0 && (
@@ -662,41 +658,41 @@ export function CrawlHistoryContent() {
                               </td>
 
                               {/* Violations */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-center">
+                              <td className="whitespace-nowrap text-center">
                                 <ViolationPill value={item.total_violations} />
                               </td>
 
                               {/* Avg Pass Rate */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-center">
+                              <td className="whitespace-nowrap text-center">
                                 {item.avg_pass_rate != null
-                                  ? <span className="text-sm font-semibold text-ink dark:text-white">{item.avg_pass_rate}%</span>
-                                  : <span className="text-body dark:text-gray-500 text-xs">—</span>
+                                  ? <span className="text-sm font-semibold text-ink">{item.avg_pass_rate}%</span>
+                                  : <span className="text-body text-xs">—</span>
                                 }
                               </td>
 
                               {/* Site Score */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-center">
+                              <td className="whitespace-nowrap text-center">
                                 <ScorePill value={item.site_score} />
                               </td>
 
                               {/* Duration */}
-                              <td className="py-3 px-3.5 whitespace-nowrap text-body dark:text-gray-400 text-xs">
+                              <td className="whitespace-nowrap text-body text-xs">
                                 {formatDuration(item.duration_seconds)}
                               </td>
 
                               {/* Status */}
-                              <td className="py-3 px-3.5 whitespace-nowrap">
+                              <td className="whitespace-nowrap">
                                 <StatusBadge status={normaliseStatus(item.status)} />
                               </td>
 
                               {/* Re-crawl */}
-                              <td className="py-3 px-3.5 whitespace-nowrap">
+                              <td className="whitespace-nowrap">
                                 <button
                                   title="Re-crawl this site"
                                   aria-label={`Re-crawl ${item.root_url}`}
                                   onClick={(e) => handleReCrawl(e, item)}
                                   disabled={reCrawling === item.crawl_id}
-                                  className="p-1.5 rounded-lg text-body dark:text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40"
+                                  className="p-1.5 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40"
                                 >
                                   <RefreshCw
                                     size={14}
@@ -714,21 +710,21 @@ export function CrawlHistoryContent() {
 
                 {/* Hint when no item selected */}
                 {selectedForCompare.length === 0 && items.length >= 2 && (
-                  <p className="text-[11px] text-body dark:text-gray-500 text-center">
+                  <p className="text-[11px] text-body text-center">
                     Select two crawls using the checkboxes to compare them side by side.
                   </p>
                 )}
 
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between text-sm text-body dark:text-gray-400">
+                  <div className="flex items-center justify-between text-sm text-body">
                     <span>
-                      Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                      Showing {(safePage - 1) * PAGE_SIZE + 1} to {Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length} results
                     </span>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                         disabled={safePage === 1}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white text-xs font-medium hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-ink text-xs font-medium hover:bg-ivory disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         <ChevronLeft className="w-3.5 h-3.5" />
                         Prev
@@ -737,7 +733,7 @@ export function CrawlHistoryContent() {
                       <button
                         onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                         disabled={safePage === totalPages}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-white/[0.1] bg-white dark:bg-charcoal text-ink dark:text-white text-xs font-medium hover:bg-ivory dark:hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-ink text-xs font-medium hover:bg-ivory disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                       >
                         Next
                         <ChevronRight className="w-3.5 h-3.5" />

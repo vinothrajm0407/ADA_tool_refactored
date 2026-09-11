@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Menu, Sun, Moon, Bell, LogOut, User } from 'lucide-react';
+import { Menu, Bell, LogOut } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
 
@@ -17,7 +17,6 @@ const pageTitles = {
   'assistive-test':     'Assistive Testing',
   'keyboard-test':      'Assistive Testing',
   'assistive-results':  'Assistive Testing',
-  'ai-fix':             'AI Fix Assistant',
   'wcag-reference':     'WCAG Reference',
   integrations:         'Channels & Apps',
   'repo-links':         'Connected Repos',
@@ -26,7 +25,7 @@ const pageTitles = {
 };
 
 export default function AppHeader() {
-  const { activePage, navigate, setSidebarOpen, dark, setDark, user, logout } = useApp();
+  const { activePage, navigate, setSidebarOpen, user, logout } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const menuTriggerRef = useRef(null);
@@ -38,6 +37,7 @@ export default function AppHeader() {
   const email = user?.email ?? '';
 
   const title = pageTitles[activePage] ?? 'Dashboard';
+  const isHome = activePage === 'dashboard';
 
   // Closing via Escape restores focus to the trigger, matching standard
   // menu-button behavior — closing by picking "Sign out" navigates away
@@ -75,14 +75,14 @@ export default function AppHeader() {
   }, [menuOpen]);
 
   return (
-    <header className="sticky top-0 z-30 bg-white/80 dark:bg-charcoal/80 backdrop-blur-md border-b border-gray-100 dark:border-white/[0.06] h-16 flex items-center px-4 sm:px-6 gap-3">
+    <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-100 h-16 flex items-center px-4 sm:px-6 gap-3">
       {/* Hamburger — mobile only */}
       <button
         className="lg:hidden btn-ghost p-2 rounded-2xl"
         onClick={() => setSidebarOpen(true)}
         aria-label="Open sidebar"
       >
-        <Menu className="w-5 h-5 text-ink dark:text-white" />
+        <Menu className="w-5 h-5 text-ink" />
       </button>
 
       {/* Compact brand mark — mobile only, when sidebar is off-canvas */}
@@ -94,38 +94,42 @@ export default function AppHeader() {
         <BrandLogo variant="compact" />
       </button>
 
-      {/* Deliberately NOT an <h1> — 10 of the 14 shell-rendered pages already
+      {/* Deliberately NOT an <h1> — most shell-rendered pages already
           render their own <h1> in the content area (verified by grep), so
           making this one too would create duplicate top-level headings.
-          4 pages currently have no in-page h1 at all (AIFixPage,
-          CrawlResultsPage, DashboardPage, SettingsPage) and need one added
-          when those specific pages are next touched — that's a page-level
-          fix, out of scope for this shell-only pass. */}
-      <p className="font-heading font-semibold text-ink dark:text-white text-lg whitespace-nowrap m-0">
-        {title}
-      </p>
+          A few pages currently have no in-page h1 at all (CrawlResultsPage,
+          DashboardPage, SettingsPage) and need one added when those specific
+          pages are next touched — that's a page-level fix, out of scope for
+          this shell-only pass. */}
+      <div className="min-w-0">
+        <p className="font-heading font-semibold text-ink text-lg whitespace-nowrap m-0 leading-tight">
+          {title}
+        </p>
+        <p className="text-xs text-body leading-tight m-0">
+          {isHome ? (
+            'Home'
+          ) : (
+            <>
+              <button
+                onClick={() => navigate('dashboard')}
+                className="hover:text-teal transition-colors"
+              >
+                Home
+              </button>
+              {' / '}{title}
+            </>
+          )}
+        </p>
+      </div>
 
       {/* Right action group */}
       <div className="flex items-center gap-2 ml-auto">
-        {/* Dark mode toggle */}
-        <button
-          className="btn-ghost p-2 rounded-2xl"
-          onClick={() => setDark(!dark)}
-          aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {dark ? (
-            <Sun className="w-5 h-5 text-amber" />
-          ) : (
-            <Moon className="w-5 h-5 text-ink dark:text-white" />
-          )}
-        </button>
-
         {/* Notifications bell */}
         <button
           className="btn-ghost p-2 rounded-2xl relative"
           aria-label="Notifications"
         >
-          <Bell className="w-5 h-5 text-ink dark:text-white" />
+          <Bell className="w-5 h-5 text-ink" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-coral" />
         </button>
 
@@ -143,22 +147,22 @@ export default function AppHeader() {
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-10 w-56 bg-white dark:bg-charcoal rounded-2xl shadow-lg border border-gray-100 dark:border-white/[0.08] py-1 z-50">
+            <div className="absolute right-0 top-10 w-56 bg-white rounded-2xl border border-gray-100 py-1 z-50">
               {/* User info */}
-              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
                 <div className="w-8 h-8 rounded-full bg-teal flex items-center justify-center flex-shrink-0">
                   <span className="text-white text-xs font-bold">{initials}</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-ink dark:text-white leading-tight truncate">{displayName}</p>
-                  <p className="text-[11px] text-body dark:text-gray-400 leading-tight truncate">{email}</p>
+                  <p className="text-sm font-semibold text-ink leading-tight truncate">{displayName}</p>
+                  <p className="text-[11px] text-body leading-tight truncate">{email}</p>
                 </div>
               </div>
 
               {/* Logout */}
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-coral/10 hover:text-coral dark:hover:text-coral transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-600 hover:bg-coral/10 hover:text-coral transition-colors"
               >
                 <LogOut size={15} className="flex-shrink-0" />
                 Sign out

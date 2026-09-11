@@ -29,8 +29,8 @@ function ScanSummaryCard({ label, session }) {
   const grade = nsScoreGradeInfo(score);
   return (
     <div className="flex-1 min-w-0">
-      <p className="text-[11px] font-bold uppercase tracking-widest text-body dark:text-gray-400 mb-1">{label}</p>
-      <p className="text-sm font-mono text-ink dark:text-white truncate" title={session.url}>{session.url}</p>
+      <p className="text-[11px] font-bold uppercase tracking-widest text-body mb-1">{label}</p>
+      <p className="text-sm font-mono text-ink truncate"title={session.url}>{session.url}</p>
       <div className="flex items-center gap-2 mt-2">
         <span className={`text-2xl font-heading font-bold ${grade.dialCls.split(' ')[0]}`}>{score}</span>
         <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${grade.badgeCls}`}>{grade.grade}</span>
@@ -40,6 +40,7 @@ function ScanSummaryCard({ label, session }) {
 }
 
 function labelFor(session) {
+  if (session.name) return session.name;
   try {
     const u = new URL(session.url);
     const segment = u.pathname.replace(/\/$/, '').split('/').filter(Boolean).pop();
@@ -74,81 +75,81 @@ export default function ScanComparisonView({ sessions, sessionA, sessionB, onCha
   });
 
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
-      <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100 dark:border-white/[0.06]">
-        <p className="font-heading font-bold text-lg text-ink dark:text-white">Compare Scans</p>
-        <button type="button" onClick={onClose} className="text-gray-400 hover:text-ink dark:hover:text-white">
+    <div className="bg-white rounded-2xl border border-gray-100">
+      <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100">
+        <p className="font-heading font-bold text-lg text-ink">Compare Scans</p>
+        <button type="button"onClick={onClose} className="text-gray-400 hover:text-ink">
           <X size={18} />
         </button>
       </div>
 
       <div className="flex items-center gap-3 px-5 pt-4">
         <select value={sessionA.id} onChange={(e) => onChangeA(e.target.value)}
-          className="flex-1 text-[13px] font-medium bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-ink dark:text-white">
+          className="flex-1 text-[13px] font-medium bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-ink">
           {sessions.map(s => <option key={s.id} value={s.id}>{labelFor(s)}</option>)}
         </select>
-        <ArrowRight size={14} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
+        <ArrowRight size={14} className="text-gray-300 flex-shrink-0"/>
         <select value={sessionB.id} onChange={(e) => onChangeB(e.target.value)}
-          className="flex-1 text-[13px] font-medium bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-ink dark:text-white">
+          className="flex-1 text-[13px] font-medium bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 text-ink">
           {sessions.map(s => <option key={s.id} value={s.id}>{labelFor(s)}</option>)}
         </select>
       </div>
 
-      <div className="flex items-stretch gap-4 px-5 py-5 border-b border-gray-100 dark:border-white/[0.06]">
+      <div className="flex items-stretch gap-4 px-5 py-5 border-b border-gray-100">
         <ScanSummaryCard label="Scan A" session={sessionA} />
         <div className="flex flex-col items-center justify-center gap-1 flex-shrink-0 px-2">
-          <ArrowRight size={16} className="text-gray-300 dark:text-gray-600" />
+          <ArrowRight size={16} className="text-gray-300"/>
           <DeltaBadge value={scoreB - scoreA} goodDirection="up" />
         </div>
         <ScanSummaryCard label="Scan B" session={sessionB} />
       </div>
 
-      <div className="grid grid-cols-3 gap-3 px-5 py-4 border-b border-gray-100 dark:border-white/[0.06]">
+      <div className="grid grid-cols-3 gap-3 px-5 py-4 border-b border-gray-100">
         {[
           { label: 'Violations', a: violationsA.length, b: violationsB.length, good: 'down' },
           { label: 'Passes', a: passesA.length, b: passesB.length, good: 'up' },
         ].map(row => (
           <div key={row.label} className="col-span-1">
-            <p className="text-[11px] font-bold uppercase tracking-widest text-body dark:text-gray-400 mb-1">{row.label}</p>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-body mb-1">{row.label}</p>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-mono text-ink dark:text-white">{row.a}</span>
+              <span className="text-sm font-mono text-ink">{row.a}</span>
               <ArrowRight size={12} className="text-gray-300" />
-              <span className="text-sm font-mono text-ink dark:text-white">{row.b}</span>
+              <span className="text-sm font-mono text-ink">{row.b}</span>
               <DeltaBadge value={row.b - row.a} goodDirection={row.good} />
             </div>
           </div>
         ))}
         <div className="col-span-1">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-body dark:text-gray-400 mb-1">Critical + Serious</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-body mb-1">Critical + Serious</p>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-mono text-ink dark:text-white">{sevA.critical + sevA.serious}</span>
+            <span className="text-sm font-mono text-ink">{sevA.critical + sevA.serious}</span>
             <ArrowRight size={12} className="text-gray-300" />
-            <span className="text-sm font-mono text-ink dark:text-white">{sevB.critical + sevB.serious}</span>
+            <span className="text-sm font-mono text-ink">{sevB.critical + sevB.serious}</span>
             <DeltaBadge value={(sevB.critical + sevB.serious) - (sevA.critical + sevA.serious)} goodDirection="down" />
           </div>
         </div>
       </div>
 
       <div className="px-5 py-4">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-body dark:text-gray-400 mb-3">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-body mb-3">
           Rule-by-rule difference ({rows.length})
         </p>
         {rows.length === 0 ? (
-          <p className="text-sm text-body dark:text-gray-400">No violations in either scan.</p>
+          <p className="text-sm text-body">No violations in either scan.</p>
         ) : (
           <div className="space-y-1.5 max-h-96 overflow-y-auto">
             {rows.map(r => (
-              <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-gray-50 dark:bg-white/[0.03]">
+              <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-gray-50">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium text-ink dark:text-white truncate">{r.title}</p>
-                  <p className="text-[11px] font-mono text-body dark:text-gray-500">{r.id}</p>
+                  <p className="text-[13px] font-medium text-ink truncate">{r.title}</p>
+                  <p className="text-[11px] font-mono text-body">{r.id}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-[11px] font-mono text-body dark:text-gray-400 w-14 text-right">A: {r.countA}</span>
-                  <span className="text-[11px] font-mono text-body dark:text-gray-400 w-14 text-right">B: {r.countB}</span>
+                  <span className="text-[11px] font-mono text-body w-14 text-right">A: {r.countA}</span>
+                  <span className="text-[11px] font-mono text-body w-14 text-right">B: {r.countB}</span>
                   {r.status === 'onlyA' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber/10 text-amber whitespace-nowrap">Only in A</span>}
                   {r.status === 'onlyB' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber/10 text-amber whitespace-nowrap">Only in B</span>}
-                  {r.status === 'both' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 dark:bg-white/10 text-gray-500 whitespace-nowrap">In both</span>}
+                  {r.status ==='both'&& <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-200 text-gray-500 whitespace-nowrap">In both</span>}
                 </div>
               </div>
             ))}

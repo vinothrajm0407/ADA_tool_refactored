@@ -72,41 +72,50 @@ export default function AssistiveTestDropdown({ scanUrl, sessionId }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-charcoal rounded-xl border border-gray-200 dark:border-white/10 shadow-lg z-20 p-3">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-body dark:text-gray-400 px-1 mb-2">
-            Which tests should run?
-          </p>
-          <div className="space-y-1 mb-3">
+        <div className="absolute right-0 top-full mt-2.5 w-80 bg-white rounded-2xl border border-gray-100 shadow-xl z-20 overflow-hidden">
+          {/* Small pointer connecting the popover visually back to the button it came from */}
+          <span className="absolute -top-1.5 right-5 w-3 h-3 bg-white border-t border-l border-gray-100 rotate-45" aria-hidden="true" />
+
+          <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-body">
+              Which tests should run?
+            </p>
+          </div>
+
+          <div className="p-2">
             {ACTIVE_MODULES.map(m => (
-              <label key={m.id} className="flex items-start gap-2.5 px-1 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-white/[0.04] cursor-pointer">
+              <label key={m.id} className="flex items-start gap-2.5 px-2.5 py-2 rounded-xl hover:bg-teal/5 cursor-pointer transition-colors">
                 <input
                   type="checkbox"
                   checked={selected.has(m.id)}
                   onChange={() => toggleModule(m.id)}
-                  className="mt-0.5 accent-teal"
+                  className="checkbox-base mt-0.5"
                 />
-                <span>
-                  <span className="block text-[13px] font-medium text-ink dark:text-white">{m.label}</span>
-                  <span className="block text-[11px] text-body dark:text-gray-400">{m.description}</span>
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-semibold text-ink">{m.label}</span>
+                  <span className="block text-[11px] text-body leading-snug mt-0.5">{m.description}</span>
                 </span>
               </label>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={handleRunSelected}
-            disabled={selected.size === 0}
-            className="btn-primary text-sm w-full flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Play className="w-3.5 h-3.5" /> Run Selected
-          </button>
-          <button
-            type="button"
-            onClick={() => { setOpen(false); setPendingAssistiveUrl(scanUrl); navigate('assistive-test'); }}
-            className="w-full text-center text-[11.5px] font-medium text-teal hover:underline mt-2 flex items-center justify-center gap-1"
-          >
-            <ExternalLink size={11} /> Open full Assistive Testing page
-          </button>
+
+          <div className="p-3 pt-1 space-y-2 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={handleRunSelected}
+              disabled={selected.size === 0}
+              className="btn-primary text-sm w-full flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Play className="w-3.5 h-3.5" /> Run Selected
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setPendingAssistiveUrl(scanUrl); navigate('assistive-test'); }}
+              className="w-full text-center text-[11.5px] font-medium text-teal hover:underline flex items-center justify-center gap-1 py-0.5"
+            >
+              <ExternalLink size={11} /> Open full Assistive Testing page
+            </button>
+          </div>
         </div>
       )}
     </div>

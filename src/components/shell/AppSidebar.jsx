@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Wand2, Settings, X,
+  LayoutDashboard, Settings, X,
   ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug, GitBranch, GitPullRequest,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -36,7 +36,6 @@ const NAV_SECTIONS = [
   {
     label: 'Tools',
     items: [
-      { id: 'ai-fix',         label: 'AI Fix Assistant',  icon: Wand2          },
       { id: 'fix-history',    label: 'Fix History',       icon: GitPullRequest },
       { id: 'assistive-test', label: 'Assistive Testing', icon: ClipboardList  },
       { id: 'wcag-reference', label: 'WCAG Reference',    icon: BookOpen       },
@@ -83,8 +82,8 @@ export default function AppSidebar() {
       )}
 
       <aside className={[
-        'fixed inset-y-0 left-0 z-30 w-64 bg-white dark:bg-charcoal flex flex-col h-full',
-        'border-r border-gray-100 dark:border-white/[0.06]',
+        'fixed inset-y-0 left-0 z-30 w-64 bg-white flex flex-col h-full',
+        'border-r border-gray-100',
         'lg:relative lg:translate-x-0 lg:flex transition-transform duration-200',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ].join(' ')}>
@@ -100,7 +99,7 @@ export default function AppSidebar() {
           </button>
 
           <button
-            className="lg:hidden p-1.5 rounded-lg text-body hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            className="lg:hidden p-1.5 rounded-lg text-body hover:bg-gray-100 transition-colors"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close sidebar"
           >
@@ -113,7 +112,7 @@ export default function AppSidebar() {
           {NAV_SECTIONS.map((section) => (
             <div key={section.label || '__top'} className="mb-1">
               {section.label && (
-                <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-body dark:text-gray-600">
+                <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-body">
                   {section.label}
                 </p>
               )}
@@ -128,12 +127,12 @@ export default function AppSidebar() {
                       'w-full flex items-center gap-3 px-4 py-3 rounded-xl text-[13.5px] border-0 transition-all duration-150',
                       active
                         ? 'bg-teal text-white font-semibold'
-                        : 'text-gray-500 dark:text-gray-400 font-medium hover:bg-gray-100 dark:hover:bg-white/5 hover:text-ink dark:hover:text-white',
+                        :'text-gray-500 font-medium hover:bg-gray-100 hover:text-ink',
                     ].join(' ')}
                   >
                     <Icon
                       size={17}
-                      className={active ? 'text-white flex-shrink-0' : 'text-gray-400 dark:text-gray-500 flex-shrink-0'}
+                      className={active ?'text-white flex-shrink-0':'text-gray-400 flex-shrink-0'}
                       strokeWidth={active ? 2 : 1.75}
                     />
                     <span>{label}</span>
@@ -145,14 +144,14 @@ export default function AppSidebar() {
         </nav>
 
         {/* ── FOOTER ── */}
-        <div className="px-4 py-4 border-t border-gray-100 dark:border-white/[0.06] flex-shrink-0">
+        <div className="px-4 py-4 border-t border-gray-100 flex-shrink-0">
           <div className="flex items-center gap-3 px-2">
             <div className="w-8 h-8 rounded-full bg-teal flex items-center justify-center flex-shrink-0">
               <span className="text-white text-xs font-bold">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-ink dark:text-white leading-tight truncate">{displayName}</p>
-              <p className="text-[11px] text-body dark:text-gray-500 leading-tight truncate">{email}</p>
+              <p className="text-sm font-semibold text-ink leading-tight truncate">{displayName}</p>
+              <p className="text-[11px] text-body leading-tight truncate">{email}</p>
             </div>
             <button
               onClick={handleLogout}

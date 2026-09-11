@@ -57,8 +57,8 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
   }
 
   return (
-    <div className={`${dark ? 'dark' : ''} min-h-screen bg-ivory dark:bg-night flex flex-col`}>
-      <header className="h-16 flex items-center justify-between px-8 bg-white dark:bg-charcoal border-b border-gray-100 dark:border-white/[0.06]">
+    <div className={`${dark ?'dark':''} min-h-screen bg-ivory flex flex-col`}>
+      <header className="h-16 flex items-center justify-between px-8 bg-white border-b border-gray-100">
         <button
           onClick={() => navigate('landing')}
           className="hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl"
@@ -69,7 +69,7 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
         <button
           onClick={toggleDark}
           aria-label="Toggle dark mode"
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-body hover:bg-gray-100 transition-colors"
         >
           {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
@@ -82,24 +82,24 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
             {status === 'verifying' && (
               <>
                 <Loader className="w-10 h-10 text-teal mx-auto mb-4 animate-spin" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Verifying your email…</h1>
-                <p className="text-sm text-body dark:text-gray-400">Just a moment.</p>
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Verifying your email…</h1>
+                <p className="text-sm text-body">Just a moment.</p>
               </>
             )}
 
             {status === 'success' && (
               <>
                 <CheckCircle className="w-10 h-10 text-teal mx-auto mb-4" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Email verified!</h1>
-                <p className="text-sm text-body dark:text-gray-400">Taking you to your dashboard…</p>
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Email verified!</h1>
+                <p className="text-sm text-body">Taking you to your dashboard…</p>
               </>
             )}
 
             {status === 'expired' && (
               <>
                 <XCircle className="w-10 h-10 text-amber-500 mx-auto mb-4" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Link expired</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-6">
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Link expired</h1>
+                <p className="text-sm text-body mb-6">
                   This verification link has expired. Enter your email below and we'll send a fresh one.
                 </p>
                 {resendSent ? (
@@ -114,7 +114,7 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
                       value={resendEmail}
                       onChange={e => setResendEmail(e.target.value)}
                       placeholder="you@company.com"
-                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-night text-ink dark:text-white text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
+                      className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-ink text-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal"
                     />
                     <button
                       type="submit"
@@ -131,8 +131,8 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
             {status === 'invalid' && (
               <>
                 <XCircle className="w-10 h-10 text-coral mx-auto mb-4" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Invalid link</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-6">
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Invalid link</h1>
+                <p className="text-sm text-body mb-6">
                   This verification link is not valid. It may have already been used.
                 </p>
                 <button
@@ -145,7 +145,7 @@ export default function VerifyEmailPage({ dark, toggleDark }) {
             )}
 
             {(status === 'expired' || status === 'invalid') && (
-              <p className="mt-5 text-center text-sm text-body dark:text-gray-400">
+              <p className="mt-5 text-center text-sm text-body">
                 <button
                   onClick={() => navigate('login')}
                   className="text-teal font-semibold hover:underline focus:outline-none"

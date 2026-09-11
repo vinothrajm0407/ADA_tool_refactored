@@ -57,9 +57,9 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
   }
 
   return (
-    <div className={`${dark ? 'dark' : ''} min-h-screen bg-ivory dark:bg-night flex flex-col`}>
+    <div className={`${dark ?'dark':''} min-h-screen bg-ivory flex flex-col`}>
       {/* Header */}
-      <header className="h-16 flex items-center justify-between px-8 bg-white dark:bg-charcoal border-b border-gray-100 dark:border-white/[0.06]">
+      <header className="h-16 flex items-center justify-between px-8 bg-white border-b border-gray-100">
         <button
           onClick={() => navigate('landing')}
           className="hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl"
@@ -70,7 +70,7 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
         <button
           onClick={toggleDark}
           aria-label="Toggle dark mode"
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-body hover:bg-gray-100 transition-colors"
         >
           {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
@@ -82,8 +82,8 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
 
             {status === 'form' && (
               <>
-                <h1 className="font-heading font-bold text-2xl text-ink dark:text-white mb-1">Reset your password</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-7">Choose a new password for your account.</p>
+                <h1 className="font-heading font-bold text-2xl text-ink mb-1">Reset your password</h1>
+                <p className="text-sm text-body mb-7">Choose a new password for your account.</p>
 
                 <form onSubmit={handleSubmit} noValidate className="space-y-5">
                   {error && (
@@ -93,7 +93,7 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
                   )}
 
                   <div className="space-y-1.5">
-                    <label htmlFor="password" className="block text-sm font-medium text-ink dark:text-white">
+                    <label htmlFor="password"className="block text-sm font-medium text-ink">
                       New password
                     </label>
                     <div className="glow-input-wrapper">
@@ -111,7 +111,7 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
                       <button
                         type="button"
                         onClick={() => setShowPw(p => !p)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-ink dark:hover:text-white z-10"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-ink z-10"
                         aria-label={showPw ? 'Hide password' : 'Show password'}
                       >
                         {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -120,7 +120,7 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label htmlFor="confirmPassword" className="block text-sm font-medium text-ink dark:text-white">
+                    <label htmlFor="confirmPassword"className="block text-sm font-medium text-ink">
                       Confirm new password
                     </label>
                     <div className="glow-input-wrapper">
@@ -152,8 +152,8 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
             {status === 'success' && (
               <div className="text-center">
                 <CheckCircle className="w-10 h-10 text-teal mx-auto mb-4" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Password reset</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-6">
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Password reset</h1>
+                <p className="text-sm text-body mb-6">
                   Your password has been updated. You can now sign in with your new password.
                 </p>
                 <button onClick={() => navigate('login')} className="btn-primary w-full py-2.5">
@@ -165,8 +165,8 @@ export default function ResetPasswordPage({ dark, toggleDark }) {
             {status === 'invalid' && (
               <div className="text-center">
                 <XCircle className="w-10 h-10 text-coral mx-auto mb-4" />
-                <h1 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Link expired</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-6">
+                <h1 className="font-heading font-bold text-xl text-ink mb-2">Link expired</h1>
+                <p className="text-sm text-body mb-6">
                   This password reset link is invalid or has expired. Request a new one below.
                 </p>
                 <button onClick={() => navigate('forgot-password')} className="btn-primary w-full py-2.5">

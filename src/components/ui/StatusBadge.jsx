@@ -4,17 +4,17 @@ import React from 'react';
 // 4.5:1 against its own tinted background in both themes — the bare color
 // (used for icons/dots elsewhere) is roughly 2-3:1 and too light for text.
 const STATUS_CLASSES = {
-  Passed: 'bg-sage/15 text-sage-700 dark:text-sage-300',
-  'Needs review': 'bg-amber/15 text-amber-700 dark:text-amber-300',
-  Failed: 'bg-coral/15 text-coral-700 dark:text-coral-300',
-  Running: 'bg-teal/15 text-teal-700 dark:text-teal-300',
+  Passed:'bg-sage/15 text-sage-700',
+  'Needs review':'bg-amber/15 text-amber-700',
+  Failed:'bg-coral/15 text-coral-700',
+  Running:'bg-teal/15 text-teal-700',
 };
 
 const SEVERITY_CLASSES = {
-  Critical: 'bg-coral/15 text-coral-700 dark:text-coral-300',
-  Serious: 'bg-terracotta/15 text-terracotta-700 dark:text-terracotta-300',
-  Moderate: 'bg-amber/15 text-amber-700 dark:text-amber-300',
-  Minor: 'bg-sage/15 text-sage-700 dark:text-sage-300',
+  Critical:'bg-coral/15 text-coral-700',
+  Serious:'bg-terracotta/15 text-terracotta-700',
+  Moderate:'bg-amber/15 text-amber-700',
+  Minor:'bg-sage/15 text-sage-700',
 };
 
 export function StatusBadge({ status }) {

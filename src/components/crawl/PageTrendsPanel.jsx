@@ -16,32 +16,32 @@ function DeltaBadge({ delta, invert = false }) {
 function TrendsTable({ title, pages, icon: Icon, iconClass, emptyMsg, deltaKey = 'violation_delta', invertGood = false }) {
   if (pages.length === 0) {
     return (
-      <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
-        <div className="px-5 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2">
+      <div className="bg-white rounded-2xl border border-gray-100">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <Icon size={15} className={iconClass} />
-          <p className="font-heading font-semibold text-sm text-ink dark:text-white">{title}</p>
+          <p className="font-heading font-semibold text-sm text-ink">{title}</p>
         </div>
-        <p className="px-5 py-8 text-sm text-body dark:text-gray-500 text-center">{emptyMsg}</p>
+        <p className="px-5 py-8 text-sm text-body text-center">{emptyMsg}</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100 dark:border-white/[0.06] flex items-center gap-2">
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
         <Icon size={15} className={iconClass} />
-        <p className="font-heading font-semibold text-sm text-ink dark:text-white">{title}</p>
-        <span className="ml-auto text-xs text-body dark:text-gray-500">{pages.length}</span>
+        <p className="font-heading font-semibold text-sm text-ink">{title}</p>
+        <span className="ml-auto text-xs text-body">{pages.length}</span>
       </div>
-      <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+      <div className="divide-y divide-gray-50">
         {pages.map((page, i) => (
           <div key={i} className="px-5 py-3 flex items-center gap-3">
-            <span className="text-[10px] text-body dark:text-gray-500 w-4 flex-shrink-0">{i + 1}</span>
+            <span className="text-[10px] text-body w-4 flex-shrink-0">{i + 1}</span>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-ink dark:text-white truncate" title={page.url}>
+              <p className="text-xs font-medium text-ink truncate"title={page.url}>
                 {page.url.replace(/^https?:\/\/[^/]+/, '').slice(0, 50) || '/'}
               </p>
-              <p className="text-[11px] text-body dark:text-gray-500 mt-0.5">
+              <p className="text-[11px] text-body mt-0.5">
                 Violations: {page.prev_violations} → <strong className={page.violation_delta < 0 ? 'text-sage' : 'text-coral'}>{page.curr_violations}</strong>
                 {' '}· Pass rate: {page.prev_pass_rate}% → {page.curr_pass_rate}%
               </p>
@@ -79,9 +79,9 @@ export default function PageTrendsPanel({ crawlId, isComplete }) {
     return (
       <div className="grid lg:grid-cols-2 gap-4">
         {[1, 2].map((i) => (
-          <div key={i} className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-5 space-y-3">
-            <div className="h-3 w-40 bg-gray-100 dark:bg-white/5 rounded animate-pulse" />
-            {[1, 2, 3].map((j) => <div key={j} className="h-10 bg-gray-50 dark:bg-white/[0.03] rounded-xl animate-pulse" />)}
+          <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+            <div className="h-3 w-40 bg-gray-100 rounded animate-pulse"/>
+            {[1, 2, 3].map((j) => <div key={j} className="h-10 bg-gray-50 rounded-xl animate-pulse"/>)}
           </div>
         ))}
       </div>
@@ -96,8 +96,8 @@ export default function PageTrendsPanel({ crawlId, isComplete }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <TrendingUp className="w-4 h-4 text-body dark:text-gray-500" />
-        <p className="font-heading font-semibold text-sm uppercase tracking-wider text-body dark:text-gray-400 leading-none">
+        <TrendingUp className="w-4 h-4 text-body"/>
+        <p className="font-heading font-semibold text-sm uppercase tracking-wider text-body leading-none">
           Page Trends vs Previous Crawl
         </p>
       </div>

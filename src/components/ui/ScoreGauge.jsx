@@ -34,7 +34,7 @@ export function ScoreGauge({ score = 0, size = 120, label = 'Score', color }) {
           fill="none"
           stroke="#E8E4DC"
           strokeWidth={strokeWidth}
-          className="dark:[stroke:rgba(255,255,255,0.1)]"
+          className=""
         />
         {/* Fill arc */}
         <circle

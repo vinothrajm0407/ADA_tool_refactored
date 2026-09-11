@@ -17,7 +17,7 @@ const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 
 // sessionId + a hash of the element's HTML), not local useState, so an in-flight
 // fetch's result still lands — and the finished state is still there — even if
 // the user navigates away and back while it's running.
-function AutoFixControl({ pageUrl, rule, node, sessionId }) {
+function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
   const { scanSessions, updateSessionAutoFix } = useApp();
   const fixKey = nsAutoFixKey(rule.id, node?.html);
   const session = scanSessions.find(s => s.id === sessionId);
@@ -42,6 +42,39 @@ function AutoFixControl({ pageUrl, rule, node, sessionId }) {
     updateSessionAutoFix(sessionId, fixKey, { status: 'done', result });
   }
 
+  // Compact form: a one-line trigger/status for the collapsed row header, so
+  // fixing a single-element violation doesn't require expanding the card and
+  // scrolling to the Recommended Fix section first. Shares the same AppContext
+  // state as the full control below, so opening the card afterward shows the
+  // same in-progress or finished result rather than starting over.
+  if (compact) {
+    if (fix.status === 'idle') {
+      return (
+        <button type="button" onClick={(e) => { e.stopPropagation(); handleAutoFix(); }}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors flex-shrink-0">
+          <Wand2 size={11} /> Fix
+        </button>
+      );
+    }
+    if (fix.status === 'running') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal flex-shrink-0">
+          <Loader2 size={12} className="animate-spin" /> Fixing…
+        </span>
+      );
+    }
+    const result = fix.result;
+    return result.status === 'verified' ? (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sage flex-shrink-0">
+        <CheckCircle2 size={13} /> {result.merged ? 'Fixed & merged' : 'Fixed'}
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-coral flex-shrink-0">
+        <XCircle size={13} /> Failed
+      </span>
+    );
+  }
+
   if (fix.status === 'idle') {
     return (
       <button type="button" onClick={handleAutoFix}
@@ -59,7 +92,7 @@ function AutoFixControl({ pageUrl, rule, node, sessionId }) {
         </span>
         <div className="flex flex-wrap gap-1.5">
           {AUTO_FIX_STEP_NAMES.map(name => (
-            <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-400 dark:text-gray-500">
+            <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">
               {name}
             </span>
           ))}
@@ -86,8 +119,8 @@ function AutoFixControl({ pageUrl, rule, node, sessionId }) {
           {result.steps.map((s, i) => (
             <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
               {s.ok ? <CheckCircle2 size={11} className="text-sage flex-shrink-0" /> : <XCircle size={11} className="text-coral flex-shrink-0" />}
-              <span className="text-body dark:text-gray-400">{s.name}</span>
-              {s.detail && <span className="text-gray-400 dark:text-gray-600 truncate">— {s.detail}</span>}
+              <span className="text-body">{s.name}</span>
+              {s.detail && <span className="text-gray-400 truncate">— {s.detail}</span>}
             </div>
           ))}
         </div>
@@ -120,7 +153,7 @@ function AutoFixControl({ pageUrl, rule, node, sessionId }) {
 // clicks. State lives in AppContext (see AutoFixControl above) — the sequential
 // loop keeps running and its updates keep landing even if the page that started
 // it unmounts, and progress is still there if the user comes back to it.
-function FixAllControl({ pageUrl, rule, nodes, sessionId }) {
+function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   const { scanSessions, updateSessionAutoFix } = useApp();
   const fixAllKey = `fixall::${rule.id}`;
   const session = scanSessions.find(s => s.id === sessionId);
@@ -159,6 +192,31 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId }) {
     await fixOne(i, next);
   }
 
+  // Compact form for the collapsed row header — see AutoFixControl's compact
+  // branch above for why this shares state with the full control instead of
+  // tracking its own.
+  if (compact) {
+    if (fixAll.status === 'idle') {
+      return (
+        <button type="button" onClick={(e) => { e.stopPropagation(); handleFixAll(); }}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors flex-shrink-0">
+          <Wand2 size={11} /> Fix all {nodes.length}
+        </button>
+      );
+    }
+    const results = fixAll.results;
+    const verifiedCount = results.filter(r => r.status === 'verified').length;
+    return fixAll.status === 'running' ? (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal flex-shrink-0">
+        <Loader2 size={12} className="animate-spin" /> Fixing…
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sage flex-shrink-0">
+        <CheckCircle2 size={13} /> {verifiedCount}/{nodes.length} fixed
+      </span>
+    );
+  }
+
   if (fixAll.status === 'idle') {
     return (
       <button type="button" onClick={handleFixAll}
@@ -182,7 +240,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId }) {
           <span key={i} className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
             r.status === 'verified' ? 'bg-sage/10 text-sage' :
             r.status === 'failed' ? 'bg-coral/10 text-coral' :
-            'bg-gray-100 dark:bg-white/[0.06] text-gray-400'
+            'bg-gray-100 text-gray-400'
           }`}>
             {r.status === 'running' && <Loader2 size={10} className="animate-spin" />}
             {r.status === 'verified' && <CheckCircle2 size={10} />}
@@ -211,7 +269,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId }) {
 }
 
 const copyBtnBase = 'border rounded font-semibold whitespace-nowrap flex-shrink-0 cursor-pointer transition-colors';
-const copyBtnIdle = 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-charcoal text-body dark:text-gray-400 hover:border-teal hover:text-ink dark:hover:text-white';
+const copyBtnIdle ='border-gray-200 bg-white text-body hover:border-teal hover:text-ink';
 const copyBtnDone = 'text-sage border-sage bg-transparent';
 
 const EFFORT_META = {
@@ -245,13 +303,13 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
     setCheckedSteps(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; });
 
   return (
-    <div className="rounded-xl border border-teal/20 bg-white dark:bg-charcoal overflow-hidden shadow-[0_1px_6px_rgba(0,0,0,0.06)]">
+    <div className="rounded-xl border border-teal/20 bg-white overflow-hidden shadow-[0_1px_6px_rgba(0,0,0,0.06)]">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-teal/10 bg-teal/[0.03] dark:bg-teal/[0.05]">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-teal/10 bg-teal/[0.03]">
         <div className="flex items-center gap-1.5">
           <Sparkles size={13} className="text-teal flex-shrink-0" />
-          <span className="text-[12.5px] font-semibold text-ink dark:text-white">Recommended Fix</span>
+          <span className="text-[12.5px] font-semibold text-ink">Recommended Fix</span>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${effortInfo.cls}`}>
@@ -266,28 +324,28 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
       </div>
 
       {/* ── Compliance + Impact row ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-white/[0.06] border-b border-gray-100 dark:border-white/[0.06]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 border-b border-gray-100">
         <div className="flex items-center gap-2 px-4 py-2">
           <Shield size={12} className="text-teal flex-shrink-0" />
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             {wcagMeta ? (
               <>
                 <span className="text-[11.5px] font-semibold text-teal whitespace-nowrap">WCAG {wcagMeta.criterion}</span>
-                {wcagMeta.name && <span className="text-[11px] text-body dark:text-gray-500 truncate">· {wcagMeta.name}</span>}
+                {wcagMeta.name && <span className="text-[11px] text-body truncate">· {wcagMeta.name}</span>}
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${wcagMeta.level === 'AA' ? 'bg-teal/10 text-teal' : 'bg-sage/10 text-sage'}`}>
                   Level {wcagMeta.level}
                 </span>
               </>
             ) : (
-              <span className="text-[11px] text-body dark:text-gray-500">WCAG 2.1 AA</span>
+              <span className="text-[11px] text-body">WCAG 2.1 AA</span>
             )}
           </div>
         </div>
         <div className="flex items-start gap-2 px-4 py-2">
-          <Users size={12} className="text-body dark:text-gray-400 flex-shrink-0 mt-0.5" />
+          <Users size={12} className="text-body flex-shrink-0 mt-0.5"/>
           <div className="flex flex-wrap gap-1">
             {impactedUsers.map(u => (
-              <span key={u} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-body dark:text-gray-400 whitespace-nowrap">
+              <span key={u} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-body whitespace-nowrap">
                 {u}
               </span>
             ))}
@@ -296,20 +354,20 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
       </div>
 
       {/* ── Root cause ── */}
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-        <p className="text-[12.5px] text-body dark:text-gray-400 leading-relaxed m-0">{whyMatters}</p>
+      <div className="px-4 py-3 border-b border-gray-100">
+        <p className="text-[12.5px] text-body leading-relaxed m-0">{whyMatters}</p>
       </div>
 
       {/* ── Before / After code ── */}
       {codePair ? (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="px-4 py-3 border-b border-gray-100">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-coral/70 flex-shrink-0" />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-coral/80">Before</span>
               </div>
-              <pre className="m-0 text-[11px] px-3 py-2.5 bg-coral/[0.05] dark:bg-coral/[0.04] border border-coral/15 rounded-lg text-ink dark:text-white overflow-x-auto whitespace-pre leading-relaxed font-mono">
+              <pre className="m-0 text-[11px] px-3 py-2.5 bg-coral/[0.05] border border-coral/15 rounded-lg text-ink overflow-x-auto whitespace-pre leading-relaxed font-mono">
                 {codePair.before}
               </pre>
             </div>
@@ -325,20 +383,20 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
                   {copied['code'] ? '✓ Copied' : '⧉ Copy'}
                 </button>
               </div>
-              <pre className="m-0 text-[11px] px-3 py-2.5 bg-teal/[0.05] dark:bg-teal/[0.05] border border-teal/15 rounded-lg text-ink dark:text-white overflow-x-auto whitespace-pre leading-relaxed font-mono">
+              <pre className="m-0 text-[11px] px-3 py-2.5 bg-teal/[0.05] border border-teal/15 rounded-lg text-ink overflow-x-auto whitespace-pre leading-relaxed font-mono">
                 {codePair.after}
               </pre>
             </div>
           </div>
           {tips.length > 0 && (
-            <ul className="mt-2.5 mb-0 pl-3.5 space-y-1 text-[11.5px] text-body dark:text-gray-500 leading-snug">
+            <ul className="mt-2.5 mb-0 pl-3.5 space-y-1 text-[11.5px] text-body leading-snug">
               {tips.map(tip => <li key={tip}>{tip}</li>)}
             </ul>
           )}
         </div>
       ) : tips.length > 0 && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-          <ul className="m-0 pl-3.5 space-y-1.5 text-[12.5px] text-body dark:text-gray-400 leading-snug">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <ul className="m-0 pl-3.5 space-y-1.5 text-[12.5px] text-body leading-snug">
             {tips.map(tip => <li key={tip}>{tip}</li>)}
           </ul>
         </div>
@@ -346,8 +404,8 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
 
       {/* ── Validation checklist ── */}
       {validationSteps.length > 0 && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-2 mt-0">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2 mt-0">
             Validation Checklist
           </p>
           <div className="flex flex-col gap-2">
@@ -357,7 +415,7 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
                 <span className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center transition-colors ${
                   checkedSteps.has(i)
                     ? 'bg-teal border-teal'
-                    : 'border-gray-300 dark:border-white/20 group-hover:border-teal/60'
+                    :'border-gray-300 group-hover:border-teal/60'
                 }`}>
                   {checkedSteps.has(i) && (
                     <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
@@ -366,7 +424,7 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
                   )}
                 </span>
                 <span className={`text-[12px] leading-snug transition-colors ${
-                  checkedSteps.has(i) ? 'line-through text-gray-400 dark:text-gray-600' : 'text-body dark:text-gray-400'
+                  checkedSteps.has(i) ?'line-through text-gray-400':'text-body'
                 }`}>
                   {step}
                 </span>
@@ -381,13 +439,13 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
           and this single-element control would otherwise silently only ever
           fix the first one while looking like it fixed the whole violation. ── */}
       {pageUrl && (violation.nodes?.length ?? 0) <= 1 && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="px-4 py-3 border-b border-gray-100">
           <AutoFixControl pageUrl={pageUrl} rule={violation} node={violation.nodes?.[0]} sessionId={sessionId} />
         </div>
       )}
 
       {/* ── Action row ── */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50/70 dark:bg-white/[0.02]">
+      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50/70">
         {tips.length > 0 && (
           <button type="button"
             onClick={() => copyText('fix', tips.join('\n'))}
@@ -436,51 +494,71 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
   };
 
   return (
-    <div className="border border-gray-100 dark:border-white/[0.07] rounded-xl overflow-hidden">
+    <div className="border border-gray-100 rounded-xl overflow-hidden">
 
-      {/* Header (always visible) */}
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        className="w-full flex items-start gap-3 px-4 py-3.5 text-left bg-white dark:bg-charcoal hover:bg-gray-50/80 dark:hover:bg-white/[0.03] transition-colors"
-      >
-        <span className={`mt-[18px] w-2 h-2 rounded-full flex-shrink-0 ${impactConfig.dot}`} />
-        <div className="flex-1 min-w-0 py-0.5">
-          <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
-            <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${impactConfig.badge}`}>
-              {impact.charAt(0).toUpperCase() + impact.slice(1)}
-              {impactConfig.sublabel && (
-                <span className={`ml-1 font-normal normal-case ${impactConfig.sublabelCls}`}>· {impactConfig.sublabel}</span>
-              )}
-            </span>
-            {wcag && (
-              <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-teal/10 text-teal border border-teal/20">
-                WCAG {wcag.criterion} {wcag.level}
+      {/* Header (always visible) — two sibling buttons, not nested: the left
+          one toggles expand, the right one (when collapsed) is the compact
+          Fix/Fix All trigger so a single-element or multi-element violation
+          can be fixed in one click without expanding the card first. */}
+      <div className="w-full flex items-center gap-3 px-4 py-2.5 bg-white hover:bg-gray-50/80 transition-colors">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="flex-1 min-w-0 flex items-start gap-3 text-left"
+        >
+          <span className={`mt-[16px] w-2 h-2 rounded-full flex-shrink-0 ${impactConfig.dot}`} />
+          <div className="flex-1 min-w-0 py-0.5">
+            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+              <span className={`inline-flex items-center text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${impactConfig.badge}`}>
+                {impact.charAt(0).toUpperCase() + impact.slice(1)}
+                {impactConfig.sublabel && (
+                  <span className={`ml-1 font-normal normal-case ${impactConfig.sublabelCls}`}>· {impactConfig.sublabel}</span>
+                )}
               </span>
-            )}
-            {P4_EFFORT[violation.id] && (
-              <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
-                P4_EFFORT[violation.id] === 'Quick'    ? 'bg-sage/10 text-sage border-sage/20' :
-                P4_EFFORT[violation.id] === 'Moderate' ? 'bg-amber/10 text-amber border-amber/20' :
-                'bg-coral/10 text-coral border-coral/20'
-              }`}>{P4_EFFORT[violation.id]} Fix</span>
-            )}
+              {wcag && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-teal/10 text-teal border border-teal/20">
+                  WCAG {wcag.criterion} {wcag.level}
+                </span>
+              )}
+              {P4_EFFORT[violation.id] && (
+                <span className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                  P4_EFFORT[violation.id] === 'Quick'    ? 'bg-sage/10 text-sage border-sage/20' :
+                  P4_EFFORT[violation.id] === 'Moderate' ? 'bg-amber/10 text-amber border-amber/20' :
+                  'bg-coral/10 text-coral border-coral/20'
+                }`}>{P4_EFFORT[violation.id]} Fix</span>
+              )}
+            </div>
+            <p className="text-sm font-semibold text-ink leading-snug">{violation.help || violation.description}</p>
+            <p className="text-[11px] font-mono text-body mt-0.5">{violation.id}</p>
           </div>
-          <p className="text-sm font-semibold text-ink dark:text-white leading-snug">{violation.help || violation.description}</p>
-          <p className="text-[11px] font-mono text-body dark:text-gray-500 mt-0.5">{violation.id}</p>
+        </button>
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          {!expanded && pageUrl && (
+            nodes.length > 1 ? (
+              <FixAllControl pageUrl={pageUrl} rule={violation} nodes={nodes} sessionId={sessionId} compact />
+            ) : (
+              <AutoFixControl pageUrl={pageUrl} rule={violation} node={nodes[0]} sessionId={sessionId} compact />
+            )
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Collapse details' : 'Expand details'}
+            className="flex items-center gap-2 text-body hover:text-ink"
+          >
+            <span className="text-xs whitespace-nowrap">
+              {nodes.length} element{nodes.length !== 1 ? 's' : ''}
+            </span>
+            <span className={`text-xs transition-transform duration-200 ${expanded ?'rotate-180':''}`}>▼</span>
+          </button>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 pt-3">
-          <span className="text-xs text-body dark:text-gray-400 whitespace-nowrap">
-            {nodes.length} element{nodes.length !== 1 ? 's' : ''}
-          </span>
-          <span className={`text-body dark:text-gray-500 text-xs transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}>▼</span>
-        </div>
-      </button>
+      </div>
 
       {/* Expanded body */}
       {expanded && (
-        <div className="border-t border-gray-100 dark:border-white/[0.05] bg-gray-50/50 dark:bg-white/[0.02] px-4 pb-5 pt-4 space-y-4">
+        <div className="border-t border-gray-100 bg-gray-50/50 px-4 pb-5 pt-4 space-y-4">
 
           {hasScreenshot && (
             <button
@@ -498,7 +576,7 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
           {nodes.length > 0 && (
             <div>
               <div className="flex items-center justify-between gap-3 mb-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-body dark:text-gray-400 m-0">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-body m-0">
                   Affected Elements <span className="font-normal normal-case tracking-normal">({nodes.length})</span>
                 </p>
                 <FixAllControl pageUrl={pageUrl} rule={violation} nodes={nodes} sessionId={sessionId} />
@@ -512,7 +590,7 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
                       </p>
                     )}
                     <div className="relative group">
-                      <pre className="text-xs bg-gray-900 dark:bg-black/50 text-emerald-300 rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all font-mono leading-relaxed max-h-24 m-0">
+                      <pre className="text-xs bg-gray-900 text-emerald-300 rounded-lg px-3 py-2.5 overflow-x-auto whitespace-pre-wrap break-all font-mono leading-relaxed max-h-24 m-0">
                         {truncateHtml(node.html)}
                       </pre>
                       <button

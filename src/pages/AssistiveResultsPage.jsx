@@ -25,7 +25,7 @@ export default function AssistiveResultsPage() {
   }
 
   return (
-    <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 space-y-6">
+    <div className="flex-1 overflow-auto bg-ivory p-6 space-y-6">
 
       {/* HEADER */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -33,16 +33,16 @@ export default function AssistiveResultsPage() {
           <div className="flex items-center gap-2 mb-1">
             <button
               onClick={handleRunAnother}
-              className="flex items-center gap-1.5 text-sm text-body dark:text-gray-400 hover:text-ink dark:hover:text-white transition-colors"
+              className="flex items-center gap-1.5 text-sm text-body hover:text-ink transition-colors"
             >
               <ArrowLeft size={15} />
               Back
             </button>
           </div>
-          <h1 className="font-heading font-bold text-2xl text-ink dark:text-white">
+          <h1 className="font-heading font-bold text-2xl text-ink">
             {moduleLabel}
           </h1>
-          <p className="text-sm text-body dark:text-gray-400 mt-0.5 truncate max-w-lg" title={assistiveResult.url}>
+          <p className="text-sm text-body mt-0.5 truncate max-w-lg"title={assistiveResult.url}>
             {assistiveResult.url}
           </p>
         </div>

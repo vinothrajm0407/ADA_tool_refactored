@@ -29,9 +29,9 @@ export default function ForgotPasswordPage({ dark, toggleDark }) {
   }
 
   return (
-    <div className={`${dark ? 'dark' : ''} min-h-screen bg-ivory dark:bg-night flex flex-col`}>
+    <div className={`${dark ?'dark':''} min-h-screen bg-ivory flex flex-col`}>
       {/* Header */}
-      <header className="h-16 flex items-center justify-between px-8 bg-white dark:bg-charcoal border-b border-gray-100 dark:border-white/[0.06]">
+      <header className="h-16 flex items-center justify-between px-8 bg-white border-b border-gray-100">
         <button
           onClick={() => navigate('landing')}
           className="hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl"
@@ -42,7 +42,7 @@ export default function ForgotPasswordPage({ dark, toggleDark }) {
         <button
           onClick={toggleDark}
           aria-label="Toggle dark mode"
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-body hover:bg-gray-100 transition-colors"
         >
           {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
@@ -58,15 +58,15 @@ export default function ForgotPasswordPage({ dark, toggleDark }) {
                 <div className="w-14 h-14 rounded-full bg-teal/10 flex items-center justify-center mx-auto mb-4">
                   <Mail className="w-7 h-7 text-teal" />
                 </div>
-                <h1 className="font-heading font-bold text-2xl text-ink dark:text-white mb-2">Check your inbox</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-1">
+                <h1 className="font-heading font-bold text-2xl text-ink mb-2">Check your inbox</h1>
+                <p className="text-sm text-body mb-1">
                   If an account exists for
                 </p>
-                <p className="text-sm font-semibold text-ink dark:text-white mb-6 break-all">{email.trim()}</p>
-                <p className="text-xs text-body dark:text-gray-500 mb-6">
+                <p className="text-sm font-semibold text-ink mb-6 break-all">{email.trim()}</p>
+                <p className="text-xs text-body mb-6">
                   we've sent a password reset link. It expires in 1 hour.
                 </p>
-                <p className="text-sm text-body dark:text-gray-400">
+                <p className="text-sm text-body">
                   <button
                     onClick={() => navigate('login')}
                     className="text-teal font-semibold hover:underline focus:outline-none"
@@ -78,14 +78,14 @@ export default function ForgotPasswordPage({ dark, toggleDark }) {
             ) : (
               /* ── Request form ── */
               <>
-                <h1 className="font-heading font-bold text-2xl text-ink dark:text-white mb-1">Forgot password?</h1>
-                <p className="text-sm text-body dark:text-gray-400 mb-7">
+                <h1 className="font-heading font-bold text-2xl text-ink mb-1">Forgot password?</h1>
+                <p className="text-sm text-body mb-7">
                   Enter your email and we'll send you a link to reset your password.
                 </p>
 
                 <form onSubmit={handleSubmit} noValidate className="space-y-5">
                   <div className="space-y-1.5">
-                    <label htmlFor="email" className="block text-sm font-medium text-ink dark:text-white">
+                    <label htmlFor="email"className="block text-sm font-medium text-ink">
                       Email
                     </label>
                     <GlowInput
@@ -109,7 +109,7 @@ export default function ForgotPasswordPage({ dark, toggleDark }) {
                   </button>
                 </form>
 
-                <p className="mt-6 text-center text-sm text-body dark:text-gray-400">
+                <p className="mt-6 text-center text-sm text-body">
                   Remembered your password?{' '}
                   <button
                     onClick={() => navigate('login')}

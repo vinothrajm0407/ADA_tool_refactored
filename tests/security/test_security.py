@@ -44,7 +44,6 @@ class TestAuthBypass:
         ("GET",  "/api/crawls"),
         ("GET",  "/api/alerts"),
         ("GET",  "/api/violations/summary"),
-        ("POST", "/api/ai-fix"),
     ]
 
     @pytest.mark.parametrize("method,endpoint", PROTECTED_ENDPOINTS)

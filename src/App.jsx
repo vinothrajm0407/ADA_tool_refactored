@@ -12,7 +12,6 @@ import AlertsPage from './pages/AlertsPage'
 import ExecutiveSummaryPage from './pages/ExecutiveSummaryPage'
 import AssistiveTestingPage from './pages/AssistiveTestingPage'
 import AssistiveResultsPage from './pages/AssistiveResultsPage'
-import AIFixPage from './pages/AIFixPage'
 import SettingsPage from './pages/SettingsPage'
 import NewScanPage from './pages/NewScanPage'
 import ScanHistoryView from './components/ScanHistory/ScanHistoryView'
@@ -86,7 +85,7 @@ function AppInner() {
       >
         Skip to main content
       </a>
-      <div className="flex h-screen overflow-hidden bg-ivory dark:bg-night">
+      <div className="flex h-screen overflow-hidden bg-ivory">
         {/* AppSidebar owns its own responsive layout (fixed+slide-in on mobile,
             relative+w-64 on desktop) and its own backdrop — no wrapper needed
             here. A second wrapper with its own width/backdrop previously
@@ -115,7 +114,6 @@ function AppInner() {
             {activePage === 'keyboard-test' && <AssistiveTestingPage />}
             {activePage === 'assistive-test' && <AssistiveTestingPage />}
             {activePage === 'assistive-results' && <AssistiveResultsPage />}
-            {activePage === 'ai-fix' && <AIFixPage />}
             {activePage === 'wcag-reference' && <WcagReferencePage />}
             {activePage === 'integrations' && <IntegrationsPage />}
             {activePage === 'repo-links' && <RepoLinkingPage />}

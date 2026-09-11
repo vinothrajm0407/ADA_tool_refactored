@@ -1,13 +1,13 @@
-import { Globe, Play, AlertTriangle } from 'lucide-react';
+import { Play, AlertTriangle } from 'lucide-react';
 import GlowInput from '../ui/GlowInput';
 import Toggle from './Toggle';
 
 function Field({ label, hint, children }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-400">
+      <label className="block text-[11px] font-semibold uppercase tracking-widest text-body">
         {label}
-        {hint && <span className="ml-1 normal-case font-normal text-body dark:text-gray-500">{hint}</span>}
+        {hint && <span className="ml-1 normal-case font-normal text-body">{hint}</span>}
       </label>
       {children}
     </div>
@@ -15,7 +15,7 @@ function Field({ label, hint, children }) {
 }
 
 function Divider() {
-  return <div className="border-t border-gray-100 dark:border-white/[0.06]" />;
+  return <div className="border-t border-gray-100"/>;
 }
 
 export default function CrawlForm({
@@ -31,30 +31,34 @@ export default function CrawlForm({
   onNotifyEmailChange,
   crawlLoading,
   onStartCrawl,
+  hideUrlField,
 }) {
   return (
     <>
-      <section className="pb-4">
-        <p className="text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-400 mb-3">
-          Root URL
-        </p>
-        <GlowInput
-          large
-          icon={Globe}
-          type="url"
-          value={crawlUrl}
-          onChange={e => onUrlChange(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !crawlLoading && onStartCrawl()}
-          placeholder="https://example.com"
-          disabled={crawlLoading}
-        />
-      </section>
+      {!hideUrlField && (
+        <>
+          <section className="pb-4">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-body mb-3">
+              Root URL
+            </p>
+            <input
+              type="url"
+              value={crawlUrl}
+              onChange={e => onUrlChange(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !crawlLoading && onStartCrawl()}
+              placeholder="https://example.com"
+              disabled={crawlLoading}
+              className="w-full border-2 border-teal rounded-lg px-4 py-2.5 text-sm text-ink placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal/20 focus:ring-offset-1 transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
+            />
+          </section>
 
-      <Divider />
+          <Divider />
+        </>
+      )}
 
       <section className="pt-5 pb-1">
-        <p className="font-heading font-semibold text-lg text-ink dark:text-white mb-1">Crawl Options</p>
-        <p className="text-sm text-body dark:text-gray-500 mb-3">
+        <p className="font-heading font-semibold text-lg text-ink mb-1">Crawl Options</p>
+        <p className="text-sm text-body mb-3">
           Configure how deep and wide the crawler explores your site.
         </p>
 
@@ -80,17 +84,17 @@ export default function CrawlForm({
                 disabled={crawlLoading}
               />
             </Field>
-            <p className="col-span-2 text-xs text-body dark:text-gray-500 -mt-2">
-              Crawls up to <strong className="text-ink dark:text-gray-300">{maxPages} pages</strong> from the root URL,
-              following links up to depth <strong className="text-ink dark:text-gray-300">{maxDepth}</strong>.
+            <p className="col-span-2 text-xs text-body -mt-2">
+              Crawls up to <strong className="text-ink">{maxPages} pages</strong> from the root URL,
+              following links up to depth <strong className="text-ink">{maxDepth}</strong>.
             </p>
           </div>
         )}
 
-        <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100">
           <div className="flex-1 min-w-0">
-            <p id="full-site-label" className="text-sm font-semibold text-ink dark:text-white">Full Site Crawl</p>
-            <p className="text-sm text-body dark:text-gray-400 mt-1 leading-relaxed">
+            <p id="full-site-label"className="text-sm font-semibold text-ink">Full Site Crawl</p>
+            <p className="text-sm text-body mt-1 leading-relaxed">
               No page limit — crawls the entire site (up to 10,000 pages).
             </p>
           </div>
@@ -119,8 +123,8 @@ export default function CrawlForm({
       <Divider />
 
       <section className="pt-3 pb-5">
-        <p className="font-heading font-semibold text-lg text-ink dark:text-white mb-1">Notifications</p>
-        <p className="text-sm text-body dark:text-gray-500 mb-3">
+        <p className="font-heading font-semibold text-lg text-ink mb-1">Notifications</p>
+        <p className="text-sm text-body mb-3">
           Receive an email report when the crawl completes.
         </p>
         <Field label="Email Address" hint="(optional)">

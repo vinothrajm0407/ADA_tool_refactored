@@ -2,6 +2,7 @@ import { apiFetch } from '../utils/api';
 import { useState, useEffect, useMemo } from 'react';
 import { BellRing, CheckCheck, TrendingDown, AlertTriangle, ShieldAlert, BarChart2, ArrowRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import PageHeader from '../components/ui/PageHeader';
 
 function formatTime(iso) {
   if (!iso) return '—';
@@ -36,7 +37,7 @@ const ALERT_META = {
 const LEFT_BAR = {
   critical: 'border-l-coral',
   serious:  'border-l-amber',
-  moderate: 'border-l-blue-400 dark:border-l-blue-500',
+  moderate:'border-l-blue-400',
   info:     'border-l-teal',
 };
 
@@ -46,15 +47,22 @@ const TABS = [
   { id: 'critical', label: 'Critical' },
 ];
 
+const SEVERITY_DOT = {
+  critical: 'bg-coral',
+  serious:  'bg-amber',
+  moderate:'bg-blue-400',
+  info:     'bg-teal',
+};
+
 function SeverityChip({ severity }) {
   const cls = {
-    critical: 'bg-coral/10 text-coral-700 dark:text-coral-300',
-    serious:  'bg-amber/10 text-amber-700 dark:text-amber-300',
-    moderate: 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
-    info:     'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400',
-  }[severity] || 'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400';
+    critical:'bg-coral/15 text-coral-700',
+    serious:'bg-amber/15 text-amber-700',
+    moderate:'bg-blue-500/15 text-blue-700',
+    info:'bg-gray-100 text-body',
+  }[severity] ||'bg-gray-100 text-body';
   return (
-    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${cls}`}>
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
       {severity?.charAt(0).toUpperCase() + severity?.slice(1)}
     </span>
   );
@@ -65,13 +73,14 @@ function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
   const Icon = meta.icon;
   const isActive = alert.status === 'active';
   const details = alert.details || {};
-  const leftBar = LEFT_BAR[alert.severity] || 'border-l-gray-200 dark:border-l-white/10';
+  const leftBar = LEFT_BAR[alert.severity] ||'border-l-gray-200';
+  const dotColor = SEVERITY_DOT[alert.severity] || 'bg-gray-400';
 
   return (
-    <div className={`bg-white dark:bg-charcoal rounded-xl border border-l-4 shadow-soft transition-opacity ${leftBar} ${
+    <div className={`bg-white rounded-xl border border-l-2 transition-opacity ${
       isActive
-        ? 'border-gray-100 dark:border-white/[0.06]'
-        : 'border-gray-100 dark:border-white/[0.04] opacity-60'
+        ?`${leftBar} border-gray-100`
+        :'border-l-transparent border-gray-100 opacity-80'
     }`}>
       <div className="px-5 py-4 flex items-start gap-3">
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.bg}`}>
@@ -79,21 +88,26 @@ function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div>
-              <p className="font-semibold text-sm text-ink dark:text-white">{meta.label}</p>
-              <p className="text-xs text-body dark:text-gray-400 truncate mt-0.5" title={alert.root_url}>
-                {alert.root_url || '—'}
-              </p>
+            <div className="flex items-start gap-1.5">
+              {isActive && (
+                <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} aria-hidden="true" />
+              )}
+              <div>
+                <p className="font-semibold text-sm text-ink">{meta.label}</p>
+                <p className="text-xs text-body truncate mt-0.5"title={alert.root_url}>
+                  {alert.root_url || '—'}
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <SeverityChip severity={alert.severity} />
               {!isActive && (
-                <span className="text-xs text-body dark:text-gray-500">Read</span>
+                <span className="text-xs text-body">Read</span>
               )}
             </div>
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-body dark:text-gray-400">
+          <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-body">
             {details.previous_score != null && details.current_score != null && (
               <span>Score: {details.previous_score} → <strong className="text-coral">{details.current_score}</strong></span>
             )}
@@ -112,7 +126,7 @@ function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
           </div>
 
           <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="text-[10px] text-body dark:text-gray-500" title={formatDate(alert.created_at)}>
+            <span className="text-[10px] text-body"title={formatDate(alert.created_at)}>
               {isToday(alert.created_at) ? formatTime(alert.created_at) : formatDate(alert.created_at)}
             </span>
             <div className="flex items-center gap-4">
@@ -120,7 +134,7 @@ function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
                 <button
                   type="button"
                   onClick={() => onViewResults(alert.crawl_id)}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-teal hover:text-teal-700 dark:hover:text-teal-300 transition-colors"
+                  className="flex items-center gap-1 text-[11px] font-semibold text-teal hover:text-teal-700 transition-colors"
                 >
                   View results <ArrowRight size={12} />
                 </button>
@@ -130,7 +144,7 @@ function AlertCard({ alert, onAcknowledge, onViewResults, acknowledging }) {
                   type="button"
                   onClick={() => onAcknowledge(alert.id)}
                   disabled={acknowledging === alert.id}
-                  className="flex items-center gap-1.5 text-[11px] font-semibold text-body dark:text-gray-400 hover:text-teal transition-colors disabled:opacity-40"
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-body hover:text-teal transition-colors disabled:opacity-40"
                 >
                   <CheckCheck size={13} />
                   {acknowledging === alert.id ? 'Marking…' : 'Mark as read'}
@@ -148,7 +162,7 @@ function AlertGroup({ title, items, onAcknowledge, onViewResults, acknowledging 
   if (items.length === 0) return null;
   return (
     <div className="space-y-3">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-body dark:text-gray-500">{title}</h2>
+      <h2 className="text-[10px] font-semibold uppercase tracking-widest text-body">{title}</h2>
       <div className="space-y-3">
         {items.map((alert) => (
           <AlertCard
@@ -244,23 +258,16 @@ export default function AlertsPage() {
   const hasUnreadInView = items.some((a) => a.status === 'active');
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0"role="main">
       <div className="max-w-6xl mx-auto space-y-6">
 
-        <div>
-          <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">
-            Notifications
-          </h1>
-          <p className="text-body dark:text-gray-400 text-[0.9375rem]">
-            Stay informed about accessibility changes that need attention.
-          </p>
-        </div>
+        <PageHeader title="Notifications" description="Stay informed about accessibility changes that need attention." />
 
         <div className="flex flex-col lg:flex-row gap-6 items-start">
           <div className="flex-1 min-w-0 w-full space-y-6">
 
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div role="tablist" aria-label="Notification filter" className="flex gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl">
+              <div role="tablist"aria-label="Notification filter"className="flex gap-1 bg-gray-100 p-1 rounded-xl">
                 {TABS.map((t) => (
                   <button
                     key={t.id}
@@ -309,7 +316,7 @@ export default function AlertsPage() {
                 <div className="w-16 h-16 rounded-2xl bg-sage/10 flex items-center justify-center mb-4">
                   <BellRing className="w-8 h-8 text-sage" />
                 </div>
-                <p className="font-heading font-bold text-xl text-ink dark:text-white mb-1">
+                <p className="font-heading font-bold text-xl text-ink mb-1">
                   {filter === 'unread' ? 'No unread notifications' : filter === 'critical' ? 'No critical notifications' : 'No notifications yet'}
                 </p>
                 <p className="text-sm max-w-xs leading-relaxed">
@@ -325,8 +332,8 @@ export default function AlertsPage() {
               </div>
             )}
 
-            <div className="text-xs text-body dark:text-gray-500 bg-gray-50 dark:bg-white/[0.03] rounded-xl p-4 space-y-1">
-              <p className="font-semibold text-ink dark:text-gray-300">When are notifications created?</p>
+            <div className="text-xs text-body bg-gray-50 rounded-xl p-4 space-y-1">
+              <p className="font-semibold text-ink">When are notifications created?</p>
               <p>Site score drops ≥ 5 points · Total violations increase ≥ 10 · New critical issues introduced · Page regressions detected</p>
               <p>These thresholds are configurable via environment variables: <code className="font-mono text-[10px]">ALERT_SCORE_DROP_THRESHOLD</code>, <code className="font-mono text-[10px]">ALERT_VIOLATION_INCREASE_THRESHOLD</code></p>
             </div>
@@ -334,8 +341,8 @@ export default function AlertsPage() {
 
           <aside className="w-full lg:w-72 flex-shrink-0">
             <div className="card p-5">
-              <h2 className="font-heading font-semibold text-sm text-ink dark:text-white mb-1">Connected channels</h2>
-              <p className="text-xs text-body dark:text-gray-400 mb-4">
+              <h2 className="font-heading font-semibold text-sm text-ink mb-1">Connected channels</h2>
+              <p className="text-xs text-body mb-4">
                 Accessibility reports are delivered to these workspaces after each crawl.
               </p>
               {integrationsLoading ? (
@@ -344,13 +351,13 @@ export default function AlertsPage() {
                   <div className="skeleton h-9" />
                 </div>
               ) : integrations.length === 0 ? (
-                <p className="text-xs text-body dark:text-gray-500 mb-4">No channels connected yet.</p>
+                <p className="text-xs text-body mb-4">No channels connected yet.</p>
               ) : (
                 <ul className="space-y-2 mb-4">
                   {integrations.map((integ) => (
-                    <li key={integ.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 dark:bg-white/[0.03] rounded-lg px-3 py-2">
-                      <span className="text-ink dark:text-white font-medium capitalize truncate">{integ.workspace_name || integ.platform}</span>
-                      <span className="text-body dark:text-gray-500 flex-shrink-0">
+                    <li key={integ.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded-lg px-3 py-2">
+                      <span className="text-ink font-medium capitalize truncate">{integ.workspace_name || integ.platform}</span>
+                      <span className="text-body flex-shrink-0">
                         {integ.channel_count} channel{integ.channel_count !== 1 ? 's' : ''}
                       </span>
                     </li>

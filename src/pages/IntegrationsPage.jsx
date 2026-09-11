@@ -5,6 +5,7 @@ import {
   AlertTriangle, CheckCheck, Clock,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
+import PageHeader from '../components/ui/PageHeader';
 
 // ── Shared dialog accessibility: focus first field on open, Escape to close, restore focus on close
 function useDialogA11y(onClose) {
@@ -155,10 +156,10 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
   return (
     <div className="dialog-overlay">
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-      <div role="dialog" aria-modal="true" aria-labelledby="add-slack-channel-title" className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
-          <h3 id="add-slack-channel-title" className="font-heading font-semibold text-base text-ink dark:text-white">Add Slack Channel</h3>
-          <button onClick={onClose} aria-label="Close dialog" className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
+      <div role="dialog"aria-modal="true"aria-labelledby="add-slack-channel-title"className="relative bg-white rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h3 id="add-slack-channel-title"className="font-heading font-semibold text-base text-ink">Add Slack Channel</h3>
+          <button onClick={onClose} aria-label="Close dialog"className="p-1 rounded-lg text-gray-400 hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
             <X size={16} />
           </button>
         </div>
@@ -167,7 +168,7 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
             <p className="text-sm text-coral bg-coral/10 rounded-xl px-4 py-3 border border-coral/20">{error}</p>
           )}
           <div>
-            <label htmlFor="slack-channel-search" className="block text-sm font-medium text-ink dark:text-white mb-1.5">Search channels</label>
+            <label htmlFor="slack-channel-search"className="block text-sm font-medium text-ink mb-1.5">Search channels</label>
             <input
               ref={firstFieldRef}
               id="slack-channel-search"
@@ -178,12 +179,12 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
               className="input-base"
             />
           </div>
-          <div className="border border-gray-100 dark:border-white/[0.06] rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+          <div className="border border-gray-100 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
             {loading && (
-              <div className="p-4 text-center text-sm text-body dark:text-gray-400 animate-pulse">Loading channels…</div>
+              <div className="p-4 text-center text-sm text-body animate-pulse">Loading channels…</div>
             )}
             {!loading && filtered.length === 0 && (
-              <div className="p-4 text-center text-sm text-body dark:text-gray-400">No channels found</div>
+              <div className="p-4 text-center text-sm text-body">No channels found</div>
             )}
             {!loading && filtered.map(c => (
               <button
@@ -192,7 +193,7 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
                 className={`w-full flex items-center gap-2 px-4 py-2.5 text-sm text-left transition-colors ${
                   selected?.id === c.id
                     ? 'bg-teal text-white'
-                    : 'text-ink dark:text-white hover:bg-gray-50 dark:hover:bg-white/5'
+                    :'text-ink hover:bg-gray-50'
                 }`}
               >
                 {c.is_private ? <Lock size={13} className="flex-shrink-0 opacity-60" /> : <Hash size={13} className="flex-shrink-0 opacity-60" />}
@@ -201,7 +202,7 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
             ))}
           </div>
           <div>
-            <label htmlFor="slack-channel-purpose" className="block text-sm font-medium text-ink dark:text-white mb-1.5">Purpose</label>
+            <label htmlFor="slack-channel-purpose"className="block text-sm font-medium text-ink mb-1.5">Purpose</label>
             <select
               id="slack-channel-purpose"
               value={purpose}
@@ -212,11 +213,11 @@ function AddSlackChannelModal({ integrationId, onClose, onAdded }) {
               <option value="alerts">Regression Alerts</option>
             </select>
           </div>
-          <p className="text-xs text-body dark:text-gray-500">
+          <p className="text-xs text-body">
             A test message will be sent to confirm the bot has access. Make sure you've invited the ADA bot to this channel first.
           </p>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 dark:border-white/[0.06]">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
           <button
             onClick={handleAdd}
@@ -273,13 +274,13 @@ function ConnectTeamsModal({ onClose, onConnected }) {
   return (
     <div className="dialog-overlay">
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
-      <div role="dialog" aria-modal="true" aria-labelledby="connect-teams-title" className="relative bg-white dark:bg-charcoal rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-white/10">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-white/[0.06]">
+      <div role="dialog"aria-modal="true"aria-labelledby="connect-teams-title"className="relative bg-white rounded-2xl shadow-xl w-full max-w-md border border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <TeamsLogo size={20} />
-            <h3 id="connect-teams-title" className="font-heading font-semibold text-base text-ink dark:text-white">Connect Microsoft Teams</h3>
+            <h3 id="connect-teams-title"className="font-heading font-semibold text-base text-ink">Connect Microsoft Teams</h3>
           </div>
-          <button onClick={onClose} aria-label="Close dialog" className="p-1 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
+          <button onClick={onClose} aria-label="Close dialog"className="p-1 rounded-lg text-gray-400 hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40">
             <X size={16} />
           </button>
         </div>
@@ -287,7 +288,7 @@ function ConnectTeamsModal({ onClose, onConnected }) {
           {error && (
             <p className="text-sm text-coral bg-coral/10 rounded-xl px-4 py-3 border border-coral/20">{error}</p>
           )}
-          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl px-4 py-3 text-xs text-blue-700 dark:text-blue-300 space-y-1">
+          <div className="bg-blue-50 rounded-xl px-4 py-3 text-xs text-blue-700 space-y-1">
             <p className="font-semibold">How to get a webhook URL:</p>
             <ol className="list-decimal list-inside space-y-0.5">
               <li>Go to the Teams channel you want to connect</li>
@@ -297,7 +298,7 @@ function ConnectTeamsModal({ onClose, onConnected }) {
             </ol>
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="teams-webhook-url" className="block text-sm font-medium text-ink dark:text-white">Webhook URL</label>
+            <label htmlFor="teams-webhook-url"className="block text-sm font-medium text-ink">Webhook URL</label>
             <input
               ref={firstFieldRef}
               id="teams-webhook-url"
@@ -310,7 +311,7 @@ function ConnectTeamsModal({ onClose, onConnected }) {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label htmlFor="teams-channel-name" className="block text-sm font-medium text-ink dark:text-white">Channel name</label>
+              <label htmlFor="teams-channel-name"className="block text-sm font-medium text-ink">Channel name</label>
               <input
                 id="teams-channel-name"
                 type="text"
@@ -321,7 +322,7 @@ function ConnectTeamsModal({ onClose, onConnected }) {
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="teams-workspace-label" className="block text-sm font-medium text-ink dark:text-white">Workspace label</label>
+              <label htmlFor="teams-workspace-label"className="block text-sm font-medium text-ink">Workspace label</label>
               <input
                 id="teams-workspace-label"
                 type="text"
@@ -332,11 +333,11 @@ function ConnectTeamsModal({ onClose, onConnected }) {
               />
             </div>
           </div>
-          <p className="text-xs text-body dark:text-gray-500">
+          <p className="text-xs text-body">
             A test message will be sent to confirm the connection.
           </p>
         </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 dark:border-white/[0.06]">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
           <button
             onClick={handleConnect}
@@ -383,14 +384,16 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
   const isSlack = integration.platform === 'slack';
 
   return (
-    <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft overflow-hidden">
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-3">
-          {isSlack ? <SlackLogo size={20} /> : <TeamsLogo size={20} />}
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isSlack ? 'bg-[#4A154B]' : 'bg-[#5058C8]'}`}>
+            {isSlack ? <SlackLogo size={18} /> : <TeamsLogo size={18} />}
+          </div>
           <div>
-            <p className="font-semibold text-sm text-ink dark:text-white">{integration.workspace_name}</p>
-            <p className="text-[11px] text-body dark:text-gray-500">
+            <p className="font-semibold text-sm text-ink">{integration.workspace_name}</p>
+            <p className="text-[11px] text-body">
               {integration.channel_count} channel{integration.channel_count !== 1 ? 's' : ''} configured
             </p>
           </div>
@@ -398,7 +401,7 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
         <div className="flex items-center gap-2">
           <button
             onClick={() => onDisconnect(integration.id)}
-            className="flex items-center gap-1.5 text-xs font-medium text-body dark:text-gray-400 hover:text-coral transition-colors px-2.5 py-1.5 rounded-lg hover:bg-coral/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
+            className="flex items-center gap-1.5 text-xs font-medium text-body hover:text-coral transition-colors px-2.5 py-1.5 rounded-lg hover:bg-coral/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
           >
             <Trash2 size={13} /> Disconnect
           </button>
@@ -406,7 +409,7 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
             onClick={() => setExpanded(v => !v)}
             aria-expanded={expanded}
             aria-label={expanded ? `Collapse ${integration.workspace_name} channels` : `Expand ${integration.workspace_name} channels`}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-ink dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-ink hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
           >
             {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
@@ -414,9 +417,9 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
       </div>
 
       {expanded && (
-        <div className="border-t border-gray-100 dark:border-white/[0.06] px-5 py-4 space-y-3">
+        <div className="border-t border-gray-100 px-5 py-4 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-widest text-body dark:text-gray-500">Channels</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-body">Channels</p>
             {isSlack && (
               <button
                 onClick={() => setShowAdd(true)}
@@ -429,12 +432,12 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
 
           {chLoading && (
             <div className="space-y-2">
-              {[1,2].map(i => <div key={i} className="h-9 bg-gray-100 dark:bg-white/5 rounded-xl animate-pulse" />)}
+              {[1,2].map(i => <div key={i} className="h-9 bg-gray-100 rounded-xl animate-pulse"/>)}
             </div>
           )}
 
           {!chLoading && channels.length === 0 && (
-            <div className="text-center py-6 text-sm text-body dark:text-gray-400">
+            <div className="text-center py-6 text-sm text-body">
               {isSlack
                 ? 'No channels added yet. Click "Add Channel" to configure a destination.'
                 : 'No channels configured.'}
@@ -442,12 +445,12 @@ function WorkspacePanel({ integration, onDisconnect, onChannelAdded }) {
           )}
 
           {!chLoading && channels.map(ch => (
-            <div key={ch.channel_id} className="flex items-center justify-between bg-gray-50 dark:bg-white/[0.03] rounded-xl px-4 py-2.5">
+            <div key={ch.channel_id} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-2.5">
               <div className="flex items-center gap-2">
-                <Hash size={14} className="text-body dark:text-gray-500 flex-shrink-0" />
-                <span className="text-sm font-medium text-ink dark:text-white">{ch.channel_name}</span>
+                <Hash size={14} className="text-body flex-shrink-0"/>
+                <span className="text-sm font-medium text-ink">{ch.channel_name}</span>
                 {ch.purpose && (
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-body dark:text-gray-500 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-body bg-gray-100 px-2 py-0.5 rounded-full">
                     {ch.purpose}
                   </span>
                 )}
@@ -563,20 +566,14 @@ export default function IntegrationsPage() {
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0" role="main">
+    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0"role="main">
       <div className="max-w-[900px] mx-auto space-y-8">
 
-        {/* Header */}
-        <div>
-          <h1 className="text-[1.75rem] font-bold text-ink dark:text-white mt-0 mb-1">Channels & apps</h1>
-          <p className="text-body dark:text-gray-400 text-[0.9375rem]">
-            Send scan results and alerts to the tools your team already uses.
-          </p>
-        </div>
+        <PageHeader title="Channels & apps" description="Send scan results and alerts to the tools your team already uses." />
 
         {/* Toast */}
         {toast && (
-          <div className="fixed bottom-6 right-6 z-50 bg-ink dark:bg-white text-white dark:text-ink text-sm font-semibold px-5 py-3 rounded-xl shadow-lg flex items-center gap-2 animate-fade-in">
+          <div className="fixed bottom-6 right-6 z-50 bg-ink text-white text-sm font-semibold px-5 py-3 rounded-xl flex items-center gap-2 animate-fade-in">
             <CheckCircle2 size={16} className="text-sage" /> {toast}
           </div>
         )}
@@ -585,15 +582,15 @@ export default function IntegrationsPage() {
         <div className="grid sm:grid-cols-2 gap-5">
 
           {/* Slack card */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6 flex flex-col gap-4">
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 flex flex-col gap-4">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#4A154B]/10 flex items-center justify-center">
-                  <SlackLogo size={22} />
+                <div className="w-9 h-9 rounded-lg bg-[#4A154B] flex items-center justify-center flex-shrink-0">
+                  <SlackLogo size={18} />
                 </div>
                 <div>
-                  <p className="font-heading font-semibold text-base text-ink dark:text-white">Slack</p>
-                  <p className="text-[11px] text-body dark:text-gray-500">Post reports to any Slack channel</p>
+                  <p className="font-heading font-semibold text-base text-ink">Slack</p>
+                  <p className="text-[11px] text-body">Post reports to any Slack channel</p>
                 </div>
               </div>
               {slackIntegrations.length > 0 ? (
@@ -601,12 +598,12 @@ export default function IntegrationsPage() {
                   <CheckCircle2 size={12} /> Connected
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-body dark:text-gray-500 bg-gray-100 dark:bg-white/5 px-2.5 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-body bg-gray-100 px-2.5 py-1 rounded-full">
                   <Circle size={12} /> Not connected
                 </span>
               )}
             </div>
-            <p className="text-sm text-body dark:text-gray-400 leading-relaxed">
+            <p className="text-sm text-body leading-relaxed">
               Authenticate with Slack to let ADA post scan summaries, crawl reports, and regression alerts to your team's channels.
             </p>
             {slackError && (
@@ -624,15 +621,15 @@ export default function IntegrationsPage() {
           </div>
 
           {/* Teams card */}
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-6 flex flex-col gap-4">
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 flex flex-col gap-4">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#5059C9]/10 flex items-center justify-center">
-                  <TeamsLogo size={22} />
+                <div className="w-9 h-9 rounded-lg bg-[#5058C8] flex items-center justify-center flex-shrink-0">
+                  <TeamsLogo size={18} />
                 </div>
                 <div>
-                  <p className="font-heading font-semibold text-base text-ink dark:text-white">Microsoft Teams</p>
-                  <p className="text-[11px] text-body dark:text-gray-500">Post reports via incoming webhook</p>
+                  <p className="font-heading font-semibold text-base text-ink">Microsoft Teams</p>
+                  <p className="text-[11px] text-body">Post reports via incoming webhook</p>
                 </div>
               </div>
               {teamsIntegrations.length > 0 ? (
@@ -640,12 +637,12 @@ export default function IntegrationsPage() {
                   <CheckCircle2 size={12} /> Connected
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-body dark:text-gray-500 bg-gray-100 dark:bg-white/5 px-2.5 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-body bg-gray-100 px-2.5 py-1 rounded-full">
                   <Circle size={12} /> Not connected
                 </span>
               )}
             </div>
-            <p className="text-sm text-body dark:text-gray-400 leading-relaxed">
+            <p className="text-sm text-body leading-relaxed">
               Use a Teams Incoming Webhook connector to receive accessibility reports in any Teams channel — no admin consent needed.
             </p>
             <button
@@ -660,13 +657,13 @@ export default function IntegrationsPage() {
         {/* Connected workspaces */}
         {loading && (
           <div className="space-y-3">
-            {[1,2].map(i => <div key={i} className="h-24 bg-gray-200 dark:bg-white/10 rounded-2xl animate-pulse" />)}
+            {[1,2].map(i => <div key={i} className="h-24 bg-gray-200 rounded-2xl animate-pulse"/>)}
           </div>
         )}
 
         {!loading && integrations.length > 0 && (
           <div className="space-y-4">
-            <h2 className="font-heading font-semibold text-base text-ink dark:text-white">Connected Workspaces</h2>
+            <h2 className="font-heading font-semibold text-base text-ink">Connected Workspaces</h2>
             {integrations.map(integration => (
               <WorkspacePanel
                 key={integration.id}
@@ -685,58 +682,61 @@ export default function IntegrationsPage() {
         {/* Delivery log */}
         {!loading && deliveries.length > 0 && (
           <div>
-            <h2 className="font-heading font-semibold text-base text-ink dark:text-white mb-4">Recent Deliveries</h2>
-            <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 dark:border-white/[0.06]">
-                    <th className="text-left px-5 py-3 text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">Report</th>
-                    <th className="text-left px-5 py-3 text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">Channel</th>
-                    <th className="text-left px-5 py-3 text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">Platform</th>
-                    <th className="text-left px-5 py-3 text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">Time</th>
-                    <th className="text-right px-5 py-3 text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-500">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deliveries.map((d, i) => (
-                    <tr
-                      key={d.id}
-                      className={`${i < deliveries.length - 1 ? 'border-b border-gray-50 dark:border-white/[0.04]' : ''} hover:bg-gray-50 dark:hover:bg-white/[0.02] transition-colors`}
-                    >
-                      <td className="px-5 py-3 text-ink dark:text-white font-medium">
-                        <ReportTypeLabel type={d.report_type} />
-                      </td>
-                      <td className="px-5 py-3 text-body dark:text-gray-400">{d.channel_name || '—'}</td>
-                      <td className="px-5 py-3">
-                        <span className="inline-flex items-center gap-1.5 text-xs text-body dark:text-gray-400">
-                          {d.platform === 'slack' ? <SlackLogo size={13} /> : <TeamsLogo size={13} />}
-                          {d.workspace_name}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-body dark:text-gray-400 text-xs">
-                        <span className="flex items-center gap-1"><Clock size={11} />{formatDate(d.sent_at)}</span>
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <DeliveryStatusBadge status={d.status} />
-                        {d.error_message && (
-                          <p className="text-[10px] text-coral mt-0.5">{d.error_message}</p>
-                        )}
-                      </td>
+            <h2 className="font-heading font-semibold text-base text-ink mb-4">Recent Deliveries</h2>
+            {/* Raw table kept (not DataTable): Platform column mixes icon + text and Status
+                column stacks a badge with an optional error line beneath it — too complex
+                for DataTable's plain-cell API. Classes below are aligned with table-base
+                (see DataTable.jsx / index.css) for visual consistency. */}
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="table-base">
+                  <thead>
+                    <tr>
+                      <th scope="col" className="whitespace-nowrap">Report</th>
+                      <th scope="col" className="whitespace-nowrap">Channel</th>
+                      <th scope="col" className="whitespace-nowrap">Platform</th>
+                      <th scope="col" className="whitespace-nowrap">Time</th>
+                      <th scope="col" className="whitespace-nowrap text-right">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {deliveries.map(d => (
+                      <tr key={d.id}>
+                        <td className="font-medium">
+                          <ReportTypeLabel type={d.report_type} />
+                        </td>
+                        <td className="text-body">{d.channel_name ||'—'}</td>
+                        <td>
+                          <span className="inline-flex items-center gap-1.5 text-xs text-body">
+                            {d.platform === 'slack' ? <SlackLogo size={13} /> : <TeamsLogo size={13} />}
+                            {d.workspace_name}
+                          </span>
+                        </td>
+                        <td className="text-body text-xs">
+                          <span className="flex items-center gap-1"><Clock size={11} />{formatDate(d.sent_at)}</span>
+                        </td>
+                        <td className="text-right">
+                          <DeliveryStatusBadge status={d.status} />
+                          {d.error_message && (
+                            <p className="text-[10px] text-coral mt-0.5">{d.error_message}</p>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
 
         {/* Empty state */}
         {!loading && integrations.length === 0 && (
-          <div className="text-center py-12 text-body dark:text-gray-400 space-y-2">
+          <div className="text-center py-12 text-body space-y-2">
             <div className="w-14 h-14 rounded-2xl bg-teal/10 flex items-center justify-center mx-auto mb-4">
               <Send className="w-7 h-7 text-teal" />
             </div>
-            <p className="font-heading font-semibold text-base text-ink dark:text-white">No integrations connected yet</p>
+            <p className="font-heading font-semibold text-base text-ink">No integrations connected yet</p>
             <p className="text-sm max-w-xs mx-auto">
               Connect Slack or Microsoft Teams to start sending accessibility reports directly to your team's channels.
             </p>
@@ -744,10 +744,10 @@ export default function IntegrationsPage() {
         )}
 
         {/* Setup note */}
-        <div className="bg-gray-50 dark:bg-white/[0.03] rounded-xl px-5 py-4 text-xs text-body dark:text-gray-500 space-y-1">
-          <p className="font-semibold text-ink dark:text-gray-300">Slack setup note</p>
+        <div className="bg-gray-50 rounded-xl px-5 py-4 text-xs text-body space-y-1">
+          <p className="font-semibold text-ink">Slack setup note</p>
           <p>
-            Slack requires a registered Slack App with <code className="font-mono text-[10px]">chat:write</code>, <code className="font-mono text-[10px]">channels:read</code>, and <code className="font-mono text-[10px]">groups:read</code> scopes.
+            Slack requires a registered Slack App with <code className="font-mono text-[10px]">chat:write</code>, <code className="font-mono text-[10px]">channels:read</code>, <code className="font-mono text-[10px]">groups:read</code>, and <code className="font-mono text-[10px]">files:write</code> scopes.
             Set <code className="font-mono text-[10px]">SLACK_CLIENT_ID</code> and <code className="font-mono text-[10px]">SLACK_CLIENT_SECRET</code> in your environment variables to enable OAuth.
           </p>
         </div>

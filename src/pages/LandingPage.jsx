@@ -37,7 +37,7 @@ const STEPS = [
 
 const FEATURES = [
   {
-    icon: Globe, color: 'text-teal-600', bg: 'bg-teal-50 dark:bg-teal-900/20',
+    icon: Globe, color:'text-teal-600', bg:'bg-teal-50',
     badge: 'Full-site',
     title: 'Multi-page Crawling',
     desc: 'Go beyond single-page checks. ADA crawls your entire site automatically and tests every page it finds.',
@@ -61,7 +61,7 @@ const FEATURES = [
     desc: 'Validate focus order, detect focus traps, and verify skip links across every flow — automatically.',
   },
   {
-    icon: TrendingUp, color: 'text-teal-600', bg: 'bg-teal-50 dark:bg-teal-900/20',
+    icon: TrendingUp, color:'text-teal-600', bg:'bg-teal-50',
     badge: null,
     title: 'Trend Analytics',
     desc: 'Visualise accessibility health over time. See which sprints improved compliance and where regressions appeared.',
@@ -93,15 +93,15 @@ function StepCard({ icon: Icon, num, title, desc }) {
   return (
     <div className="flex flex-col items-center text-center gap-3">
       <div className="relative mb-1">
-        <div className="w-16 h-16 rounded-2xl bg-white dark:bg-night border border-gray-100 dark:border-white/10 shadow-soft flex items-center justify-center">
-          <Icon className="w-7 h-7 text-teal" />
+        <div className="w-16 h-16 rounded-2xl bg-white border border-gray-100 flex items-center justify-center">
+          <Icon className="w-7 h-7 text-teal"/>
         </div>
         <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-teal text-white text-xs font-bold font-heading flex items-center justify-center leading-none">
           {num}
         </span>
       </div>
-      <h3 className="font-heading font-semibold text-ink dark:text-white text-base">{title}</h3>
-      <p className="text-sm text-body dark:text-gray-400 leading-relaxed max-w-[240px]">{desc}</p>
+      <h3 className="font-heading font-semibold text-ink text-base">{title}</h3>
+      <p className="text-sm text-body leading-relaxed max-w-[240px]">{desc}</p>
     </div>
   );
 }
@@ -120,8 +120,8 @@ function FeatureCard({ icon: Icon, color, bg, badge, title, desc }) {
         )}
       </div>
       <div>
-        <h3 className="font-heading font-semibold text-ink dark:text-white text-base mb-1.5">{title}</h3>
-        <p className="text-sm text-body dark:text-gray-400 leading-relaxed">{desc}</p>
+        <h3 className="font-heading font-semibold text-ink text-base mb-1.5">{title}</h3>
+        <p className="text-sm text-body leading-relaxed">{desc}</p>
       </div>
     </div>
   );
@@ -131,9 +131,9 @@ function SpotlightBullet({ text }) {
   return (
     <li className="flex items-start gap-2.5">
       <span className="mt-0.5 w-4 h-4 rounded-full bg-teal/10 flex items-center justify-center flex-shrink-0">
-        <Check className="w-2.5 h-2.5 text-teal" />
+        <Check className="w-2.5 h-2.5 text-teal"/>
       </span>
-      <span className="text-sm text-body dark:text-gray-400 leading-relaxed">{text}</span>
+      <span className="text-sm text-body leading-relaxed">{text}</span>
     </li>
   );
 }
@@ -145,21 +145,21 @@ function AuthRequiredModal({ onLogin, onSignup, onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={onClose}>
       <div
-        className="bg-white dark:bg-charcoal rounded-2xl shadow-2xl p-8 w-full max-w-sm text-center"
+        className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm text-center"
         onClick={e => e.stopPropagation()}
       >
         <div className="w-12 h-12 rounded-full bg-teal/10 flex items-center justify-center mx-auto mb-4">
-          <ShieldCheck className="w-6 h-6 text-teal" />
+          <ShieldCheck className="w-6 h-6 text-teal"/>
         </div>
-        <h2 className="font-heading font-bold text-xl text-ink dark:text-white mb-2">Sign in to continue</h2>
-        <p className="text-sm text-body dark:text-gray-400 mb-7">
+        <h2 className="font-heading font-bold text-xl text-ink mb-2">Sign in to continue</h2>
+        <p className="text-sm text-body mb-7">
           Please sign in or create an account to access ADA.
         </p>
         <div className="flex flex-col gap-3">
           <button onClick={onLogin} className="btn-primary w-full py-3">Sign In</button>
           <button
             onClick={onSignup}
-            className="w-full py-3 rounded-xl border border-gray-200 dark:border-white/10 text-sm font-semibold text-ink dark:text-white hover:bg-ivory dark:hover:bg-white/5 transition-colors"
+            className="w-full py-3 rounded-xl border border-gray-200 text-sm font-semibold text-ink hover:bg-ivory transition-colors"
           >
             Create Account
           </button>
@@ -184,7 +184,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
   }
 
   return (
-    <div className="min-h-screen bg-white dark:bg-night font-body">
+    <div className="min-h-screen bg-white font-body">
 
       {/* Skip to main content — WCAG 2.4.1 */}
       <a
@@ -196,7 +196,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
 
       {/* ── HEADER ── */}
       <header
-        className="sticky top-0 z-50 bg-white/90 dark:bg-night/90 backdrop-blur-md border-b border-gray-100 dark:border-white/5 px-8 h-[4.5rem] flex items-center justify-between"
+        className="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-gray-100 px-8 h-[4.5rem] flex items-center justify-between"
       >
         <BrandLogo variant="landing" />
 
@@ -207,7 +207,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
             { label: 'Why ADA',      href: '#why-ada'      },
           ].map(({ label, href }) => (
             <a key={label} href={href}
-              className="text-sm font-medium text-body dark:text-gray-400 hover:text-ink dark:hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded">
+              className="text-sm font-medium text-body hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded">
               {label}
             </a>
           ))}
@@ -215,7 +215,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
 
         <div className="flex items-center gap-2.5">
           <button onClick={toggleDark} aria-label="Toggle dark mode"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-body dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal">
+            className="w-9 h-9 rounded-lg flex items-center justify-center text-body hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal">
             {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
           {isAuthenticated ? (
@@ -224,7 +224,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
             <>
               <button
                 onClick={() => navigate('login')}
-                className="px-4 py-2 rounded-xl text-sm font-semibold text-ink dark:text-white border border-gray-200 dark:border-white/10 hover:bg-ivory dark:hover:bg-white/5 transition-colors"
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-ink border border-gray-200 hover:bg-ivory transition-colors"
               >
                 Login
               </button>
@@ -238,7 +238,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
       <main id="main-content">
 
         {/* HERO */}
-        <section aria-label="Hero" className="hero-glow min-h-[calc(100vh-4.5rem)] flex items-center bg-white dark:bg-night">
+        <section aria-label="Hero"className="hero-glow min-h-[calc(100vh-4.5rem)] flex items-center bg-white">
           <div className="w-full max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center py-16">
             <div>
               <span className="bg-teal/10 text-teal text-xs font-semibold px-3 py-1.5 rounded-full inline-flex items-center gap-1.5 mb-6 tracking-wide">
@@ -246,18 +246,18 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
                 Built for engineering &amp; QA teams
               </span>
 
-              <h1 className="font-heading font-bold text-5xl sm:text-6xl lg:text-[4rem] xl:text-[4.5rem] text-ink dark:text-white leading-[1.08] tracking-tight">
+              <h1 className="font-heading font-bold text-5xl sm:text-6xl lg:text-[4rem] xl:text-[4.5rem] text-ink leading-[1.08] tracking-tight">
                 Find and fix accessibility issues across your entire site
               </h1>
 
-              <p className="text-body dark:text-gray-300 text-lg mt-5 leading-relaxed max-w-[480px]">
+              <p className="text-body text-lg mt-5 leading-relaxed max-w-[480px]">
                 ADA crawls every page, scores your WCAG compliance, tests keyboard navigation, and gives developers AI-generated code fixes — all in one platform.
               </p>
 
               <div className="flex flex-wrap gap-2 mt-5" aria-label="Key capabilities">
                 {['Full-site crawling', 'WCAG scoring', 'Keyboard testing', 'AI code fixes'].map((cap) => (
                   <span key={cap}
-                    className="text-xs font-medium text-body dark:text-gray-400 bg-ivory dark:bg-white/5 border border-gray-200 dark:border-white/10 px-3 py-1 rounded-full">
+                    className="text-xs font-medium text-body bg-ivory border border-gray-200 px-3 py-1 rounded-full">
                     {cap}
                   </span>
                 ))}
@@ -269,7 +269,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
                   Start Scan <ArrowRight className="w-4 h-4" aria-hidden="true" />
                 </button>
                 <a href="#how-it-works"
-                  className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl border border-gray-200 dark:border-white/10 bg-transparent text-ink dark:text-white font-semibold font-heading text-sm hover:bg-ivory dark:hover:bg-white/5 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl">
+                  className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl border border-gray-200 bg-transparent text-ink font-semibold font-heading text-sm hover:bg-ivory transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal rounded-xl">
                   See How It Works <ChevronDown className="w-4 h-4" aria-hidden="true" />
                 </a>
               </div>
@@ -282,31 +282,31 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* HOW IT WORKS */}
-        <section id="how-it-works" aria-label="How it works" className="py-16 bg-ivory dark:bg-charcoal">
+        <section id="how-it-works"aria-label="How it works"className="py-16 bg-ivory">
           <div className="max-w-4xl mx-auto px-8">
             <div className="text-center mb-12">
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">How It Works</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2">
                 From URL to insights in minutes
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 mt-3 max-w-sm mx-auto leading-relaxed">
+              <p className="text-sm text-body mt-3 max-w-sm mx-auto leading-relaxed">
                 No agents to install. No configuration files. Paste a URL and ADA handles the rest.
               </p>
             </div>
             <div className="grid md:grid-cols-3 gap-12 relative">
-              <div className="hidden md:block absolute top-8 left-[calc(16.67%+2.5rem)] right-[calc(16.67%+2.5rem)] border-t-2 border-dashed border-teal/20 dark:border-teal/15 pointer-events-none" aria-hidden="true" />
+              <div className="hidden md:block absolute top-8 left-[calc(16.67%+2.5rem)] right-[calc(16.67%+2.5rem)] border-t-2 border-dashed border-teal/20 pointer-events-none"aria-hidden="true"/>
               {STEPS.map((s) => <StepCard key={s.num} {...s} />)}
             </div>
           </div>
         </section>
 
         {/* FEATURES */}
-        <section id="features" aria-label="Features" className="py-16 bg-white dark:bg-night">
+        <section id="features"aria-label="Features"className="py-16 bg-white">
           <div className="max-w-7xl mx-auto px-8">
             <div className="text-center mb-10">
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">Features</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2">Everything your team needs</h2>
-              <p className="text-sm text-body dark:text-gray-400 mt-3 max-w-sm mx-auto leading-relaxed">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2">Everything your team needs</h2>
+              <p className="text-sm text-body mt-3 max-w-sm mx-auto leading-relaxed">
                 Everything your team needs to find, understand, and fix accessibility issues — from first scan to shipped fix.
               </p>
             </div>
@@ -317,14 +317,14 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* SPOTLIGHT: FULL-SITE CRAWLING */}
-        <section aria-label="Multi-page crawling feature" className="py-16 bg-ivory dark:bg-charcoal">
+        <section aria-label="Multi-page crawling feature"className="py-16 bg-ivory">
           <div className="max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center">
             <div>
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">Site-wide scanning</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2 mb-4">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2 mb-4">
                 Scan your entire site, not just one page
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 leading-relaxed mb-6">
+              <p className="text-sm text-body leading-relaxed mb-6">
                 ADA discovers every page on your site automatically, tests each one against WCAG 2.1 and 2.2 criteria, and groups results by severity — so your team always knows exactly where to focus.
               </p>
               <ul className="flex flex-col gap-3">
@@ -343,17 +343,17 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* SPOTLIGHT: AI FIX */}
-        <section aria-label="AI fix suggestions feature" className="py-16 bg-white dark:bg-night">
+        <section aria-label="AI fix suggestions feature"className="py-16 bg-white">
           <div className="max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center">
             <div className="flex justify-center lg:justify-start order-2 lg:order-1" aria-hidden="true">
               <AIFixPreview />
             </div>
             <div className="order-1 lg:order-2">
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">AI-powered remediation</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2 mb-4">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2 mb-4">
                 From violation to fix — in seconds
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 leading-relaxed mb-6">
+              <p className="text-sm text-body leading-relaxed mb-6">
                 ADA doesn't just tell you what's broken. For every violation it finds, AI generates a ready-to-use code fix in your framework of choice. Review it, copy it, ship it.
               </p>
               <ul className="flex flex-col gap-3">
@@ -369,14 +369,14 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* SPOTLIGHT: SCORE TREND */}
-        <section aria-label="Accessibility score trend feature" className="py-16 bg-ivory dark:bg-charcoal">
+        <section aria-label="Accessibility score trend feature"className="py-16 bg-ivory">
           <div className="max-w-7xl mx-auto px-8 grid lg:grid-cols-2 gap-16 items-center">
             <div>
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">Trend analytics</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2 mb-4">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2 mb-4">
                 Track your accessibility health over time
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 leading-relaxed mb-6">
+              <p className="text-sm text-body leading-relaxed mb-6">
                 A single score tells you where your site stands today. Sprint-level trend charts tell you whether you're improving or regressing. ADA gives you both — site-wide and per page.
               </p>
               <ul className="flex flex-col gap-3">
@@ -395,14 +395,14 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* WHY ADA — moved before secondary CTA */}
-        <section id="why-ada" aria-label="Why ADA" className="py-16 bg-white dark:bg-night">
+        <section id="why-ada"aria-label="Why ADA"className="py-16 bg-white">
           <div className="max-w-7xl mx-auto px-8">
             <div className="text-center mb-10">
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">Why ADA</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2">
                 One platform for your full accessibility workflow
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 mt-3 max-w-lg mx-auto leading-relaxed">
+              <p className="text-sm text-body mt-3 max-w-lg mx-auto leading-relaxed">
                 ADA brings together site-wide scanning, real-time scoring, keyboard testing, trend tracking, and AI-powered fixes — so your team always has a clear path from issue to resolution.
               </p>
             </div>
@@ -469,33 +469,33 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
         </section>
 
         {/* INTEGRATIONS */}
-        <section aria-label="Integrations" className="py-16 bg-ivory dark:bg-charcoal">
+        <section aria-label="Integrations"className="py-16 bg-ivory">
           <div className="max-w-7xl mx-auto px-8">
             <div className="text-center mb-10">
               <span className="text-xs font-semibold uppercase tracking-widest text-teal">Integrations</span>
-              <h2 className="font-heading font-bold text-3xl text-ink dark:text-white mt-2">
+              <h2 className="font-heading font-bold text-3xl text-ink mt-2">
                 Fits inside your existing workflow
               </h2>
-              <p className="text-sm text-body dark:text-gray-400 mt-3 max-w-sm mx-auto leading-relaxed">
+              <p className="text-sm text-body mt-3 max-w-sm mx-auto leading-relaxed">
                 ADA works alongside the tools your team already uses. Current integrations and what's coming next.
               </p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {INTEGRATIONS.map(({ icon: Icon, label, desc, available }) => (
                 <div key={label} className="card p-5 flex flex-col gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${available ? 'bg-teal/10' : 'bg-gray-100 dark:bg-white/5'}`} aria-hidden="true">
-                    <Icon className={`w-5 h-5 ${available ? 'text-teal' : 'text-body dark:text-gray-500'}`} />
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${available ?'bg-teal/10':'bg-gray-100'}`} aria-hidden="true">
+                    <Icon className={`w-5 h-5 ${available ?'text-teal':'text-body'}`} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="text-sm font-semibold text-ink dark:text-white">{label}</p>
+                      <p className="text-sm font-semibold text-ink">{label}</p>
                       {!available && (
-                        <span className="text-[9px] font-semibold uppercase tracking-wide text-body dark:text-gray-500 bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded-full">
+                        <span className="text-[9px] font-semibold uppercase tracking-wide text-body bg-gray-100 px-1.5 py-0.5 rounded-full">
                           Soon
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-body dark:text-gray-400 leading-relaxed">{desc}</p>
+                    <p className="text-xs text-body leading-relaxed">{desc}</p>
                   </div>
                 </div>
               ))}

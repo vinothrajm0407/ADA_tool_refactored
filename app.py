@@ -14,6 +14,8 @@ import logging
 import os
 import re
 import threading
+import urllib.error
+import urllib.request
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -26,6 +28,7 @@ from functools import wraps
 from pathlib import Path
 import bcrypt
 import jwt
+from croniter import croniter
 from flask import Flask, Response, jsonify, g, request, send_from_directory
 from config import Config
 from services.url_processor import (
@@ -431,7 +434,10 @@ def api_scan():
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
 
     try:
-        scan_job = create_scan_job(url, {"include_best_practices": include_best_practices})
+        scan_job = create_scan_job(url, {
+            "include_best_practices": include_best_practices,
+            "user_id": g.current_user_id,
+        })
         return jsonify({"ok": True, "jobId": scan_job["job_id"], "status": scan_job["status"]}), 202
     except ValueError as e:
         logging.warning("Invalid scan request: %s", e)
@@ -744,6 +750,7 @@ def api_crawl_create():
         "max_pages": data.get("maxPages"),
         "full_site": bool(data.get("fullSite", False)),
         "notify_email": (data.get("notifyEmail") or "").strip() or None,
+        "user_id": g.current_user_id,
     }
     try:
         job = create_crawl_job(url, options)
@@ -897,7 +904,7 @@ def api_crawl_schedules_list():
         return jsonify({"ok": True, "available": False, "items": [],
                         "message": "Database not configured"}), 200
     try:
-        items = db.get_crawl_schedules()
+        items = db.get_crawl_schedules(g.current_user_id)
         return jsonify({"ok": True, "items": items})
     except Exception as e:
         logging.exception("Failed to list crawl schedules: %s", e)
@@ -914,14 +921,24 @@ def api_crawl_schedules_create():
     frequency = (data.get("frequency") or "weekly").strip().lower()
     name = (data.get("name") or "").strip() or None
     time_of_day = db.parse_time_of_day(data.get("timeOfDay"))
+    schedule_type = (data.get("scheduleType") or "simple").strip().lower()
+    cron_expression = (data.get("cronExpression") or "").strip() or None
     if not url:
         return jsonify({"ok": False, "error": "Missing 'url'"}), 400
-    if frequency not in ("daily", "weekly", "monthly"):
+    if schedule_type not in ("simple", "cron"):
+        schedule_type = "simple"
+    if schedule_type == "cron":
+        if not cron_expression or not croniter.is_valid(cron_expression):
+            return jsonify({"ok": False, "error": "Invalid cron expression"}), 400
+    if frequency not in ("hourly", "daily", "weekly", "monthly"):
         frequency = "weekly"
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not configured"}), 503
     try:
-        sched = db.create_crawl_schedule(url, frequency, name=name, time_of_day=time_of_day)
+        sched = db.create_crawl_schedule(
+            url, frequency, name=name, time_of_day=time_of_day, user_id=g.current_user_id,
+            schedule_type=schedule_type, cron_expression=cron_expression,
+        )
         return jsonify({"ok": True, "schedule": sched}), 201
     except Exception as e:
         logging.exception("Failed to create crawl schedule: %s", e)
@@ -941,11 +958,23 @@ def api_crawl_schedules_update(schedule_id):
         kwargs["name"] = (data.get("name") or "").strip() or None
     if "timeOfDay" in data:
         kwargs["time_of_day"] = db.parse_time_of_day(data.get("timeOfDay"))
+    if "scheduleType" in data:
+        schedule_type = str(data["scheduleType"]).strip().lower()
+        cron_expression = (data.get("cronExpression") or "").strip() or None
+        if schedule_type == "cron" and (not cron_expression or not croniter.is_valid(cron_expression)):
+            return jsonify({"ok": False, "error": "Invalid cron expression"}), 400
+        kwargs["schedule_type"] = schedule_type
+        kwargs["cron_expression"] = cron_expression
+    elif "cronExpression" in data:
+        cron_expression = (data.get("cronExpression") or "").strip() or None
+        if cron_expression and not croniter.is_valid(cron_expression):
+            return jsonify({"ok": False, "error": "Invalid cron expression"}), 400
+        kwargs["cron_expression"] = cron_expression
     if not kwargs:
         return jsonify({"ok": False, "error": "Nothing to update"}), 400
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not configured"}), 503
-    ok = db.update_crawl_schedule(schedule_id, **kwargs)
+    ok = db.update_crawl_schedule(schedule_id, g.current_user_id, **kwargs)
     return jsonify({"ok": ok})
 
 
@@ -954,7 +983,7 @@ def api_crawl_schedules_update(schedule_id):
 def api_crawl_schedules_delete(schedule_id):
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not configured"}), 503
-    ok = db.delete_crawl_schedule(schedule_id)
+    ok = db.delete_crawl_schedule(schedule_id, g.current_user_id)
     return jsonify({"ok": ok})
 
 
@@ -964,13 +993,13 @@ def api_crawl_schedules_run_now(schedule_id):
     """Trigger a schedule's crawl immediately, without disturbing its next automatic run."""
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not configured"}), 503
-    sched = db.get_crawl_schedule(schedule_id)
+    sched = db.get_crawl_schedule(schedule_id, g.current_user_id)
     if not sched:
         return jsonify({"ok": False, "error": "Schedule not found"}), 404
     if db.has_active_crawl_for_url(sched["root_url"]):
         return jsonify({"ok": False, "error": "A crawl is already running for this URL"}), 409
     try:
-        job = create_crawl_job(sched["root_url"], {})
+        job = create_crawl_job(sched["root_url"], {"user_id": g.current_user_id})
         return jsonify({"ok": True, "crawl_id": job["crawl_id"]}), 201
     except Exception as e:
         logging.exception("Failed to run schedule now: %s", e)
@@ -983,7 +1012,7 @@ def api_crawl_schedules_stop(schedule_id):
     """Cancel the in-progress crawl currently running for this schedule, if any."""
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Database not configured"}), 503
-    sched = db.get_crawl_schedule(schedule_id)
+    sched = db.get_crawl_schedule(schedule_id, g.current_user_id)
     if not sched:
         return jsonify({"ok": False, "error": "Schedule not found"}), 404
     crawl_id = db.get_active_crawl_id_for_url(sched["root_url"])
@@ -1003,7 +1032,7 @@ def api_crawl_schedules_runs(schedule_id):
     """Return the most recent crawl runs for this schedule."""
     if not db.is_ready():
         return jsonify({"ok": True, "available": False, "items": []})
-    sched = db.get_crawl_schedule(schedule_id)
+    sched = db.get_crawl_schedule(schedule_id, g.current_user_id)
     if not sched:
         return jsonify({"ok": False, "error": "Schedule not found"}), 404
     limit = request.args.get("limit", type=int) or 5
@@ -1122,110 +1151,6 @@ def api_violations_summary():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/api/ai-fix", methods=["POST"])
-@require_auth
-def api_ai_fix():
-    """Generate an AI-powered accessibility fix using Claude API."""
-    if not request.is_json:
-        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
-    try:
-        data = request.get_json(silent=True) or {}
-    except Exception:
-        return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
-
-    violation = data.get("violation") or {}
-    framework = (data.get("framework") or "html").strip().lower()
-
-    if not violation or not violation.get("id"):
-        return jsonify({"ok": False, "error": "Missing violation data"}), 400
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        # Return structured mock response when no key configured
-        return jsonify({
-            "ok": True,
-            "explanation": f"This violation ({violation.get('id')}) was detected. Configure ANTHROPIC_API_KEY in .env to get AI-powered fixes.",
-            "wcagCriterion": violation.get("helpUrl", "https://www.w3.org/WAI/WCAG21/"),
-            "before": "<!-- Original code with accessibility issue -->\n<input type=\"email\" placeholder=\"Work email\" />",
-            "after": "<!-- Fixed code -->\n<label for=\"email\">Work email</label>\n<input id=\"email\" type=\"email\" autocomplete=\"email\" />",
-        })
-
-    # Build prompt
-    rule_id = violation.get("id", "unknown")
-    description = violation.get("description", "")
-    impact = violation.get("impact", "serious")
-    help_text = violation.get("help", "")
-    help_url = violation.get("helpUrl", "")
-    nodes = violation.get("nodes", [])
-    node_html = nodes[0].get("html", "") if nodes else ""
-
-    framework_note = {
-        "react": "Use React/JSX syntax (htmlFor instead of for, className instead of class, camelCase attributes)",
-        "vue": "Use Vue 3 template syntax with proper accessibility attributes",
-        "html": "Use standard HTML5 with ARIA attributes where needed",
-    }.get(framework, "Use standard HTML5")
-
-    prompt = f"""You are an expert web accessibility engineer specializing in WCAG 2.1 compliance.
-
-A website accessibility scanner detected this violation:
-- Rule ID: {rule_id}
-- Impact: {impact}
-- Description: {description}
-- Help: {help_text}
-- WCAG Reference: {help_url}
-- Example HTML with issue: {node_html}
-
-Framework: {framework_note}
-
-Provide a structured fix in this EXACT JSON format (no other text, valid JSON only):
-{{
-  "explanation": "Plain English explanation of WHY this is an accessibility problem and WHO it affects",
-  "wcagCriterion": "WCAG 2.1 Success Criterion X.X.X - Criterion Name (Level A/AA/AAA)",
-  "before": "The problematic code snippet (2-10 lines max)",
-  "after": "The corrected code snippet with proper accessibility attributes (2-10 lines max)"
-}}"""
-
-    try:
-        import urllib.request
-        import urllib.error
-
-        payload = json.dumps({
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 800,
-            "messages": [{"role": "user", "content": prompt}]
-        }).encode()
-
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-
-        text = result["content"][0]["text"].strip()
-        # Parse JSON from Claude response
-        fix_data = json.loads(text)
-        return jsonify({"ok": True, **fix_data})
-
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        logging.error("Claude API error: %s %s", e.code, body)
-        return jsonify({"ok": False, "error": f"AI service error: {e.code}"}), 502
-    except json.JSONDecodeError as e:
-        logging.error("Failed to parse Claude JSON response: %s", e)
-        return jsonify({"ok": False, "error": "AI response parsing failed"}), 502
-    except Exception as e:
-        logging.exception("AI fix endpoint error: %s", e)
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
 @app.route("/api/auto-fix", methods=["POST"])
 @require_auth
 def api_auto_fix():
@@ -1254,12 +1179,17 @@ def api_auto_fix():
 
     existing = db.get_open_fix(g.current_user_id, page_url, rule.get("id", ""), node_signature)
     if existing:
-        # The DB row only reflects what happened when we opened that PR — it
-        # has no idea if it was since closed, or the repo archived. Check
-        # GitHub directly rather than trust a record that could be stale.
-        pr_match = re.search(r"/pull/(\d+)$", existing["pr_url"] or "")
+        # The DB row only reflects what happened when we opened that PR/MR — it
+        # has no idea if it was since closed, or the repo archived. Check the
+        # provider directly rather than trust a record that could be stale.
+        # GitHub PR urls end in /pull/<n>, GitLab MR urls in /merge_requests/<n>,
+        # Bitbucket PR urls in /pull-requests/<n>.
+        pr_url_val = existing["pr_url"] or ""
+        pr_match = re.search(r"/pull/(\d+)$", pr_url_val) \
+            or re.search(r"/merge_requests/(\d+)$", pr_url_val) \
+            or re.search(r"/pull-requests/(\d+)$", pr_url_val)
         still_open = bool(pr_match) and is_pull_request_open(
-            link["repo_url"], link["access_token"], int(pr_match.group(1))
+            link["repo_url"], link["access_token"], int(pr_match.group(1)), link.get("provider") or "github"
         )
         if still_open:
             return jsonify({
@@ -1317,18 +1247,70 @@ def _teams_webhook_send(webhook_url: str, payload: dict) -> bool:
         return resp.status == 200
 
 
-def _build_slack_blocks(report_type: str, context: dict) -> tuple[list, str]:
-    """Return (blocks, fallback_text) for a Slack Block Kit message."""
+def _report_status_emoji(pass_rate) -> str:
+    try:
+        rate = float(pass_rate)
+    except (TypeError, ValueError):
+        return "📋"
+    if rate >= 90:
+        return "✅"
+    if rate >= 50:
+        return "⚠️"
+    return "❌"
+
+
+def _report_url(report_type: str, context: dict) -> str:
+    """Deep link into the actual scan/crawl results page, not just the app homepage."""
+    base = Config.APP_BASE_URL
+    if report_type == "crawl_summary" and context.get("crawl_id"):
+        return f"{base}/crawl-results?crawlId={context['crawl_id']}"
+    if context.get("scan_id"):
+        return f"{base}/scan-history?scanId={context['scan_id']}"
+    return base
+
+
+_VIOLATION_IMPACT_EMOJI = {"critical": "🔴", "serious": "🟠", "moderate": "🟡", "minor": "⚪"}
+_MAX_INLINE_VIOLATIONS = 15
+
+
+def _violation_summary_line(v: dict) -> str:
+    emoji = _VIOLATION_IMPACT_EMOJI.get((v.get("impact") or "").lower(), "⚪")
+    line = f"{emoji} {v.get('rule_id', 'unknown')} ({v.get('impact') or '—'}) — {v.get('affected_count', 0)} element(s)"
+    if v.get("pages_affected"):
+        line += f" across {v['pages_affected']} page(s)"
+    return line
+
+
+def _violation_detail_lines(v: dict) -> list[str]:
+    lines = []
+    desc = (v.get("description") or "").strip()
+    if desc:
+        lines.append(desc[:280])
+    tags = ", ".join(v.get("wcag_tags") or [])
+    if tags:
+        lines.append(f"WCAG: {tags}")
+    if v.get("example_selector"):
+        lines.append(f"Selector: {v['example_selector'][:80]}")
+    return lines
+
+
+def _build_slack_blocks(report_type: str, context: dict) -> tuple[list, str, dict | None]:
+    """Return (blocks, fallback_text, overflow) for a Slack Block Kit message.
+    Kept as a clean summary card — the full per-violation detail now lives in
+    the auto-attached Executive Summary PDF (see report_pdf_service.py /
+    notify_service.send_report_pdf) instead of being dumped inline here.
+    overflow is always None for Slack now; kept in the return shape so
+    existing callers don't need to change how they unpack it."""
     url       = context.get("url", "—")
     score     = context.get("score", "—")
     violations = context.get("violations", "—")
     pass_rate = context.get("pass_rate", "—")
     pages     = context.get("pages")
     note      = context.get("note", "")
-    app_url   = Config.APP_BASE_URL
+    emoji     = _report_status_emoji(pass_rate)
 
     if report_type == "crawl_summary":
-        title = f"ADA Crawl Report — {url}"
+        title = f"{emoji} ADA Crawl Report — {url}"
         fields = [
             {"type": "mrkdwn", "text": f"*Pages Scanned*\n{pages or '—'}"},
             {"type": "mrkdwn", "text": f"*Avg Score*\n{score}/100"},
@@ -1336,13 +1318,13 @@ def _build_slack_blocks(report_type: str, context: dict) -> tuple[list, str]:
             {"type": "mrkdwn", "text": f"*Pass Rate*\n{pass_rate}%"},
         ]
     elif report_type == "score_card":
-        title = f"ADA Score Card — {url}"
+        title = f"{emoji} ADA Score Card — {url}"
         fields = [
             {"type": "mrkdwn", "text": f"*Accessibility Score*\n{score}/100"},
             {"type": "mrkdwn", "text": f"*Pass Rate*\n{pass_rate}%"},
         ]
     else:  # scan_summary
-        title = f"ADA Scan Summary — {url}"
+        title = f"{emoji} ADA Scan Summary — {url}"
         fields = [
             {"type": "mrkdwn", "text": f"*Score*\n{score}/100"},
             {"type": "mrkdwn", "text": f"*Pass Rate*\n{pass_rate}%"},
@@ -1350,31 +1332,69 @@ def _build_slack_blocks(report_type: str, context: dict) -> tuple[list, str]:
         ]
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": "ADA Accessibility Report", "emoji": True}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": f"*{url}*"}},
+        {"type": "header", "text": {"type": "plain_text", "text": f"{emoji} ADA Accessibility Report — {url}", "emoji": True}},
         {"type": "section", "fields": fields},
     ]
     if note:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"_{note}_"}})
-    blocks.append({
-        "type": "actions",
-        "elements": [{"type": "button", "style": "primary",
-                       "text": {"type": "plain_text", "text": "View in ADA"},
-                       "url": app_url}],
-    })
-    blocks.append({"type": "divider"})
-    return blocks, title
+    return blocks, title, None
+
+
+def _slack_upload_file(token: str, channel_id: str, filename: str, content: str | bytes,
+                        initial_comment: str | None = None) -> bool:
+    """Upload a file to Slack and share it into a channel — used both for the
+    violations-overflow .txt attachment (see _build_slack_blocks) and the
+    auto-generated Executive Summary PDF (see report_pdf_service.py).
+    Uses files.getUploadURLExternal -> PUT upload -> files.completeUploadExternal,
+    Slack's current upload flow (the older files.upload method is deprecated).
+    Every failure is logged with Slack's actual error reason (e.g. missing_scope) —
+    this used to fail silently, which is exactly how a missing files:write scope
+    went unnoticed until someone checked why no file was arriving."""
+    import urllib.parse as _up
+    try:
+        data_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        form = _up.urlencode({"filename": filename, "length": len(data_bytes)}).encode()
+        req = urllib.request.Request(
+            "https://slack.com/api/files.getUploadURLExternal",
+            data=form,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            init = json.loads(resp.read())
+        if not init.get("ok"):
+            logging.error("Slack files.getUploadURLExternal failed: %s", init)
+            return False
+        put_req = urllib.request.Request(init["upload_url"], data=data_bytes, method="POST")
+        with urllib.request.urlopen(put_req, timeout=15) as resp:
+            resp.read()
+        complete_payload = {
+            "files": [{"id": init["file_id"], "title": filename}],
+            "channel_id": channel_id,
+        }
+        if initial_comment:
+            complete_payload["initial_comment"] = initial_comment
+        complete = _slack_api(token, "files.completeUploadExternal", complete_payload)
+        if not complete.get("ok"):
+            logging.error("Slack files.completeUploadExternal failed: %s", complete)
+        return bool(complete.get("ok"))
+    except Exception:
+        logging.exception("Slack file upload failed")
+        return False
 
 
 def _build_teams_card(report_type: str, context: dict) -> dict:
-    """Return a Teams Adaptive Card webhook payload."""
+    """Return a Teams Adaptive Card webhook payload — full report content inline,
+    not just a link (mirrors _build_slack_blocks)."""
     url        = context.get("url", "—")
     score      = context.get("score", "—")
     violations = context.get("violations", "—")
     pass_rate  = context.get("pass_rate", "—")
     pages      = context.get("pages")
     note       = context.get("note", "")
-    app_url    = Config.APP_BASE_URL
+    violations_detail = context.get("violations_detail") or []
+    emoji      = _report_status_emoji(pass_rate)
+    report_url = _report_url(report_type, context)
 
     if report_type == "crawl_summary":
         facts = [
@@ -1397,12 +1417,24 @@ def _build_teams_card(report_type: str, context: dict) -> dict:
 
     body = [
         {"type": "TextBlock", "size": "Large", "weight": "Bolder",
-         "text": "ADA Accessibility Report", "wrap": True},
+         "text": f"{emoji} ADA Accessibility Report", "wrap": True},
         {"type": "TextBlock", "text": url, "weight": "Bolder", "wrap": True},
         {"type": "FactSet", "facts": facts},
     ]
+    if violations_detail:
+        shown = violations_detail[:_MAX_INLINE_VIOLATIONS]
+        body.append({"type": "TextBlock", "text": f"Issues found ({len(violations_detail)}):",
+                     "weight": "Bolder", "wrap": True, "spacing": "Medium"})
+        for v in shown:
+            text = "  \n".join([_violation_summary_line(v), *_violation_detail_lines(v)])
+            body.append({"type": "TextBlock", "text": text, "wrap": True, "spacing": "Small"})
+        remaining = len(violations_detail) - len(shown)
+        if remaining > 0:
+            body.append({"type": "TextBlock", "text": f"+{remaining} more issue(s) not shown",
+                         "isSubtle": True, "wrap": True})
     if note:
         body.append({"type": "TextBlock", "text": note, "isSubtle": True, "wrap": True})
+    body.append({"type": "TextBlock", "text": f"Reference: {report_url}", "isSubtle": True, "wrap": True, "spacing": "Medium"})
 
     return {
         "type": "message",
@@ -1413,7 +1445,6 @@ def _build_teams_card(report_type: str, context: dict) -> dict:
                 "type": "AdaptiveCard",
                 "version": "1.2",
                 "body": body,
-                "actions": [{"type": "Action.OpenUrl", "title": "View in ADA", "url": app_url}],
             },
         }],
     }
@@ -1427,7 +1458,7 @@ def _oauth_result_html(success: bool, event_type: str = "", workspace_name: str 
 try {{
   window.opener.postMessage(
     {{type: "{event_type}", workspaceName: {json.dumps(workspace_name)}}},
-    window.opener.location.origin
+    "*"
   );
 }} catch(e) {{}}
 setTimeout(() => window.close(), 500);
@@ -1439,7 +1470,7 @@ setTimeout(() => window.close(), 500);
 <script>
 try {{
   window.opener.postMessage({{type: "ada_oauth_error", error: {json.dumps(error)}}},
-    window.opener.location.origin);
+    "*");
 }} catch(e) {{}}
 setTimeout(() => window.close(), 3000);
 </script>
@@ -1523,7 +1554,7 @@ def api_slack_start():
     auth_url = (
         f"https://slack.com/oauth/v2/authorize"
         f"?client_id={Config.SLACK_CLIENT_ID}"
-        f"&scope=chat%3Awrite%2Cchannels%3Aread%2Cgroups%3Aread"
+        f"&scope=chat%3Awrite%2Cchannels%3Aread%2Cgroups%3Aread%2Cfiles%3Awrite"
         f"&redirect_uri={_up.quote(redirect_uri, safe='')}"
         f"&state={state}"
     )
@@ -1553,6 +1584,7 @@ def api_slack_callback():
     # Exchange code for access token
     try:
         import urllib.parse as _up
+        import urllib.request
         redirect_uri = f"{Config.APP_BASE_URL}/api/integrations/slack/callback"
         form_data = _up.urlencode({
             "client_id":     Config.SLACK_CLIENT_ID,
@@ -1709,6 +1741,18 @@ def api_teams_connect():
 _GITHUB_REPO_RE = re.compile(
     r"^https?://github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?/?$"
 )
+# GitLab repos can live under nested subgroups (gitlab.com/team/subteam/project),
+# unlike GitHub's flat owner/repo — capture the whole path after gitlab.com/.
+_GITLAB_REPO_RE = re.compile(
+    r"^https?://gitlab\.com/(?P<path>[\w.-]+(?:/[\w.-]+)+?)(?:\.git)?/?$"
+)
+# Bitbucket workspaces are flat like GitHub (no nested subgroups) — same shape,
+# different host. Repo group is lazy on the single segment directly (like
+# GitHub's), not on a repeated group (like GitLab's) — that repeated-group
+# form is what let ".git" get swallowed into the path there.
+_BITBUCKET_REPO_RE = re.compile(
+    r"^https?://bitbucket\.org/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?/?$"
+)
 
 
 @app.route("/api/repo-links", methods=["GET"])
@@ -1728,8 +1772,12 @@ def api_repo_links_create():
     repo_url       = (body.get("repo_url") or "").strip()
     access_token   = (body.get("access_token") or "").strip()
     default_branch = (body.get("default_branch") or "main").strip()
+    edit_link_id   = body.get("link_id")
+    is_edit        = bool(edit_link_id)
 
-    if not site_url or not repo_url or not access_token:
+    if not site_url or not repo_url:
+        return jsonify({"ok": False, "error": "site_url and repo_url are required"}), 400
+    if not access_token and not is_edit:
         return jsonify({"ok": False, "error": "site_url, repo_url and access_token are required"}), 400
 
     import urllib.parse as _up
@@ -1738,35 +1786,76 @@ def api_repo_links_create():
     if not domain:
         return jsonify({"ok": False, "error": "site_url must be a full URL, e.g. https://example.com"}), 400
 
-    match = _GITHUB_REPO_RE.match(repo_url)
-    if not match:
-        return jsonify({"ok": False, "error": "repo_url must look like https://github.com/owner/repo"}), 400
+    gh_match = _GITHUB_REPO_RE.match(repo_url)
+    gl_match = None if gh_match else _GITLAB_REPO_RE.match(repo_url)
+    bb_match = None if (gh_match or gl_match) else _BITBUCKET_REPO_RE.match(repo_url)
+    if not gh_match and not gl_match and not bb_match:
+        return jsonify({"ok": False, "error": "repo_url must look like https://github.com/owner/repo, https://gitlab.com/owner/repo, or https://bitbucket.org/workspace/repo"}), 400
+    provider = "github" if gh_match else "gitlab" if gl_match else "bitbucket"
 
-    import urllib.request
-    import urllib.error
-    owner, repo = match.group("owner"), match.group("repo")
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repo}",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "ADA-Accessibility-Intelligence",
-        },
-    )
+    # Only validate against the provider's API when a new token was actually
+    # submitted — editing e.g. just the default branch shouldn't cost a
+    # network round-trip against a token that isn't changing.
+    if access_token:
+        import urllib.request
+        import urllib.error
+        if provider == "github":
+            owner, repo = gh_match.group("owner"), gh_match.group("repo")
+            repo_label = f"{owner}/{repo}"
+            req = urllib.request.Request(
+                f"https://api.github.com/repos/{owner}/{repo}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": "ADA-Accessibility-Intelligence",
+                },
+            )
+        elif provider == "gitlab":
+            # The regex's path group can swallow a trailing ".git" whole when
+            # there's only one segment after the namespace (e.g. "owner/repo.git")
+            # — "." is a valid path character, so the lazy repetition never needs
+            # to exclude it. Strip it explicitly rather than fight the regex.
+            repo_label = gl_match.group("path").removesuffix(".git")
+            encoded_path = _up.quote(repo_label, safe="")
+            req = urllib.request.Request(
+                f"https://gitlab.com/api/v4/projects/{encoded_path}",
+                headers={
+                    "PRIVATE-TOKEN": access_token,
+                    "User-Agent": "ADA-Accessibility-Intelligence",
+                },
+            )
+        else:
+            owner, repo = bb_match.group("owner"), bb_match.group("repo")
+            repo_label = f"{owner}/{repo}"
+            req = urllib.request.Request(
+                f"https://api.bitbucket.org/2.0/repositories/{owner}/{repo}",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "User-Agent": "ADA-Accessibility-Intelligence",
+                },
+            )
+        try:
+            with urllib.request.urlopen(req, timeout=15):
+                pass
+        except urllib.error.HTTPError as e:
+            logging.warning("Repo link validation failed: %s %s -> %s", e.code, repo_label, e.reason)
+            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket"}.get(provider, "repo")
+            error = f"Could not access that {provider_name} — check the URL and token" if provider != "github" \
+                else "Could not access that repo — check the URL and token"
+            return jsonify({"ok": False, "error": error}), 502
+        except Exception as e:
+            logging.exception("Repo link validation error: %s", e)
+            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket", "github": "GitHub"}[provider]
+            return jsonify({"ok": False, "error": f"Could not reach {provider_name} — try again"}), 502
+
     try:
-        with urllib.request.urlopen(req, timeout=15):
-            pass
-    except urllib.error.HTTPError as e:
-        logging.warning("Repo link validation failed: %s %s/%s -> %s", e.code, owner, repo, e.reason)
-        return jsonify({"ok": False, "error": "Could not access that repo — check the URL and token"}), 502
-    except Exception as e:
-        logging.exception("Repo link validation error: %s", e)
-        return jsonify({"ok": False, "error": "Could not reach GitHub — try again"}), 502
-
-    link_id = db.save_repo_link(
-        g.current_user_id, domain, site_url, repo_url, default_branch, "react", access_token,
-        path_prefix=parsed_site.path,
-    )
+        link_id = db.save_repo_link(
+            g.current_user_id, domain, site_url, repo_url, default_branch, "react", access_token or None,
+            path_prefix=parsed_site.path, provider=provider,
+            link_id=int(edit_link_id) if edit_link_id else None,
+        )
+    except ValueError:
+        return jsonify({"ok": False, "error": "Repo link not found"}), 404
     return jsonify({"ok": True, "id": link_id}), 201
 
 
@@ -1804,9 +1893,31 @@ def api_integration_send():
     if not channel:
         return jsonify({"ok": False, "error": "Channel not found"}), 404
 
+    if not context.get("violations_detail"):
+        try:
+            if context.get("scan_id"):
+                scan_result = db.get_scan_result(int(context["scan_id"]))
+                context["violations_detail"] = [
+                    {
+                        "rule_id": v.get("id", ""),
+                        "impact": v.get("impact"),
+                        "description": v.get("description") or v.get("help"),
+                        "wcag_tags": [t for t in (v.get("tags") or []) if t.startswith("wcag")],
+                        "affected_count": len(v.get("nodes") or []),
+                        "example_selector": (((v.get("nodes") or [{}])[0]).get("target") or [None])[0],
+                        "help_url": v.get("helpUrl"),
+                    }
+                    for v in ((scan_result or {}).get("axeResult") or {}).get("violations") or []
+                ]
+            elif context.get("crawl_id"):
+                from backend.services.crawl_task import _aggregate_crawl_violations
+                context["violations_detail"] = _aggregate_crawl_violations(context["crawl_id"])
+        except Exception:
+            logging.exception("Failed to backfill violation detail for manual send")
+
     try:
         if integration["platform"] == "slack":
-            blocks, fallback = _build_slack_blocks(report_type, context)
+            blocks, fallback, overflow = _build_slack_blocks(report_type, context)
             result = _slack_api(integration["access_token"], "chat.postMessage", {
                 "channel": channel_id,
                 "text": fallback,
@@ -1814,6 +1925,8 @@ def api_integration_send():
             })
             success = result.get("ok", False)
             err_msg = None if success else result.get("error", "Unknown error")
+            if success and overflow:
+                _slack_upload_file(integration["access_token"], channel_id, overflow["filename"], overflow["content"])
         else:  # teams
             payload = _build_teams_card(report_type, context)
             success = _teams_webhook_send(channel["webhook_url"], payload)
@@ -1842,6 +1955,53 @@ def api_integration_send():
             error_msg=str(e),
         )
         return jsonify({"ok": False, "error": "Delivery failed — check connection settings"}), 500
+
+
+@app.route("/_ada_test_fixture")
+def _ada_test_fixture():
+    """Temporary: serves the GitLab Auto-Fix test page through the public ngrok
+    tunnel, since the scanner's SSRF guard blocks private/loopback addresses —
+    remove this route once GitLab testing is done."""
+    fixture_path = Path(
+        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
+        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_lab_artifact.html"
+    )
+    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/_ada_test_fixture2")
+def _ada_test_fixture2():
+    """Temporary: serves the wider ada-test-app fixture (GitLab copy) through the
+    public ngrok tunnel — same reason as _ada_test_fixture above."""
+    fixture_path = Path(
+        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
+        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_app_fixture.html"
+    )
+    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/_ada_test_fixture3")
+def _ada_test_fixture3():
+    """Temporary: serves the wider ada-test-app fixture (Bitbucket copy) through
+    the public ngrok tunnel — Bitbucket has no free static-pages hosting, same
+    reason as _ada_test_fixture2 above for GitLab."""
+    fixture_path = Path(
+        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
+        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_app_fixture_bitbucket.html"
+    )
+    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/_ada_test_fixture4")
+def _ada_test_fixture4():
+    """Temporary: serves the ada-test-clean fixture (GitLab, zero-violation
+    baseline) through the public ngrok tunnel — same reason as
+    _ada_test_fixture2 above."""
+    fixture_path = Path(
+        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
+        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_clean_fixture.html"
+    )
+    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.route("/", defaults={"path": ""})

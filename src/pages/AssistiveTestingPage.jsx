@@ -1,9 +1,10 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../utils/api';
-import { Play, AlertCircle, Link2, CheckCircle2, Circle, Info, ArrowRight } from 'lucide-react';
+import { Play, AlertCircle, Link2, CheckCircle2, CircleMinus, Info, ArrowRight, ExternalLink } from 'lucide-react';
 import ScanProgress from '../components/newscan/ScanProgress';
 import ScoreGauge from '../components/ui/ScoreGauge';
+import AssistiveResultView, { MODULE_LABELS } from '../components/assistive/AssistiveResultView';
 import './NewScanPage.css';
 import { MODULES, buildAssistiveResult } from '../config/assistiveModules';
 
@@ -13,50 +14,47 @@ import { MODULES, buildAssistiveResult } from '../config/assistiveModules';
 const SCAN_TYPE_TO_MODULE_ID = { keyboard: 'keyboard', contrast: 'color-contrast', 'page-structure': 'page-structure' };
 
 // ─── Test module status row (mirrors the mockup's "Test modules" list) ──────
-function ModuleRow({ mod, status, isActiveTab, onSelect }) {
+function ModuleRow({ mod, status, isActiveTab, checked, onToggle, disabled }) {
   const Icon = mod.icon;
   const isPlanned = mod.status !== 'active';
-  const statusPill = isPlanned ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-400 whitespace-nowrap">
-      Coming soon
+  const statusPill = isPlanned || !status || status === 'not-tested' ? (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 whitespace-nowrap">
+      <CircleMinus size={12} /> Not tested
     </span>
   ) : status === 'passed' ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sage/15 text-sage-700 dark:text-sage-300 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sage/15 text-sage-700 whitespace-nowrap">
       <CheckCircle2 size={12} /> Completed
     </span>
   ) : status === 'needs-review' ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber/15 text-amber-700 dark:text-amber-300 whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber/15 text-amber-700 whitespace-nowrap">
       <AlertCircle size={12} /> Needs review
     </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-400 whitespace-nowrap">
-      <Circle size={10} /> Not tested
-    </span>
-  );
+  ) : null;
 
   return (
     <div className={`flex items-center gap-4 px-4 py-3.5 rounded-xl border transition-colors ${
-      isActiveTab ? 'border-teal/40 bg-teal/[0.04]' : 'border-gray-100 dark:border-white/[0.06]'
+      isActiveTab ?'border-teal/40 bg-teal/[0.04]':'border-gray-100'
     }`}>
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-        isPlanned ? 'bg-gray-100 dark:bg-white/[0.06]' : 'bg-teal/10'
+        isPlanned ?'bg-gray-100':'bg-teal/10'
       }`}>
-        <Icon size={16} className={isPlanned ? 'text-gray-400' : 'text-teal'} />
+        <Icon size={16} className={isPlanned ?'text-gray-400':'text-teal'} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-ink dark:text-white m-0">{mod.label}</p>
-        <p className="text-xs text-body dark:text-gray-400 m-0 leading-relaxed">{mod.description}</p>
+        <p className="text-sm font-semibold text-ink m-0">{mod.label}</p>
+        <p className="text-xs text-body m-0 leading-relaxed">{mod.description}</p>
       </div>
       {statusPill}
       {!isPlanned && (
-        <button
-          type="button"
-          onClick={() => onSelect(mod.id)}
-          aria-label={`Go to ${mod.label} test`}
-          className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-        >
-          <ArrowRight size={16} />
-        </button>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onToggle(mod.id, e.target.checked)}
+          aria-label={`Include ${mod.label} in the next test run`}
+          title={`Include ${mod.label} in the next test run`}
+          className="checkbox-base flex-shrink-0"
+        />
       )}
     </div>
   );
@@ -75,6 +73,18 @@ export default function AssistiveTestingPage() {
   const [error, setError] = useState('');
   const [autoRun, setAutoRun] = useState(false);
   const [history, setHistory] = useState([]);
+  const [selectedModuleIds, setSelectedModuleIds] = useState(() => new Set());
+  // Results from the most recent multi-module run, shown inline below since
+  // there's no single results page to navigate to for more than one module.
+  const [multiResults, setMultiResults] = useState([]);
+
+  const toggleModuleSelected = useCallback((id, isChecked) => {
+    setSelectedModuleIds((prev) => {
+      const next = new Set(prev);
+      if (isChecked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (pendingAssistiveUrl) {
@@ -138,47 +148,79 @@ export default function AssistiveTestingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moduleStatus]);
 
+  // Runs whichever modules are checked in the "Test modules" list. With
+  // nothing checked, falls back to just the active tab (the original
+  // single-test behavior) so Start Test still works without touching a
+  // checkbox. Multiple checked modules run one after another; when exactly
+  // one ran, its full results page opens as before — with several, there's
+  // no single result to navigate to, so every module's real result renders
+  // inline below instead (see multiResults / the JSX further down).
   const handleRunTest = useCallback(async () => {
     const trimmed = url.trim();
     if (!trimmed) {
       setError('Please enter a URL to test.');
       return;
     }
-    if (!activeModule || activeModule.status !== 'active') return;
+    const idsToRun = selectedModuleIds.size > 0
+      ? activeModules.filter((m) => selectedModuleIds.has(m.id)).map((m) => m.id)
+      : [activeModuleId];
 
     setLoading(true);
     setError('');
+    setMultiResults([]);
 
-    try {
-      const res = await apiFetch(activeModule.endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed }),
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        setError(data.error ?? 'Test failed. Please check the URL and try again.');
-      } else {
-        setAssistiveResult(buildAssistiveResult(data.result ?? data, activeModuleId, trimmed));
-        navigate('assistive-results');
+    const okResults = []; // [{ id, built }]
+    let firstError = '';
+
+    for (const id of idsToRun) {
+      const mod = MODULES.find((m) => m.id === id);
+      if (!mod || mod.status !== 'active') continue;
+      setActiveModuleId(id);
+      try {
+        const res = await apiFetch(mod.endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: trimmed }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          firstError ||= `${mod.label}: ${data.error ?? 'Test failed.'}`;
+        } else {
+          okResults.push({ id, built: buildAssistiveResult(data.result ?? data, id, trimmed) });
+        }
+      } catch {
+        firstError ||= `${mod.label}: Network error. Please check your connection and try again.`;
       }
-    } catch {
-      setError('Network error. Please check your connection and try again.');
-    } finally {
-      setLoading(false);
     }
-  }, [url, activeModule, activeModuleId, setAssistiveResult, navigate]);
+
+    setLoading(false);
+    if (firstError) setError(firstError);
+
+    // Refresh the "Test modules" status list / coverage gauge with whatever
+    // just ran, regardless of how many modules were included.
+    apiFetch('/api/assistive-history')
+      .then((res) => res.json())
+      .then((data) => { if (data.ok && Array.isArray(data.items)) setHistory(data.items); })
+      .catch(() => {});
+
+    if (idsToRun.length === 1 && okResults.length === 1) {
+      setAssistiveResult(okResults[0].built);
+      navigate('assistive-results');
+    } else {
+      setMultiResults(okResults);
+    }
+  }, [url, selectedModuleIds, activeModuleId, activeModules, setAssistiveResult, navigate]);
 
   return (
-    <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6">
+    <div className="flex-1 overflow-auto bg-ivory p-6">
 
       {/* HEADER */}
       <div className="mb-6">
-        <h1 className="font-heading font-bold text-2xl text-ink dark:text-white">
-          Assistive Testing
+        <h1 className="font-heading font-bold text-2xl text-ink">
+          Assistive testing
         </h1>
-        <p className="text-sm text-body dark:text-gray-400 mt-1">
-          Validate real interaction patterns beyond automated scans.
+        <p className="text-sm text-body mt-1">
+          Validate real interaction patterns beyond automated scans
         </p>
       </div>
 
@@ -187,7 +229,7 @@ export default function AssistiveTestingPage() {
         <div className="space-y-5 min-w-0">
 
           {/* Module tabs */}
-          <div role="tablist" aria-label="Assistive test module" className="flex items-center gap-5 border-b border-gray-200 dark:border-white/10 overflow-x-auto">
+          <div role="tablist"aria-label="Assistive test module"className="flex items-center gap-5 border-b border-gray-200 overflow-x-auto">
             {activeModules.map((mod) => (
               <button
                 key={mod.id}
@@ -198,8 +240,8 @@ export default function AssistiveTestingPage() {
                 onClick={() => { setActiveModuleId(mod.id); setError(''); }}
                 className={`pb-3 -mb-px border-b-2 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 rounded-t ${
                   activeModuleId === mod.id
-                    ? 'border-teal text-teal font-semibold'
-                    : 'border-transparent text-body dark:text-gray-400 hover:text-ink dark:hover:text-white'
+                    ?'border-teal text-teal font-semibold'
+                    :'border-transparent text-body hover:text-ink'
                 }`}
               >
                 {mod.label}
@@ -209,13 +251,13 @@ export default function AssistiveTestingPage() {
 
           <div id="assistive-run-panel" role="tabpanel" aria-labelledby={`assistive-tab-${activeModuleId}`}>
             {loading ? (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft">
+              <div className="bg-white rounded-2xl border border-gray-100">
                 <ScanProgress bare url={url} />
               </div>
             ) : (
-              <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft px-6 py-5 space-y-4">
+              <div className="bg-white rounded-2xl border border-gray-100 px-6 py-5 space-y-4">
                 <div>
-                  <label htmlFor="assistive-url" className="block text-sm font-semibold text-ink dark:text-white mb-2">
+                  <label htmlFor="assistive-url"className="block text-sm font-semibold text-ink mb-2">
                     Target URL
                   </label>
                   <div className="glow-input-wrapper glow-input-wrapper--large">
@@ -235,7 +277,7 @@ export default function AssistiveTestingPage() {
                 </div>
 
                 <button
-                  onClick={handleRunTest}
+                  onClick={() => handleRunTest()}
                   disabled={!url.trim()}
                   className="btn-primary w-full justify-center py-3.5 text-base font-semibold"
                 >
@@ -255,7 +297,7 @@ export default function AssistiveTestingPage() {
 
           {/* Test modules list */}
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-body dark:text-gray-400 mb-3 px-1">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-body mb-3 px-1">
               Test modules
             </p>
             <div className="space-y-2">
@@ -265,17 +307,37 @@ export default function AssistiveTestingPage() {
                   mod={mod}
                   status={moduleStatus[mod.id]}
                   isActiveTab={mod.id === activeModuleId}
-                  onSelect={(id) => { setActiveModuleId(id); setError(''); document.getElementById('assistive-url')?.focus(); }}
+                  disabled={loading}
+                  checked={selectedModuleIds.has(mod.id)}
+                  onToggle={toggleModuleSelected}
                 />
               ))}
             </div>
           </div>
+
+          {/* Inline results for a multi-module run — a single-module run
+              navigates to the full results page instead (see handleRunTest). */}
+          {multiResults.length > 0 && (
+            <div className="space-y-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-body px-1">
+                Results from this run
+              </p>
+              {multiResults.map(({ id, built }) => (
+                <div key={id}>
+                  <h3 className="font-heading font-semibold text-base text-ink mb-2">
+                    {MODULE_LABELS[id] ?? id}
+                  </h3>
+                  <AssistiveResultView result={built} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* ── SIDEBAR ── */}
         <div className="space-y-4">
-          <div className="bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/[0.06] shadow-soft p-5">
-            <p className="font-heading font-semibold text-sm text-ink dark:text-white mb-4">Test coverage</p>
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <p className="font-heading font-semibold text-sm text-ink mb-4">Test coverage</p>
             {url.trim() ? (
               <>
                 <div className="flex justify-center mb-4">
@@ -283,19 +345,19 @@ export default function AssistiveTestingPage() {
                 </div>
                 <div className="space-y-2.5">
                   <div className="flex items-center gap-2.5 text-sm">
-                    <span className="w-6 h-6 rounded-full bg-sage/15 text-sage-700 dark:text-sage-300 flex items-center justify-center flex-shrink-0"><CheckCircle2 size={13} /></span>
-                    <span className="font-semibold text-ink dark:text-white tabular-nums">{coverage.passed}</span>
-                    <span className="text-body dark:text-gray-400">Passed</span>
+                    <span className="w-6 h-6 rounded-full bg-sage/15 text-sage-700 flex items-center justify-center flex-shrink-0"><CheckCircle2 size={13} /></span>
+                    <span className="font-semibold text-ink tabular-nums">{coverage.passed}</span>
+                    <span className="text-body">Passed</span>
                   </div>
                   <div className="flex items-center gap-2.5 text-sm">
-                    <span className="w-6 h-6 rounded-full bg-amber/15 text-amber-700 dark:text-amber-300 flex items-center justify-center flex-shrink-0"><AlertCircle size={13} /></span>
-                    <span className="font-semibold text-ink dark:text-white tabular-nums">{coverage.needsReview}</span>
-                    <span className="text-body dark:text-gray-400">Needs review</span>
+                    <span className="w-6 h-6 rounded-full bg-amber/15 text-amber-700 flex items-center justify-center flex-shrink-0"><AlertCircle size={13} /></span>
+                    <span className="font-semibold text-ink tabular-nums">{coverage.needsReview}</span>
+                    <span className="text-body">Needs review</span>
                   </div>
                   <div className="flex items-center gap-2.5 text-sm">
-                    <span className="w-6 h-6 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-400 flex items-center justify-center flex-shrink-0"><Circle size={11} /></span>
-                    <span className="font-semibold text-ink dark:text-white tabular-nums">{coverage.notTested}</span>
-                    <span className="text-body dark:text-gray-400">Not tested</span>
+                    <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-400 flex items-center justify-center flex-shrink-0"><CircleMinus size={13} /></span>
+                    <span className="font-semibold text-ink tabular-nums">{coverage.notTested}</span>
+                    <span className="text-body">Not tested</span>
                   </div>
                 </div>
                 <button
@@ -307,7 +369,7 @@ export default function AssistiveTestingPage() {
                 </button>
               </>
             ) : (
-              <p className="text-sm text-body dark:text-gray-400">Enter a URL to see coverage across all test modules.</p>
+              <p className="text-sm text-body">Enter a URL to see coverage across all test modules.</p>
             )}
           </div>
 
@@ -316,8 +378,15 @@ export default function AssistiveTestingPage() {
             <div>
               <p className="text-sm font-semibold m-0 mb-1">Human review recommended</p>
               <p className="text-xs m-0 leading-relaxed opacity-90">
-                Assistive testing results should be reviewed with keyboard and screen reader users to confirm real-world accessibility.
+                Assistive testing results should be reviewed with keyboard and screen reader users to confirm real world accessibility.
               </p>
+              <button
+                type="button"
+                onClick={() => navigate('wcag-reference')}
+                className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-teal hover:underline"
+              >
+                Learn more about assistive testing <ExternalLink size={12} />
+              </button>
             </div>
           </div>
         </div>

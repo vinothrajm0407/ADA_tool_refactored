@@ -1,4 +1,6 @@
 import { CheckCircle } from 'lucide-react';
+import { buildAssistiveViolation } from '../../utils/assistiveFixAdapter';
+import AssistiveAutoFixControl from './AssistiveAutoFixControl';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -16,19 +18,19 @@ function colorHex(val) {
 // ─── Stat item ────────────────────────────────────────────────────────────────
 
 function StatItem({ label, value, sub, color = 'default' }) {
-  const colors = { sage: 'text-sage', coral: 'text-coral', amber: 'text-amber', teal: 'text-teal', default: 'text-ink dark:text-white' };
+  const colors = { sage:'text-sage', coral:'text-coral', amber:'text-amber', teal:'text-teal', default:'text-ink'};
   return (
     <div className="text-center">
       <p className={`font-heading font-bold text-2xl ${colors[color]}`}>{value ?? '—'}</p>
-      <p className="text-xs text-body dark:text-gray-400 mt-0.5">{label}</p>
-      {sub && <p className="text-[10px] text-body dark:text-gray-500 mt-0.5">{sub}</p>}
+      <p className="text-xs text-body mt-0.5">{label}</p>
+      {sub && <p className="text-[10px] text-body mt-0.5">{sub}</p>}
     </div>
   );
 }
 
 // ─── Violation row ────────────────────────────────────────────────────────────
 
-function ViolationRow({ item }) {
+function ViolationRow({ item, testType, url }) {
   const current = item.ratio?.current;
   const required = item.ratio?.required ?? 4.5;
   const passes = typeof current === 'number' ? current >= required : false;
@@ -38,11 +40,20 @@ function ViolationRow({ item }) {
   const bg = colorHex(item.bgColor);
   const hasColors = fg && bg;
 
+  const violationRule = buildAssistiveViolation({
+    testType, url,
+    message: `Insufficient color contrast${item.summary ? `: ${item.summary}` : ''}`,
+    detail: `Current ratio ${displayRatio}, required ${required}:1`,
+    severity: 'error',
+    selector: item.target,
+    html: item.html,
+  });
+
   return (
-    <div className="py-4 border-b border-gray-50 dark:border-white/[0.04] last:border-0">
+    <div className="py-4 border-b border-gray-50 last:border-0">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <p className="text-xs font-mono text-body dark:text-gray-400 truncate mb-1.5" title={item.target}>
+          <p className="text-xs font-mono text-body truncate mb-1.5"title={item.target}>
             {item.target}
           </p>
 
@@ -51,20 +62,20 @@ function ViolationRow({ item }) {
             <div className="flex items-center gap-2 mb-2">
               <div className="flex items-center gap-1.5">
                 <span
-                  className="w-4 h-4 rounded border border-black/10 dark:border-white/10 shrink-0"
+                  className="w-4 h-4 rounded border border-black/10 shrink-0"
                   style={{ backgroundColor: fg }}
                   title={`Text: ${fg}`}
                 />
-                <span className="text-[10px] font-mono text-body dark:text-gray-500">{fg}</span>
+                <span className="text-[10px] font-mono text-body">{fg}</span>
               </div>
-              <span className="text-[10px] text-body dark:text-gray-500">on</span>
+              <span className="text-[10px] text-body">on</span>
               <div className="flex items-center gap-1.5">
                 <span
-                  className="w-4 h-4 rounded border border-black/10 dark:border-white/10 shrink-0"
+                  className="w-4 h-4 rounded border border-black/10 shrink-0"
                   style={{ backgroundColor: bg }}
                   title={`Background: ${bg}`}
                 />
-                <span className="text-[10px] font-mono text-body dark:text-gray-500">{bg}</span>
+                <span className="text-[10px] font-mono text-body">{bg}</span>
               </div>
               {/* Live preview */}
               <span
@@ -82,7 +93,7 @@ function ViolationRow({ item }) {
             </span>
           )}
           {item.summary && (
-            <p className="text-xs text-body dark:text-gray-500 mt-1 line-clamp-2">{item.summary}</p>
+            <p className="text-xs text-body mt-1 line-clamp-2">{item.summary}</p>
           )}
         </div>
 
@@ -90,12 +101,17 @@ function ViolationRow({ item }) {
           <p className={`font-heading font-bold text-lg leading-tight ${passes ? 'text-sage' : 'text-coral'}`}>
             {displayRatio}
           </p>
-          <p className="text-[10px] text-body dark:text-gray-500">needs {required}:1</p>
+          <p className="text-[10px] text-body">needs {required}:1</p>
           <span className={`mt-1 inline-flex text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
             passes ? 'bg-sage/10 text-sage' : 'bg-coral/10 text-coral'
           }`}>
             {passes ? 'AA Pass' : 'AA Fail'}
           </span>
+          {!passes && (
+            <div className="mt-2 flex justify-end">
+              <AssistiveAutoFixControl pageUrl={url} rule={violationRule} node={{ html: item.html || '' }} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -106,6 +122,8 @@ function ViolationRow({ item }) {
 
 export default function ColorContrastModule({ result }) {
   const raw = result?.metadata ?? result;
+  const testType = result?.testType;
+  const url = result?.url;
 
   const passed  = raw?.passed ?? false;
   const overview = raw?.ratioOverview ?? {};
@@ -117,10 +135,10 @@ export default function ColorContrastModule({ result }) {
     return (
       <div className="card p-8 flex flex-col items-center gap-3">
         <CheckCircle className="w-10 h-10 text-sage" />
-        <p className="font-heading font-bold text-base text-ink dark:text-white">
+        <p className="font-heading font-bold text-base text-ink">
           No contrast violations found
         </p>
-        <p className="text-sm text-body dark:text-gray-400 text-center max-w-sm">
+        <p className="text-sm text-body text-center max-w-sm">
           All text elements on this page meet WCAG 2.2 AA contrast requirements (4.5:1 minimum).
         </p>
       </div>
@@ -135,7 +153,7 @@ export default function ColorContrastModule({ result }) {
 
       {/* Summary */}
       <div className="card p-6">
-        <h3 className="font-heading font-bold text-base text-ink dark:text-white mb-4">
+        <h3 className="font-heading font-bold text-base text-ink mb-4">
           Color Contrast Summary
         </h3>
         <div className="flex gap-8 flex-wrap">
@@ -166,19 +184,19 @@ export default function ColorContrastModule({ result }) {
       {items.length > 0 && (
         <div className="card p-5">
           <div className="flex items-center gap-2 mb-1">
-            <h3 className="font-heading font-bold text-base text-ink dark:text-white">
+            <h3 className="font-heading font-bold text-base text-ink">
               Failing Elements
             </h3>
             <span className="bg-coral/10 text-coral text-xs font-semibold px-2.5 py-0.5 rounded-full">
               {items.length} unique selector{items.length !== 1 ? 's' : ''}
             </span>
           </div>
-          <p className="text-xs text-body dark:text-gray-500 mb-3">
+          <p className="text-xs text-body mb-3">
             Sorted by number of occurrences
           </p>
           <div>
             {items.map((item, i) => (
-              <ViolationRow key={i} item={item} />
+              <ViolationRow key={i} item={item} testType={testType} url={url} />
             ))}
           </div>
         </div>

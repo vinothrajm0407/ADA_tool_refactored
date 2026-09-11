@@ -102,7 +102,7 @@ const SEVERITY_ROWS = [
 const IMPACT_CLS = {
   critical: 'bg-coral/10 text-coral',
   serious:  'bg-terracotta/[0.15] text-terracotta',
-  moderate: 'bg-amber/10 text-[#92400e] dark:text-amber',
+  moderate:'bg-amber/10 text-[#92400e]',
   minor:    'bg-sage/[0.12] text-sage',
 }
 
@@ -117,7 +117,7 @@ const DIAL_CLS = {
 const GRADE_CLS = {
   success:  'bg-teal/10 text-teal',
   good:     'bg-sage/[0.12] text-sage',
-  warning:  'bg-amber/10 text-[#92400e] dark:text-amber',
+  warning:'bg-amber/10 text-[#92400e]',
   serious:  'bg-terracotta/[0.15] text-terracotta',
   critical: 'bg-coral/10 text-coral',
 }
@@ -126,21 +126,21 @@ const SEV_DOT_CLS = {
   critical: 'bg-coral',
   serious:  'bg-terracotta',
   moderate: 'bg-amber',
-  minor:    'bg-gray-400 dark:bg-gray-500',
+  minor:'bg-gray-400',
 }
 
 const SEV_COUNT_CLS = {
   critical: 'text-coral',
   serious:  'text-terracotta',
   moderate: 'text-amber',
-  minor:    'text-gray-400 dark:text-gray-500',
+  minor:'text-gray-400',
 }
 
 function ImpactBadge({ impact }) {
   if (!impact) return null
   const c = impact.toLowerCase()
   const label = c.charAt(0).toUpperCase() + c.slice(1)
-  const cls = IMPACT_CLS[c] ?? 'bg-gray-100 dark:bg-white/10 text-body dark:text-gray-400'
+  const cls = IMPACT_CLS[c] ??'bg-gray-100 text-body'
   return (
     <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide uppercase whitespace-nowrap ${cls}`}>
       {label}
@@ -179,7 +179,7 @@ function getNodeSummary(node) {
 }
 
 const copyBtnBase = 'border rounded font-semibold whitespace-nowrap flex-shrink-0 font-[inherit] cursor-pointer transition-colors'
-const copyBtnIdle = 'border-gray-200 dark:border-white/[0.08] bg-white dark:bg-charcoal text-body dark:text-gray-400 hover:border-teal hover:text-ink dark:hover:text-white'
+const copyBtnIdle ='border-gray-200 bg-white text-body hover:border-teal hover:text-ink'
 const copyBtnDone = 'text-sage border-sage bg-transparent'
 
 const EFFORT_META = {
@@ -225,13 +225,13 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
   }
 
   return (
-    <div className="my-3.5 rounded-xl border border-teal/20 bg-white dark:bg-charcoal overflow-hidden shadow-[0_1px_6px_rgba(0,0,0,0.06)]">
+    <div className="my-3.5 rounded-xl border border-teal/20 bg-white overflow-hidden shadow-[0_1px_6px_rgba(0,0,0,0.06)]">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-teal/10 bg-teal/[0.03] dark:bg-teal/[0.05]">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-teal/10 bg-teal/[0.03]">
         <div className="flex items-center gap-1.5">
           <Sparkles size={13} className="text-teal flex-shrink-0" />
-          <span className="text-[12.5px] font-semibold text-ink dark:text-white">Recommended Fix</span>
+          <span className="text-[12.5px] font-semibold text-ink">Recommended Fix</span>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap justify-end">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${effortInfo.cls}`}>
@@ -246,28 +246,28 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
       </div>
 
       {/* ── Compliance + Impact row ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 dark:divide-white/[0.06] border-b border-gray-100 dark:border-white/[0.06]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 border-b border-gray-100">
         <div className="flex items-center gap-2 px-4 py-2">
           <Shield size={12} className="text-teal flex-shrink-0" />
           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
             {wcagMeta ? (
               <>
                 <span className="text-[11.5px] font-semibold text-teal whitespace-nowrap">WCAG {wcagMeta.criterion}</span>
-                {wcagMeta.name && <span className="text-[11px] text-body dark:text-gray-500 truncate">· {wcagMeta.name}</span>}
+                {wcagMeta.name && <span className="text-[11px] text-body truncate">· {wcagMeta.name}</span>}
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${wcagMeta.level === 'AA' ? 'bg-teal/10 text-teal' : 'bg-sage/10 text-sage'}`}>
                   Level {wcagMeta.level}
                 </span>
               </>
             ) : (
-              <span className="text-[11px] text-body dark:text-gray-500">WCAG 2.1 AA</span>
+              <span className="text-[11px] text-body">WCAG 2.1 AA</span>
             )}
           </div>
         </div>
         <div className="flex items-start gap-2 px-4 py-2">
-          <Users size={12} className="text-body dark:text-gray-400 flex-shrink-0 mt-0.5" />
+          <Users size={12} className="text-body flex-shrink-0 mt-0.5"/>
           <div className="flex flex-wrap gap-1">
             {impactedUsers.map(u => (
-              <span key={u} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-body dark:text-gray-400 whitespace-nowrap">
+              <span key={u} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-body whitespace-nowrap">
                 {u}
               </span>
             ))}
@@ -276,20 +276,20 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
       </div>
 
       {/* ── Root cause ── */}
-      <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-        <p className="text-[12.5px] text-body dark:text-gray-400 leading-relaxed m-0">{whyMatters}</p>
+      <div className="px-4 py-3 border-b border-gray-100">
+        <p className="text-[12.5px] text-body leading-relaxed m-0">{whyMatters}</p>
       </div>
 
       {/* ── Before / After code ── */}
       {codePair ? (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="px-4 py-3 border-b border-gray-100">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>
               <div className="flex items-center gap-1.5 mb-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-coral/70 flex-shrink-0" />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-coral/80">Before</span>
               </div>
-              <pre className="m-0 text-[11px] px-3 py-2.5 bg-coral/[0.05] dark:bg-coral/[0.04] border border-coral/15 rounded-lg text-ink dark:text-white overflow-x-auto whitespace-pre leading-relaxed font-mono">
+              <pre className="m-0 text-[11px] px-3 py-2.5 bg-coral/[0.05] border border-coral/15 rounded-lg text-ink overflow-x-auto whitespace-pre leading-relaxed font-mono">
                 {codePair.before}
               </pre>
             </div>
@@ -305,20 +305,20 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                   {copied[`code-${violationKey}`] ? '✓ Copied' : '⧉ Copy'}
                 </button>
               </div>
-              <pre className="m-0 text-[11px] px-3 py-2.5 bg-teal/[0.05] dark:bg-teal/[0.05] border border-teal/15 rounded-lg text-ink dark:text-white overflow-x-auto whitespace-pre leading-relaxed font-mono">
+              <pre className="m-0 text-[11px] px-3 py-2.5 bg-teal/[0.05] border border-teal/15 rounded-lg text-ink overflow-x-auto whitespace-pre leading-relaxed font-mono">
                 {codePair.after}
               </pre>
             </div>
           </div>
           {tips.length > 0 && (
-            <ul className="mt-2.5 mb-0 pl-3.5 space-y-1 text-[11.5px] text-body dark:text-gray-500 leading-snug">
+            <ul className="mt-2.5 mb-0 pl-3.5 space-y-1 text-[11.5px] text-body leading-snug">
               {tips.map(tip => <li key={tip}>{tip}</li>)}
             </ul>
           )}
         </div>
       ) : tips.length > 0 && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-          <ul className="m-0 pl-3.5 space-y-1.5 text-[12.5px] text-body dark:text-gray-400 leading-snug">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <ul className="m-0 pl-3.5 space-y-1.5 text-[12.5px] text-body leading-snug">
             {tips.map(tip => <li key={tip}>{tip}</li>)}
           </ul>
         </div>
@@ -326,8 +326,8 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
 
       {/* ── Validation checklist ── */}
       {validationSteps.length > 0 && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-2 mt-0">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2 mt-0">
             Validation Checklist
           </p>
           <div className="flex flex-col gap-2">
@@ -337,7 +337,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                 <span className={`w-4 h-4 rounded flex-shrink-0 border-2 flex items-center justify-center transition-colors ${
                   checkedSteps.has(i)
                     ? 'bg-teal border-teal'
-                    : 'border-gray-300 dark:border-white/20 group-hover:border-teal/60'
+                    :'border-gray-300 group-hover:border-teal/60'
                 }`}>
                   {checkedSteps.has(i) && (
                     <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 10 10" fill="none">
@@ -346,7 +346,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                   )}
                 </span>
                 <span className={`text-[12px] leading-snug transition-colors ${
-                  checkedSteps.has(i) ? 'line-through text-gray-400 dark:text-gray-600' : 'text-body dark:text-gray-400'
+                  checkedSteps.has(i) ?'line-through text-gray-400':'text-body'
                 }`}>
                   {step}
                 </span>
@@ -358,7 +358,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
 
       {/* ── Auto Fix ── */}
       {canAutoFix && (
-        <div className="px-4 py-3 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="px-4 py-3 border-b border-gray-100">
           {autoFixState === 'idle' && (
             <button type="button" onClick={handleAutoFix}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors">
@@ -372,12 +372,12 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {AUTO_FIX_STEP_NAMES.map(name => (
-                  <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-400 dark:text-gray-500">
+                  <span key={name} className="text-[10.5px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">
                     {name}
                   </span>
                 ))}
               </div>
-              <p className="text-[11px] text-body dark:text-gray-500 m-0">This can take a minute — cloning, building, and re-scanning the fix.</p>
+              <p className="text-[11px] text-body m-0">This can take a minute — cloning, building, and re-scanning the fix.</p>
             </div>
           )}
           {autoFixState === 'done' && autoFixResult && (
@@ -396,8 +396,8 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                   {autoFixResult.steps.map((s, i) => (
                     <div key={i} className="flex items-center gap-1.5 text-[11.5px]">
                       {s.ok ? <CheckCircle2 size={11} className="text-sage flex-shrink-0" /> : <XCircle size={11} className="text-coral flex-shrink-0" />}
-                      <span className="text-body dark:text-gray-400">{s.name}</span>
-                      {s.detail && <span className="text-gray-400 dark:text-gray-600 truncate">— {s.detail}</span>}
+                      <span className="text-body">{s.name}</span>
+                      {s.detail && <span className="text-gray-400 truncate">— {s.detail}</span>}
                     </div>
                   ))}
                 </div>
@@ -427,7 +427,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
       )}
 
       {/* ── Action row ── */}
-      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50/70 dark:bg-white/[0.02]">
+      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50/70">
         {tips.length > 0 && (
           <button type="button"
             onClick={() => copyText(`fix-${violationKey}`, tips.join('\n'))}
@@ -607,10 +607,10 @@ export default function ADAResultsView({ initialResult = null, processResult = n
   }
 
   return (
-    <main className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 min-h-0">
+    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0">
       <div>
-        <h1 className="mb-2 font-heading font-bold text-3xl text-ink dark:text-white">ADA Automation Results</h1>
-        <p className="mb-5 text-[15px] text-body dark:text-gray-400">
+        <h1 className="mb-2 font-heading font-bold text-3xl text-ink">ADA Automation Results</h1>
+        <p className="mb-5 text-[15px] text-body">
           Upload an axe-core (or compatible) JSON result to view summary, violations, and passed rules.
         </p>
 
@@ -630,7 +630,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
           </label>
           {displayResult && (
             <button type="button" onClick={handleClearResult}
-              className="px-3.5 py-2 bg-transparent border border-gray-200 dark:border-white/[0.08] rounded-lg text-[13px] text-body dark:text-gray-400 cursor-pointer font-[inherit] hover:bg-black/[0.04] dark:hover:bg-white/[0.04] hover:text-ink dark:hover:text-white transition-colors">
+              className="px-3.5 py-2 bg-transparent border border-gray-200 rounded-lg text-[13px] text-body cursor-pointer font-[inherit] hover:bg-black/[0.04] hover:text-ink transition-colors">
               Clear result / Load another
             </button>
           )}
@@ -641,7 +641,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
         )}
 
         {scanIdToLoad != null && loadingScan && (
-          <p className="p-6 bg-white dark:bg-charcoal border border-dashed border-gray-200 dark:border-white/[0.08] rounded-xl text-body dark:text-gray-500 text-center">
+          <p className="p-6 bg-white border border-dashed border-gray-200 rounded-xl text-body text-center">
             Loading scan result…
           </p>
         )}
@@ -658,26 +658,26 @@ export default function ADAResultsView({ initialResult = null, processResult = n
         )}
 
         {displayResult && loadedScanResult && (
-          <p className="mb-3 px-3.5 py-2.5 bg-teal/10 dark:bg-teal/[0.08] rounded-lg text-sm text-body dark:text-gray-400">
+          <p className="mb-3 px-3.5 py-2.5 bg-teal/10 rounded-lg text-sm text-body">
             Viewing stored scan from history (URL: {displayResult.url || '—'}).
           </p>
         )}
         {displayResult && initialResult && !result && !loadedScanResult && (
-          <p className="mb-3 px-3.5 py-2.5 bg-teal/10 dark:bg-teal/[0.08] rounded-lg text-sm text-body dark:text-gray-400">
+          <p className="mb-3 px-3.5 py-2.5 bg-teal/10 rounded-lg text-sm text-body">
             Showing result from your last ADA check (URL: {displayResult.url || '—'}).
           </p>
         )}
 
         {!displayResult && !error && !(scanIdToLoad != null && (loadingScan || loadScanError)) && (
-          <div className="p-6 bg-white dark:bg-charcoal border border-dashed border-gray-200 dark:border-white/[0.08] rounded-xl text-body dark:text-gray-500 text-center">
+          <div className="p-6 bg-white border border-dashed border-gray-200 rounded-xl text-body text-center">
             <p>No result loaded. Use the button above to upload a JSON file (e.g. CollectionPageADACheck*.json).</p>
           </div>
         )}
 
         {displayResult && hasScreenshot && (
-          <section className="bg-white dark:bg-charcoal rounded-xl p-5 mb-6 shadow-soft" aria-label="Screenshot of tested page">
-            <h2 className="mb-2 font-heading font-semibold text-lg text-ink dark:text-white">Page screenshot</h2>
-            <p className="mb-3 text-sm text-body dark:text-gray-400 leading-snug">
+          <section className="bg-white rounded-xl p-5 mb-6"aria-label="Screenshot of tested page">
+            <h2 className="mb-2 font-heading font-semibold text-lg text-ink">Page screenshot</h2>
+            <p className="mb-3 text-sm text-body leading-snug">
               View the page as it was when the accessibility check ran.
             </p>
             <button type="button" onClick={() => setScreenshotModal({ kind: 'full' })}
@@ -688,34 +688,34 @@ export default function ADAResultsView({ initialResult = null, processResult = n
         )}
 
         {displayResult && !hasScreenshot && (
-          <div className="mb-5 px-4 py-3 bg-black/[0.05] dark:bg-white/[0.04] rounded-lg text-sm text-body dark:text-gray-400 space-y-2">
+          <div className="mb-5 px-4 py-3 bg-black/[0.05] rounded-lg text-sm text-body space-y-2">
             {effectiveProcessResult?.usedFallback ? (
               <>
-                <p><strong className="text-ink dark:text-white">Screenshots are not available</strong> because the accessibility check could not run; a fallback result was used instead.</p>
+                <p><strong className="text-ink">Screenshots are not available</strong> because the accessibility check could not run; a fallback result was used instead.</p>
                 {effectiveProcessResult.fallbackError && (
                   <p className="font-mono text-[12.8px] text-coral">{effectiveProcessResult.fallbackError}</p>
                 )}
                 {(effectiveProcessResult.fallbackError || '').toLowerCase().includes('greenlet') || (effectiveProcessResult.fallbackError || '').toLowerCase().includes('dll') ? (
                   <>
-                    <p><strong className="text-ink dark:text-white">Fix (Windows):</strong> Install the <strong className="text-ink dark:text-white">Microsoft Visual C++ Redistributable</strong>, then re-run.</p>
+                    <p><strong className="text-ink">Fix (Windows):</strong> Install the <strong className="text-ink">Microsoft Visual C++ Redistributable</strong>, then re-run.</p>
                     <ol className="pl-5 my-2 list-decimal">
                       <li>Download and install: <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe" target="_blank" rel="noopener noreferrer" className="text-teal hover:underline">VC++ Redistributable x64</a> (one-time).</li>
                       <li>Restart your terminal, then from the project folder run:</li>
                     </ol>
-                    <pre className="my-2 px-3 py-2.5 bg-black/[0.06] dark:bg-white/[0.06] rounded-lg text-[13.6px] overflow-x-auto font-mono">python -m playwright install chromium</pre>
-                    <p>Then run <code className="font-mono bg-black/[0.06] dark:bg-white/[0.06] px-1 rounded">python app.py</code> and try <strong className="text-ink dark:text-white">Process</strong> again. See <code className="font-mono bg-black/[0.06] dark:bg-white/[0.06] px-1 rounded">TROUBLESHOOTING.md</code> in the project for more.</p>
+                    <pre className="my-2 px-3 py-2.5 bg-black/[0.06] rounded-lg text-[13.6px] overflow-x-auto font-mono">python -m playwright install chromium</pre>
+                    <p>Then run <code className="font-mono bg-black/[0.06] px-1 rounded">python app.py</code> and try <strong className="text-ink">Process</strong> again. See <code className="font-mono bg-black/[0.06] px-1 rounded">TROUBLESHOOTING.md</code> in the project for more.</p>
                   </>
                 ) : (
                   <>
                     <p>To get screenshots, install Playwright's Chromium from the project folder:</p>
-                    <pre className="my-2 px-3 py-2.5 bg-black/[0.06] dark:bg-white/[0.06] rounded-lg text-[13.6px] overflow-x-auto font-mono">python -m playwright install chromium</pre>
-                    <p>Then run the app with <code className="font-mono bg-black/[0.06] dark:bg-white/[0.06] px-1 rounded">python app.py</code> and try <strong className="text-ink dark:text-white">Process</strong> again.</p>
+                    <pre className="my-2 px-3 py-2.5 bg-black/[0.06] rounded-lg text-[13.6px] overflow-x-auto font-mono">python -m playwright install chromium</pre>
+                    <p>Then run the app with <code className="font-mono bg-black/[0.06] px-1 rounded">python app.py</code> and try <strong className="text-ink">Process</strong> again.</p>
                   </>
                 )}
               </>
             ) : (
               <p>
-                No screenshot for this result. Screenshots are included when you run <strong className="text-ink dark:text-white">Process</strong> from the app; they are not in sample or uploaded results from older runs.
+                No screenshot for this result. Screenshots are included when you run <strong className="text-ink">Process</strong> from the app; they are not in sample or uploaded results from older runs.
               </p>
             )}
           </div>
@@ -725,8 +725,8 @@ export default function ADAResultsView({ initialResult = null, processResult = n
           <>
             {/* Score + Severity grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
-              <section className="bg-white dark:bg-charcoal rounded-xl p-5 shadow-soft" aria-label="Accessibility Score">
-                <h2 className="mb-4 text-[11px] font-bold tracking-[0.06em] uppercase text-gray-400 dark:text-gray-500">
+              <section className="bg-white rounded-xl p-5"aria-label="Accessibility Score">
+                <h2 className="mb-4 text-[11px] font-bold tracking-[0.06em] uppercase text-gray-400">
                   Accessibility Score
                 </h2>
                 <div className="flex items-center gap-5">
@@ -738,13 +738,13 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                     <span className={`inline-block text-[14px] font-bold px-2.5 py-0.5 rounded-full mb-2 ${GRADE_CLS[gradeInfo.color]}`}>
                       Grade {gradeInfo.grade}
                     </span>
-                    <p className="m-0 text-[13px] text-body dark:text-gray-400 leading-snug">{scoreMessage(score)}</p>
+                    <p className="m-0 text-[13px] text-body leading-snug">{scoreMessage(score)}</p>
                   </div>
                 </div>
               </section>
 
-              <section className="bg-white dark:bg-charcoal rounded-xl p-5 shadow-soft" aria-label="Severity Breakdown">
-                <h2 className="mb-4 text-[11px] font-bold tracking-[0.06em] uppercase text-gray-400 dark:text-gray-500">
+              <section className="bg-white rounded-xl p-5"aria-label="Severity Breakdown">
+                <h2 className="mb-4 text-[11px] font-bold tracking-[0.06em] uppercase text-gray-400">
                   Severity Breakdown
                 </h2>
                 <div className="flex flex-col gap-2.5">
@@ -752,8 +752,8 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                     <div key={key} className="flex items-center gap-2.5">
                       <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${SEV_DOT_CLS[key]}`} />
                       <div className="flex-1 flex items-baseline gap-1.5">
-                        <span className="text-sm text-body dark:text-gray-400">{label}</span>
-                        <span className="text-[11px] text-gray-400 dark:text-gray-500">{sublabel}</span>
+                        <span className="text-sm text-body">{label}</span>
+                        <span className="text-[11px] text-gray-400">{sublabel}</span>
                       </div>
                       <span className={`text-base font-bold min-w-[28px] text-right ${SEV_COUNT_CLS[key]}`}>
                         {severityBreakdown[key]}
@@ -765,54 +765,54 @@ export default function ADAResultsView({ initialResult = null, processResult = n
             </div>
 
             {/* Summary */}
-            <section className="bg-white dark:bg-charcoal rounded-xl p-5 mb-6 shadow-soft" aria-label="Run summary">
-              <h2 className="mb-4 font-heading font-semibold text-lg text-ink dark:text-white">Summary</h2>
+            <section className="bg-white rounded-xl p-5 mb-6"aria-label="Run summary">
+              <h2 className="mb-4 font-heading font-semibold text-lg text-ink">Summary</h2>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 mb-5">
                 <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">URL</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">URL</span>
                   <a href={displayResult.url} target="_blank" rel="noopener noreferrer"
                     className="text-sm text-teal break-all hover:underline">
                     {displayResult.url || '—'}
                   </a>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">Timestamp</span>
-                  <span className="text-sm text-ink dark:text-white">{formatDateTime(displayResult.timestamp)}</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">Timestamp</span>
+                  <span className="text-sm text-ink">{formatDateTime(displayResult.timestamp)}</span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">Engine</span>
-                  <span className="text-sm text-ink dark:text-white">{displayResult.testEngine?.name} {displayResult.testEngine?.version}</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">Engine</span>
+                  <span className="text-sm text-ink">{displayResult.testEngine?.name} {displayResult.testEngine?.version}</span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">Viewport</span>
-                  <span className="text-sm text-ink dark:text-white">{displayResult.testEnvironment?.windowWidth} × {displayResult.testEnvironment?.windowHeight}</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">Viewport</span>
+                  <span className="text-sm text-ink">{displayResult.testEnvironment?.windowWidth} × {displayResult.testEnvironment?.windowHeight}</span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">Scan profile</span>
-                  <span className="text-sm text-ink dark:text-white">{scanProfile}</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">Scan profile</span>
+                  <span className="text-sm text-ink">{scanProfile}</span>
                 </div>
               </div>
               <div className="flex flex-wrap gap-5 mb-3">
                 <div className="flex flex-col items-center min-w-[70px]">
                   <span className="text-2xl font-bold text-sage">{passes.length}</span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Passed</span>
+                  <span className="text-xs text-gray-400">Passed</span>
                 </div>
                 <div className="flex flex-col items-center min-w-[70px]">
                   <span className="text-2xl font-bold text-coral">{violations.length}</span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Violations</span>
+                  <span className="text-xs text-gray-400">Violations</span>
                 </div>
                 <div className="flex flex-col items-center min-w-[70px]">
                   <span className="text-2xl font-bold text-amber">{incomplete.length}</span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Incomplete</span>
+                  <span className="text-xs text-gray-400">Incomplete</span>
                 </div>
                 <div className="flex flex-col items-center min-w-[70px]">
-                  <span className="text-2xl font-bold text-ink dark:text-white">{passRate}%</span>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">Pass rate</span>
+                  <span className="text-2xl font-bold text-ink">{passRate}%</span>
+                  <span className="text-xs text-gray-400">Pass rate</span>
                 </div>
               </div>
               {Object.keys(impactCounts).length > 0 && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400 dark:text-gray-500">By impact:</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.03em] text-gray-400">By impact:</span>
                   {IMPACT_ORDER.filter((i) => impactCounts[i]).map((i) => (
                     <span key={i} className="inline-flex items-center gap-1.5">
                       <ImpactBadge impact={i} /> {impactCounts[i]}
@@ -830,7 +830,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                   placeholder="Search by rule id or description"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="flex-1 min-w-[200px] px-3.5 py-2.5 border border-gray-200 dark:border-white/[0.08] rounded-lg bg-white dark:bg-charcoal text-ink dark:text-white text-[15px] placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal transition-colors"
+                  className="flex-1 min-w-[200px] px-3.5 py-2.5 border border-gray-200 rounded-lg bg-white text-ink text-[15px] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal/30 focus:border-teal transition-colors"
                   aria-label="Search violations"
                 />
                 <div className="flex flex-wrap gap-3">
@@ -855,17 +855,17 @@ export default function ADAResultsView({ initialResult = null, processResult = n
 
             {/* Top Issues */}
             {topIssues.length > 0 && (
-              <section className="bg-white dark:bg-charcoal rounded-xl px-6 py-5 mb-6 shadow-soft" aria-label="Top issues summary">
-                <h2 className="mb-3.5 font-heading font-semibold text-lg text-ink dark:text-white">Top Issues</h2>
+              <section className="bg-white rounded-xl px-6 py-5 mb-6"aria-label="Top issues summary">
+                <h2 className="mb-3.5 font-heading font-semibold text-lg text-ink">Top Issues</h2>
                 <ul className="list-none m-0 p-0 flex flex-col gap-1.5">
                   {topIssues.map((issue) => (
                     <li key={issue.id}>
                       <button type="button" onClick={() => scrollToViolation(issue.id)} title={`Scroll to ${issue.id}`}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 border-none bg-ivory dark:bg-night/50 rounded-lg cursor-pointer text-left hover:bg-teal/[0.08] transition-colors font-[inherit]">
-                        <span className="flex-1 text-sm font-medium text-ink dark:text-white whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
+                        className="w-full flex items-center gap-2.5 px-2.5 py-2 border-none bg-ivory rounded-lg cursor-pointer text-left hover:bg-teal/[0.08] transition-colors font-[inherit]">
+                        <span className="flex-1 text-sm font-medium text-ink whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
                           {issue.title}
                         </span>
-                        <span className="w-[100px] h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden flex-shrink-0">
+                        <span className="w-[100px] h-1.5 bg-gray-200 rounded-full overflow-hidden flex-shrink-0">
                           <span className="block h-full bg-teal rounded-full"
                             style={{ width: `${Math.round((issue.count / maxTopCount) * 100)}%`, transition: 'width 0.4s ease-out' }} />
                         </span>
@@ -880,12 +880,12 @@ export default function ADAResultsView({ initialResult = null, processResult = n
             )}
 
             {/* Violations */}
-            <section className="bg-white dark:bg-charcoal rounded-xl p-5 mb-6 shadow-soft" aria-label="Violations">
-              <h2 className="mb-4 font-heading font-semibold text-lg text-ink dark:text-white">
+            <section className="bg-white rounded-xl p-5 mb-6"aria-label="Violations">
+              <h2 className="mb-4 font-heading font-semibold text-lg text-ink">
                 Violations ({filteredViolations.length})
               </h2>
               {filteredViolations.length === 0 ? (
-                <p className="text-[15px] text-gray-400 dark:text-gray-500">No violations match the current filters.</p>
+                <p className="text-[15px] text-gray-400">No violations match the current filters.</p>
               ) : (
                 <ul className="list-none m-0 p-0 flex flex-col gap-2.5">
                   {filteredViolations.map((rule, violationIndex) => {
@@ -894,24 +894,24 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                     const wcagMeta = wcagTagToMeta(rule.tags)
                     return (
                       <li key={key} id={`vi-${rule.id || violationIndex}`}
-                        className="border border-gray-100 dark:border-white/[0.06] rounded-xl overflow-hidden bg-white dark:bg-charcoal hover:border-teal/40 hover:shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:-translate-y-px transition-all duration-150">
+                        className="border border-gray-100 rounded-xl overflow-hidden bg-white hover:border-teal/40 hover:shadow-[0_4px_14px_rgba(0,0,0,0.06)] hover:-translate-y-px transition-all duration-150">
                         <div
-                          className="flex items-center gap-2.5 px-3.5 py-3 cursor-pointer bg-teal/[0.04] dark:bg-teal/[0.06] hover:bg-teal/[0.08] transition-colors"
+                          className="flex items-center gap-2.5 px-3.5 py-3 cursor-pointer bg-teal/[0.04] hover:bg-teal/[0.08] transition-colors"
                           onClick={() => setExpandedRule(isExpanded ? null : key)}
                           onKeyDown={(e) => e.key === 'Enter' && setExpandedRule(isExpanded ? null : key)}
                           role="button" tabIndex={0} aria-expanded={isExpanded}
                         >
                           <div className="min-w-0 flex flex-col gap-0.5 flex-1">
-                            <span className="font-semibold text-[14.8px] text-ink dark:text-white overflow-hidden text-ellipsis whitespace-nowrap">
+                            <span className="font-semibold text-[14.8px] text-ink overflow-hidden text-ellipsis whitespace-nowrap">
                               {formatRuleTitle(rule)}
                             </span>
                             {rule.id && (
-                              <span className="font-mono text-[11.2px] text-gray-400 dark:text-gray-500 opacity-80">
+                              <span className="font-mono text-[11.2px] text-gray-400 opacity-80">
                                 Rule: {rule.id}
                               </span>
                             )}
                           </div>
-                          <span className="min-w-[24px] h-6 px-2 rounded-full inline-flex items-center justify-center bg-ivory dark:bg-night/50 text-body dark:text-gray-400 text-xs font-bold border border-gray-100 dark:border-white/[0.06] mx-1" title="Affected elements">
+                          <span className="min-w-[24px] h-6 px-2 rounded-full inline-flex items-center justify-center bg-ivory text-body text-xs font-bold border border-gray-100 mx-1"title="Affected elements">
                             {rule.nodes?.length ?? 0}
                           </span>
                           <ImpactBadge impact={rule.impact} />
@@ -920,13 +920,13 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                               WCAG {wcagMeta.criterion} {wcagMeta.level}
                             </span>
                           )}
-                          <span className="text-gray-400 dark:text-gray-500 ml-1 flex-shrink-0 flex items-center">
+                          <span className="text-gray-400 ml-1 flex-shrink-0 flex items-center">
                             {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                           </span>
                         </div>
 
                         {isExpanded && (
-                          <div className="px-3.5 py-3.5 border-t border-gray-100 dark:border-white/[0.06] text-sm">
+                          <div className="px-3.5 py-3.5 border-t border-gray-100 text-sm">
                             {rule.screenshot && typeof rule.screenshot === 'string' && rule.screenshot.trim() && (
                               <div className="mb-3">
                                 <button type="button" onClick={() => setScreenshotModal({ kind: 'rule', ruleKey: key })}
@@ -935,8 +935,8 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                                 </button>
                               </div>
                             )}
-                            <p className="mb-1.5 text-ink dark:text-white">{rule.description}</p>
-                            <p className="mb-0 text-body dark:text-gray-400">{rule.help}</p>
+                            <p className="mb-1.5 text-ink">{rule.description}</p>
+                            <p className="mb-0 text-body">{rule.help}</p>
 
                             <RecommendedFixCard
                               rule={rule}
@@ -948,13 +948,13 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                             />
 
                             <div className="mt-1">
-                              <strong className="block mb-2 text-[13px] text-ink dark:text-white">
+                              <strong className="block mb-2 text-[13px] text-ink">
                                 Affected elements ({rule.nodes?.length ?? 0})
                               </strong>
                               {(rule.nodes || []).slice(0, 20).map((node, idx) => (
-                                <div key={idx} className="mb-3 p-2.5 bg-ivory dark:bg-night/50 rounded-lg">
+                                <div key={idx} className="mb-3 p-2.5 bg-ivory rounded-lg">
                                   <div className="flex items-start justify-between gap-2 mb-1">
-                                    <code className="block text-xs break-all text-body dark:text-gray-400">
+                                    <code className="block text-xs break-all text-body">
                                       {(node.target && (Array.isArray(node.target) ? node.target.flat().join(' ') : node.target)) || '—'}
                                     </code>
                                     <button type="button" onClick={() => copyText(`node-${key}-${idx}`, node.html || '')}
@@ -963,15 +963,15 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                                     </button>
                                   </div>
                                   {getNodeSummary(node) && (
-                                    <p className="mb-1.5 text-[12.2px] text-body dark:text-gray-500">{getNodeSummary(node)}</p>
+                                    <p className="mb-1.5 text-[12.2px] text-body">{getNodeSummary(node)}</p>
                                   )}
-                                  <pre className="m-0 text-[11px] whitespace-pre-wrap break-all max-h-[120px] overflow-auto text-body dark:text-gray-400">
+                                  <pre className="m-0 text-[11px] whitespace-pre-wrap break-all max-h-[120px] overflow-auto text-body">
                                     {node.html || '—'}
                                   </pre>
                                 </div>
                               ))}
                               {(rule.nodes?.length ?? 0) > 20 && (
-                                <p className="mt-2 text-[13px] text-gray-400 dark:text-gray-500">
+                                <p className="mt-2 text-[13px] text-gray-400">
                                   … and {(rule.nodes?.length ?? 0) - 20} more
                                 </p>
                               )}
@@ -986,9 +986,9 @@ export default function ADAResultsView({ initialResult = null, processResult = n
             </section>
 
             {/* Passes (collapsible) */}
-            <section className="bg-white dark:bg-charcoal rounded-xl p-4 shadow-soft" aria-label="Passed rules">
+            <section className="bg-white rounded-xl p-4"aria-label="Passed rules">
               <button type="button" onClick={() => setShowPasses((p) => !p)} aria-expanded={showPasses}
-                className="w-full py-2.5 border-none bg-transparent text-[15px] font-semibold text-ink dark:text-white cursor-pointer text-left hover:text-teal transition-colors font-[inherit] flex items-center gap-1.5">
+                className="w-full py-2.5 border-none bg-transparent text-[15px] font-semibold text-ink cursor-pointer text-left hover:text-teal transition-colors font-[inherit] flex items-center gap-1.5">
                 <span className="flex-shrink-0">{showPasses ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span>
                 Passed rules ({passes.length})
               </button>
@@ -996,9 +996,9 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                 <ul className="list-none mt-3 m-0 p-0 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-1.5">
                   {passes.map((rule) => (
                     <li key={rule.id || JSON.stringify(rule)}
-                      className="flex justify-between px-2.5 py-1.5 bg-ivory dark:bg-night/50 rounded-lg text-[13px]">
-                      <span className="font-mono text-ink dark:text-white">{rule.id}</span>
-                      <span className="text-gray-400 dark:text-gray-500">{rule.nodes?.length ?? 0} nodes</span>
+                      className="flex justify-between px-2.5 py-1.5 bg-ivory rounded-lg text-[13px]">
+                      <span className="font-mono text-ink">{rule.id}</span>
+                      <span className="text-gray-400">{rule.nodes?.length ?? 0} nodes</span>
                     </li>
                   ))}
                 </ul>
@@ -1013,12 +1013,12 @@ export default function ADAResultsView({ initialResult = null, processResult = n
             role="dialog" aria-modal="true" aria-label={modalContent.title}
             onClick={() => setScreenshotModal(null)}>
             <div className="absolute inset-0 bg-slate-900/60" />
-            <div className="relative bg-white dark:bg-charcoal rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.3)] max-w-[90vw] max-h-[90vh] flex flex-col overflow-hidden"
+            <div className="relative bg-white rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.3)] max-w-[90vw] max-h-[90vh] flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-white/[0.06] flex-shrink-0">
-                <h3 className="m-0 text-base font-semibold text-ink dark:text-white">{modalContent.title}</h3>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
+                <h3 className="m-0 text-base font-semibold text-ink">{modalContent.title}</h3>
                 <button type="button" onClick={() => setScreenshotModal(null)} aria-label="Close"
-                  className="w-9 h-9 p-0 border-none bg-transparent text-2xl leading-none text-body dark:text-gray-400 cursor-pointer rounded-lg hover:bg-black/[0.08] dark:hover:bg-white/[0.08] hover:text-ink dark:hover:text-white transition-colors">
+                  className="w-9 h-9 p-0 border-none bg-transparent text-2xl leading-none text-body cursor-pointer rounded-lg hover:bg-black/[0.08] hover:text-ink transition-colors">
                   ×
                 </button>
               </div>

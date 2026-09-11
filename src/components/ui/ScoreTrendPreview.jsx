@@ -31,21 +31,21 @@ const GUIDES = [60, 70, 80, 90];
 
 export default function ScoreTrendPreview() {
   return (
-    <div className="w-full max-w-[340px] bg-white dark:bg-charcoal rounded-2xl border border-gray-100 dark:border-white/10 shadow-soft p-5 select-none">
+    <div className="w-full max-w-[340px] bg-white rounded-2xl border border-gray-100 p-5 select-none">
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-body dark:text-gray-500 mb-1">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-body mb-1">
             Accessibility Score
           </p>
           <div className="flex items-end gap-2">
             <span className="font-heading font-bold text-3xl text-teal leading-none">92</span>
-            <span className="text-sm font-semibold text-sage-700 dark:text-sage-300 mb-0.5">↑ +28 pts</span>
+            <span className="text-sm font-semibold text-sage-700 mb-0.5">↑ +28 pts</span>
           </div>
         </div>
         <div className="text-right">
-          <p className="text-[10px] text-body dark:text-gray-500">Trend</p>
-          <p className="text-xs font-semibold text-sage-700 dark:text-sage-300">Improving</p>
+          <p className="text-[10px] text-body">Trend</p>
+          <p className="text-xs font-semibold text-sage-700">Improving</p>
         </div>
       </div>
 
@@ -120,7 +120,7 @@ export default function ScoreTrendPreview() {
         </text>
       </svg>
 
-      <p className="text-[10px] text-center text-body dark:text-gray-500 mt-2">
+      <p className="text-[10px] text-center text-body mt-2">
         Site-wide score across 6 development sprints
       </p>
     </div>

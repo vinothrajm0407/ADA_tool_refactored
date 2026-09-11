@@ -72,13 +72,6 @@ POST /api/crawl → create_crawl_job → RQ enqueue crawl_site_task → return c
      Post-crawl: finalize_crawl_summary → email → AI summary → alert evaluation
 ```
 
-### AI Fix Flow
-```
-POST /api/ai-fix → validate violation → build prompt → urllib.request to Anthropic API
-     → parse JSON response → return {explanation, wcagCriterion, before, after}
-     No API key: return mock/placeholder response
-```
-
 ---
 
 ## Phase 2: Coverage Gap Report
@@ -157,7 +150,6 @@ tests/
     test_assistive_api.py                     — 4 assistive endpoints (22 tests)
     test_history_api.py                       — History + trends endpoints (24 tests)
     test_alerts_api.py                        — Alerts, schedules, AI summary (23 tests)
-    test_ai_fix_api.py                        — AI fix endpoint happy/error paths (12 tests)
   security/
     test_security.py                          — Auth bypass, SSRF, XSS, SQL injection,
                                                 command injection, path traversal,

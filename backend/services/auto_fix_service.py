@@ -15,10 +15,12 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from contextlib import contextmanager
@@ -87,16 +89,20 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def _git_auth_header(token: str) -> str:
-    """GitHub's git-over-HTTPS wants Basic auth, not the Bearer scheme its REST API uses."""
-    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+def _git_auth_header(token: str, provider: str = "github") -> str:
+    """Git-over-HTTPS wants Basic auth, not the Bearer/PRIVATE-TOKEN scheme each
+    provider's REST API uses. GitHub: username x-access-token. GitLab: username
+    oauth2. Bitbucket: username x-token-auth (its documented convention for a
+    Repository/Workspace Access Token) — either way, password is the token."""
+    username = {"gitlab": "oauth2", "bitbucket": "x-token-auth"}.get(provider, "x-access-token")
+    basic = base64.b64encode(f"{username}:{token}".encode()).decode()
     return f"http.extraHeader=AUTHORIZATION: basic {basic}"
 
 
-def _clone_repo(repo_url: str, token: str, branch: str) -> Path:
+def _clone_repo(repo_url: str, token: str, branch: str, provider: str = "github") -> Path:
     tmp_dir = Path(tempfile.mkdtemp(prefix="ada_autofix_"))
     _run(
-        ["git", "-c", _git_auth_header(token),
+        ["git", "-c", _git_auth_header(token, provider),
          "clone", "--depth", "1", "--branch", branch, repo_url, str(tmp_dir)],
         cwd=tmp_dir.parent, timeout=_GIT_TIMEOUT,
     )
@@ -118,7 +124,7 @@ def _grep_repo(repo_dir: Path, pattern: re.Pattern, extensions: tuple[str, ...] 
     return hits
 
 
-def _locate_by_needle(repo_dir: Path, needle: re.Pattern, extensions: tuple[str, ...] = (".jsx", ".tsx")) -> tuple[str, int] | None:
+def _locate_by_needle(repo_dir: Path, needle: re.Pattern, extensions: tuple[str, ...] = (".jsx", ".tsx", ".html")) -> tuple[str, int] | None:
     hits = _grep_repo(repo_dir, needle, extensions)
     if len(hits) != 1:
         return None
@@ -152,22 +158,31 @@ def locate_source(repo_dir: Path, node_html: str, rule_id: str | None = None) ->
     html = (node_html or "").strip()
 
     if rule_id == "html-has-lang":
-        return _locate_by_needle(repo_dir, re.compile(r"<html[\s>]"), extensions=(".html",))
+        # Match only an <html> tag that's actually missing lang= — a bare tag-name
+        # needle would hit every page in a multi-page static site and never be
+        # "the one" file, even though only one of them lacks the attribute.
+        needle = re.compile(r"<html(?![^>]*\blang=)[^>]*>")
+        return _locate_by_needle(repo_dir, needle, extensions=(".html",))
 
     if rule_id == "color-contrast":
         # The fix belongs in CSS, not the component — find the element's own
         # class selector rule block, not the JSX that references the class.
+        # Static sites often keep this in a <style> block inside the page
+        # itself rather than a separate stylesheet, so look in both.
         class_match = re.search(r'class="([^"]+)"', html)
         if not class_match:
             return None
         class_name = class_match.group(1).strip().split()[0]
         needle = re.compile(re.escape(f".{class_name}") + r"\s*\{")
-        return _locate_by_needle(repo_dir, needle, extensions=(".css",))
+        return _locate_by_needle(repo_dir, needle, extensions=(".css", ".html"))
 
     class_match = re.search(r'class="([^"]+)"', html)
     if class_match:
         class_name = class_match.group(1).strip().split()[0]
-        needle = re.compile(re.escape(f'className="{class_name}"'))
+        # Accept both the JSX (className) and plain-HTML (class) spellings —
+        # a violation's outerHTML always reports the rendered "class" attribute
+        # regardless of which one the source actually wrote.
+        needle = re.compile(r'\bclass(?:Name)?="' + re.escape(class_name) + r'"')
         return _locate_by_needle(repo_dir, needle)
 
     # No class — try other attributes next. Unlike className/htmlFor/tabIndex
@@ -264,9 +279,9 @@ def _parse_contrast_data(node: dict) -> tuple[str, str, float] | None:
 
 def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
     """
-    Deterministic placeholder fixes used only when GEMINI_API_KEY isn't configured —
-    same idea as the existing /api/ai-fix mock fallback (app.py). These prove the rest
-    of the pipeline works without needing a live Gemini call; the generated text is a
+    Deterministic placeholder fixes used only when GEMINI_API_KEY isn't configured.
+    These prove the rest of the pipeline works without needing a live Gemini call;
+    the generated text is a
     generic/derived placeholder, not a real contextual label — add a real API key for that.
     """
     rule_id = rule.get("id")
@@ -277,7 +292,7 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         if not class_match:
             return None
         class_name = class_match.group(1).strip().split()[0]
-        pattern = re.compile(r'<button([^>]*\bclassName="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
+        pattern = re.compile(r'<button([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
         m = pattern.search(file_content)
         if not m or "aria-label" in m.group(1):
             return None
@@ -345,7 +360,7 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         class_name = class_match.group(1).strip().split()[0]
         tag_match = re.match(r"<(\w+)", html.strip())
         tag = tag_match.group(1) if tag_match else "a"
-        pattern = re.compile(r"<" + re.escape(tag) + r'([^>]*\bclassName="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
+        pattern = re.compile(r"<" + re.escape(tag) + r'([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
         m = pattern.search(file_content)
         if not m or "aria-label" in m.group(1):
             return None
@@ -369,7 +384,7 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         class_match = re.search(r'class="([^"]+)"', html)
         if class_match:
             class_name = class_match.group(1).strip().split()[0]
-            body = r'<' + old_tag + r'([^>]*\bclassName="' + re.escape(class_name) + r'"[^>]*?)(/?)>(.*?)</' + old_tag + r'>'
+            body = r'<' + old_tag + r'([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>(.*?)</' + old_tag + r'>'
         else:
             body = r"<" + old_tag + r"([^>]*?)(/?)>(.*?)</" + old_tag + r">"
         m = re.compile(body, re.DOTALL).search(file_content)
@@ -458,6 +473,88 @@ The "before" value MUST be an exact substring of the file content given above �
         return None
 
 
+# Conventional root-component locations, checked in order — first one that
+# exists in the repo wins. Used only for "page-wide" violations (empty node
+# html — see buildAssistiveViolation in the frontend) where there's no single
+# broken element to locate, only somewhere the missing landmark belongs.
+PAGE_ENTRY_CANDIDATES = (
+    "src/App.jsx", "src/App.tsx",
+    "src/app/page.jsx", "src/app/page.tsx",
+    "app/page.jsx", "app/page.tsx",
+)
+
+
+def _locate_page_entry(repo_dir: Path) -> str | None:
+    for candidate in PAGE_ENTRY_CANDIDATES:
+        if (repo_dir / candidate).is_file():
+            return candidate
+    return None
+
+
+def generate_insertion_patch(rule: dict, file_content: str) -> str | None:
+    """
+    For a page-wide violation with no single element to patch (missing H1,
+    missing <main>, etc.) — ask Gemini to return the whole file with the
+    missing element inserted in a sensible place, rather than a before/after
+    substring swap (there's no existing "before" text for something absent).
+
+    Never eligible for auto-merge (see is_auto_merge_eligible / RULES_WITH_FALLBACK
+    — these rule ids are assistive-testing ids, never in that set, so this is
+    already guaranteed structurally, not just by convention). A wrong insertion
+    point is a real risk an AI before/after diff doesn't have, so this always
+    goes through a human-reviewed PR — the existing build + re-scan steps catch
+    syntax errors and confirm the violation actually clears, but not placement.
+    """
+    if not Config.GEMINI_API_KEY:
+        return None
+    prompt = f"""You are fixing a web accessibility violation in a React (JSX) source file.
+This violation describes something MISSING from the page, not a broken existing element.
+
+Violation: {rule.get("id", "unknown")} — {rule.get("help", "")}
+Details: {rule.get("description", "")}
+
+Here is the full source file content:
+---
+{file_content}
+---
+
+Add the missing element in the most sensible location in this file's JSX, changing nothing else.
+Respond with ONLY the complete, corrected file content — no markdown fences, no explanation, no JSON wrapper, just the raw file text."""
+
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": 4096},
+    }).encode()
+
+    # Retries a plain urllib socket hang observed directly during testing — the
+    # identical request succeeded via curl in 12s while urllib.request timed out
+    # three times in a row at up to 60s, pointing at a flaky client-side hang
+    # rather than Gemini actually being slow. Same defensive pattern as
+    # merge_pull_request's retry loop above, for a different flaky-network symptom.
+    attempts = 3
+    for attempt in range(attempts):
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent"
+            f"?key={Config.GEMINI_API_KEY}",
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                result = json.loads(resp.read())
+            text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            text = text.removeprefix("```jsx").removeprefix("```tsx").removeprefix("```").removesuffix("```").strip()
+            if not text or text.strip() == file_content.strip():
+                return None
+            return text
+        except Exception:
+            if attempt == attempts - 1:
+                logger.exception("Auto-fix insertion-patch generation failed")
+                return None
+    return None
+
+
 def validate_patch(file_content: str, before: str, after: str) -> bool:
     return (
         bool(before) and bool(after)
@@ -486,14 +583,12 @@ def run_tests(repo_dir: Path) -> dict:
 
 
 @contextmanager
-def build_and_preview(repo_dir: Path):
-    """npm install + build, then serve dist/ via `vite preview` and yield its URL."""
-    _run([NPM_CMD, "install", "--silent"], cwd=repo_dir, timeout=_NPM_INSTALL_TIMEOUT)
-    _run([NPM_CMD, "run", "build", "--silent"], cwd=repo_dir, timeout=_NPM_BUILD_TIMEOUT)
-
+def _serve_and_wait(cmd: list[str], cwd: Path, url_pattern: re.Pattern, timeout: int):
+    """Run cmd, wait for a line on its stdout matching url_pattern (group 1 = the URL
+    to yield), then kill the whole process tree on exit. Shared by both preview
+    strategies below — only the command and the URL announcement format differ."""
     proc = subprocess.Popen(
-        [NPX_CMD, "vite", "preview", "--port", "0", "--strictPort"],
-        cwd=repo_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         start_new_session=(platform.system() != "Windows"),
     )
     # proc.stdout.readline() blocks with no timeout of its own, so a deadline check
@@ -511,7 +606,7 @@ def build_and_preview(repo_dir: Path):
 
     preview_url = None
     try:
-        deadline = time.time() + _PREVIEW_START_TIMEOUT
+        deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 line = line_queue.get(timeout=max(0.1, deadline - time.time()))
@@ -519,15 +614,46 @@ def build_and_preview(repo_dir: Path):
                 break
             if line is None:
                 break
-            match = re.search(r"(https?://localhost:\d+\S*)", _ANSI_RE.sub("", line))
+            match = url_pattern.search(_ANSI_RE.sub("", line))
             if match:
                 preview_url = match.group(1)
                 break
         if not preview_url:
-            raise RuntimeError("vite preview did not report a URL in time")
+            raise RuntimeError(f"{cmd[0]} did not report a preview URL in time")
         yield preview_url
     finally:
         _kill_process_tree(proc)
+
+
+@contextmanager
+def build_and_preview(repo_dir: Path):
+    """npm-based repo: npm install + build, then serve dist/ via `vite preview`.
+
+    Plain static site (no package.json — e.g. a hand-authored GitHub Pages repo
+    with no build step, docs/ served as-is): skip straight to serving its files
+    directly over HTTP, so verification checks the real page instead of failing
+    on a nonexistent build or (if a stray dist/ happens to exist) a stale one.
+    """
+    if not (repo_dir / "package.json").exists():
+        static_root = repo_dir / "docs" if (repo_dir / "docs").is_dir() else repo_dir
+        with _serve_and_wait(
+            [sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1"],
+            cwd=static_root,
+            url_pattern=re.compile(r"(https?://127\.0\.0\.1:\d+\S*)"),
+            timeout=_PREVIEW_START_TIMEOUT,
+        ) as preview_url:
+            yield preview_url
+        return
+
+    _run([NPM_CMD, "install", "--silent"], cwd=repo_dir, timeout=_NPM_INSTALL_TIMEOUT)
+    _run([NPM_CMD, "run", "build", "--silent"], cwd=repo_dir, timeout=_NPM_BUILD_TIMEOUT)
+    with _serve_and_wait(
+        [NPX_CMD, "vite", "preview", "--port", "0", "--strictPort"],
+        cwd=repo_dir,
+        url_pattern=re.compile(r"(https?://localhost:\d+\S*)"),
+        timeout=_PREVIEW_START_TIMEOUT,
+    ) as preview_url:
+        yield preview_url
 
 
 def rescan_and_verify(preview_url: str, rule_id: str) -> bool:
@@ -537,16 +663,68 @@ def rescan_and_verify(preview_url: str, rule_id: str) -> bool:
     return not any(v.get("id") == rule_id for v in violations)
 
 
+def verify_page_wide_fix(preview_url: str, rule: dict) -> bool:
+    """rescan_and_verify checks axe's own violations list by rule id — useless here,
+    since assistive-testing rule ids (e.g. assistive-page_structure-...) never appear
+    in axe's output at all, so that check is vacuously true regardless of whether an
+    insertion actually worked. Do a real structural check for the two page-wide rules
+    this pipeline currently supports; if the rule describes something else we can't
+    identify a specific check for, fall back to trusting build success + the human
+    review this fix always goes through (see run_auto_fix's is_page_wide branch)."""
+    from playwright.sync_api import sync_playwright
+    text = ((rule.get("description") or "") + " " + (rule.get("help") or "")).lower()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_context().new_page()
+            page.goto(preview_url, wait_until="networkidle", timeout=15000)
+            if "h1" in text or "heading" in text:
+                return page.locator("h1").count() > 0
+            if "main" in text or "landmark" in text:
+                return page.locator("main, [role=main]").count() > 0
+            return True
+        finally:
+            browser.close()
+
+
 def _parse_github_repo(repo_url: str) -> tuple[str, str] | None:
     match = re.match(r"https://github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", repo_url)
     return match.groups() if match else None
 
 
-def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: str, repo_url: str) -> str:
+def _parse_gitlab_repo(repo_url: str) -> str | None:
+    """Returns the full namespace/project path — gitlab.com repos can live under
+    nested subgroups (gitlab.com/team/subteam/project), unlike GitHub's flat owner/repo.
+
+    The regex's path group can swallow a trailing ".git" whole when there's only
+    one segment after the namespace (e.g. "owner/repo.git") — "." is a valid path
+    character, so the lazy repetition never needs to exclude it. Strip it
+    explicitly rather than fight the regex."""
+    match = re.match(r"https://gitlab\.com/([\w.-]+(?:/[\w.-]+)+?)(?:\.git)?/?$", repo_url)
+    return match.group(1).removesuffix(".git") if match else None
+
+
+def _parse_bitbucket_repo(repo_url: str) -> tuple[str, str] | None:
+    match = re.match(r"https://bitbucket\.org/([\w.-]+)/([\w.-]+?)(?:\.git)?/?$", repo_url)
+    return match.groups() if match else None
+
+
+def _parse_repo(provider: str, repo_url: str) -> str | None:
+    """Dispatches to the provider-specific parser and returns the namespace/project
+    path used to build that provider's web and REST URLs ('owner/repo' for GitHub
+    and Bitbucket, the full possibly-nested path for GitLab)."""
+    if provider == "gitlab":
+        return _parse_gitlab_repo(repo_url)
+    parsed = _parse_bitbucket_repo(repo_url) if provider == "bitbucket" else _parse_github_repo(repo_url)
+    return f"{parsed[0]}/{parsed[1]}" if parsed else None
+
+
+def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: str, repo_url: str,
+                 provider: str = "github") -> str:
     def git(*args, extra_headers=False):
         base = ["git"]
         if extra_headers:
-            base += ["-c", _git_auth_header(token)]
+            base += ["-c", _git_auth_header(token, provider)]
         base += ["-c", "user.email=ada-bot@ada-tool.local", "-c", "user.name=ADA Auto-Fix"]
         _run(base + list(args), cwd=repo_dir, timeout=_GIT_TIMEOUT)
 
@@ -555,11 +733,40 @@ def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: st
     git("commit", "-m", commit_message)
     git("push", "origin", branch_name, extra_headers=True)
 
-    parsed = _parse_github_repo(repo_url)
-    if parsed:
-        owner, repo = parsed
-        return f"https://github.com/{owner}/{repo}/tree/{branch_name}"
+    path = _parse_repo(provider, repo_url)
+    if path:
+        if provider == "gitlab":
+            return f"https://gitlab.com/{path}/-/tree/{branch_name}"
+        if provider == "bitbucket":
+            return f"https://bitbucket.org/{path}/branch/{branch_name}"
+        return f"https://github.com/{path}/tree/{branch_name}"
     return branch_name
+
+
+def _pr_body_insertion(rule: dict, file_path: str, before_content: str, after_content: str) -> str:
+    import difflib
+    rule_id = rule.get("id", "")
+    diff = "".join(difflib.unified_diff(
+        before_content.splitlines(keepends=True), after_content.splitlines(keepends=True),
+        fromfile=file_path, tofile=file_path,
+    ))
+    return f"""### Accessibility fix — `{rule_id}`
+
+{rule.get("help", "")}
+
+{rule.get("description", "")}
+
+**File:** `{file_path}`
+
+This violation describes something missing from the page (no single existing element to point at), so an AI chose where to add it — **check the placement below makes sense before merging**, that's not something the automated build/re-scan can confirm on its own.
+
+```diff
+{diff}
+```
+
+---
+Generated by ADA Auto-Fix: built and re-scanned to confirm the missing element is now present. Never auto-merged — placement always needs a human check.
+"""
 
 
 def _pr_body(rule: dict, node: dict, patch: dict, file_path: str, line_no: int) -> str:
@@ -588,33 +795,77 @@ Generated and verified by ADA Auto-Fix: the patch was applied in an isolated san
 
 
 def create_pull_request(repo_url: str, token: str, branch_name: str, base_branch: str,
-                         title: str, body: str) -> dict | None:
-    """Open a PR for an already-pushed branch. Returns {"url", "number"}, or None on any
-    failure (e.g. a PR for this branch already exists) — a convenience step, not a gate."""
-    parsed = _parse_github_repo(repo_url)
-    if not parsed:
+                         title: str, body: str, provider: str = "github") -> dict | None:
+    """Open a PR (GitHub/Bitbucket) or merge request (GitLab) for an already-pushed
+    branch. Returns {"url", "number"} either way — each provider's response shape
+    is normalized here so callers don't need to know which one they're talking to.
+    None on any failure (e.g. one already exists for this branch) — a convenience
+    step, not a gate."""
+    path = _parse_repo(provider, repo_url)
+    if not path:
         return None
-    owner, repo = parsed
-    payload = json.dumps({"title": title, "head": branch_name, "base": base_branch, "body": body}).encode()
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repo}/pulls",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "ADA-Accessibility-Intelligence",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    if provider == "gitlab":
+        encoded_path = urllib.parse.quote(path, safe="")
+        payload = json.dumps({
+            "source_branch": branch_name, "target_branch": base_branch,
+            "title": title, "description": body,
+        }).encode()
+        req = urllib.request.Request(
+            f"https://gitlab.com/api/v4/projects/{encoded_path}/merge_requests",
+            data=payload,
+            headers={
+                "PRIVATE-TOKEN": token,
+                "User-Agent": "ADA-Accessibility-Intelligence",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+    elif provider == "bitbucket":
+        payload = json.dumps({
+            "title": title, "description": body,
+            "source": {"branch": {"name": branch_name}},
+            "destination": {"branch": {"name": base_branch}},
+        }).encode()
+        req = urllib.request.Request(
+            f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "ADA-Accessibility-Intelligence",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+    else:
+        payload = json.dumps({"title": title, "head": branch_name, "base": base_branch, "body": body}).encode()
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{path}/pulls",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ADA-Accessibility-Intelligence",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
+        if provider == "gitlab":
+            if not result.get("web_url") or result.get("iid") is None:
+                return None
+            return {"url": result["web_url"], "number": result["iid"]}
+        if provider == "bitbucket":
+            href = (result.get("links") or {}).get("html", {}).get("href")
+            if not href or result.get("id") is None:
+                return None
+            return {"url": href, "number": result["id"]}
         if not result.get("html_url") or not result.get("number"):
             return None
         return {"url": result["html_url"], "number": result["number"]}
     except Exception:
-        logger.exception("create_pull_request failed for %s/%s (%s)", owner, repo, branch_name)
+        logger.exception("create_pull_request failed for %s (%s)", path, branch_name)
         return None
 
 
@@ -628,59 +879,106 @@ def is_auto_merge_eligible(rule_id: str) -> bool:
     return rule_id in RULES_WITH_FALLBACK
 
 
-def merge_pull_request(repo_url: str, token: str, pr_number: int) -> bool:
-    """Merge an already-open PR. Returns True only on a confirmed merge."""
-    parsed = _parse_github_repo(repo_url)
-    if not parsed:
+def merge_pull_request(repo_url: str, token: str, pr_number: int, provider: str = "github") -> bool:
+    """Merge an already-open PR/MR. Returns True only on a confirmed merge.
+
+    Retries briefly on failure: both providers can take a moment after a PR/MR
+    is created before their API considers it mergeable (observed directly —
+    GitLab returned 405 immediately after creation, then 200 on retry seconds
+    later), so a single-shot attempt right after create_pull_request is racy."""
+    path = _parse_repo(provider, repo_url)
+    if not path:
         return False
-    owner, repo = parsed
-    payload = json.dumps({"merge_method": "merge"}).encode()
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/merge",
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "ADA-Accessibility-Intelligence",
-            "Content-Type": "application/json",
-        },
-        method="PUT",
-    )
+    if provider == "gitlab":
+        encoded_path = urllib.parse.quote(path, safe="")
+        req_factory = lambda: urllib.request.Request(
+            f"https://gitlab.com/api/v4/projects/{encoded_path}/merge_requests/{pr_number}/merge",
+            headers={"PRIVATE-TOKEN": token, "User-Agent": "ADA-Accessibility-Intelligence"},
+            method="PUT",
+        )
+    elif provider == "bitbucket":
+        req_factory = lambda: urllib.request.Request(
+            f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}/merge",
+            data=b"{}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "ADA-Accessibility-Intelligence",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+    else:
+        payload = json.dumps({"merge_method": "merge"}).encode()
+        req_factory = lambda: urllib.request.Request(
+            f"https://api.github.com/repos/{path}/pulls/{pr_number}/merge",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ADA-Accessibility-Intelligence",
+                "Content-Type": "application/json",
+            },
+            method="PUT",
+        )
+    attempts = 4
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req_factory(), timeout=15) as resp:
+                result = json.loads(resp.read())
+            if provider == "gitlab":
+                return result.get("state") == "merged"
+            if provider == "bitbucket":
+                return result.get("state") == "MERGED"
+            return bool(result.get("merged"))
+        except Exception as e:
+            if attempt == attempts - 1:
+                logger.exception("merge_pull_request failed for %s #%s", path, pr_number)
+                return False
+            time.sleep(2 * (attempt + 1))
+    return False
+
+
+def is_pull_request_open(repo_url: str, token: str, pr_number: int, provider: str = "github") -> bool:
+    """
+    True only if the provider currently reports this PR/MR as open — GitHub uses
+    "open", GitLab uses "opened", Bitbucket uses "OPEN". Used to double-check a
+    "duplicate" PR recorded in our own database — that record only reflects what
+    happened when we opened it, not anything that happened to it on the provider's
+    side since (closed without merging, repo archived, etc). Any failure (PR
+    deleted, repo inaccessible) is treated as "not open" so a stale local record
+    can never permanently block re-running Auto-Fix on a violation.
+    """
+    path = _parse_repo(provider, repo_url)
+    if not path:
+        return False
+    if provider == "gitlab":
+        encoded_path = urllib.parse.quote(path, safe="")
+        req = urllib.request.Request(
+            f"https://gitlab.com/api/v4/projects/{encoded_path}/merge_requests/{pr_number}",
+            headers={"PRIVATE-TOKEN": token, "User-Agent": "ADA-Accessibility-Intelligence"},
+            method="GET",
+        )
+    elif provider == "bitbucket":
+        req = urllib.request.Request(
+            f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}",
+            headers={"Authorization": f"Bearer {token}", "User-Agent": "ADA-Accessibility-Intelligence"},
+            method="GET",
+        )
+    else:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{path}/pulls/{pr_number}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ADA-Accessibility-Intelligence",
+            },
+            method="GET",
+        )
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
-        return bool(result.get("merged"))
-    except Exception:
-        logger.exception("merge_pull_request failed for %s/%s #%s", owner, repo, pr_number)
-        return False
-
-
-def is_pull_request_open(repo_url: str, token: str, pr_number: int) -> bool:
-    """
-    True only if GitHub currently reports this PR as open. Used to double-check
-    a "duplicate" PR recorded in our own database — that record only reflects
-    what happened when we opened it, not anything that happened to it on
-    GitHub since (closed without merging, repo archived, etc). Any failure
-    (PR deleted, repo inaccessible) is treated as "not open" so a stale local
-    record can never permanently block re-running Auto-Fix on a violation.
-    """
-    parsed = _parse_github_repo(repo_url)
-    if not parsed:
-        return False
-    owner, repo = parsed
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "ADA-Accessibility-Intelligence",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-        return result.get("state") == "open"
+        expected = {"gitlab": "opened", "bitbucket": "OPEN"}.get(provider, "open")
+        return result.get("state") == expected
     except Exception:
         return False
 
@@ -692,39 +990,67 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
     def step(name: str, ok: bool, detail: str = ""):
         steps.append({"name": name, "ok": ok, "detail": detail})
 
+    provider = link.get("provider") or "github"
     repo_dir = None
     try:
-        repo_dir = _clone_repo(link["repo_url"], link["access_token"], link["default_branch"])
+        repo_dir = _clone_repo(link["repo_url"], link["access_token"], link["default_branch"], provider)
         step("Clone repo", True)
 
-        located = locate_source(repo_dir, (node or {}).get("html", ""), rule.get("id"))
-        if not located:
-            step("Locate source", False, "Could not uniquely match this violation to a source file")
-            return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
-        file_path, line_no = located
-        step("Locate source", True, f"{file_path}:{line_no}")
+        node_html = (node or {}).get("html", "").strip()
+        is_page_wide = not node_html
 
-        full_path = repo_dir / file_path
-        file_content = full_path.read_text(encoding="utf-8")
+        if is_page_wide:
+            # Nothing to locate — this violation describes something missing
+            # from the page, not a broken existing element (see PAGE_ENTRY_CANDIDATES).
+            file_path = _locate_page_entry(repo_dir)
+            if not file_path:
+                step("Locate source", False, "Could not determine which file to insert the fix into")
+                return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
+            step("Locate source", True, f"{file_path} (page-wide — no single element to target)")
 
-        patch = generate_patch(rule, node, file_content)
-        if not patch:
-            rule_id = rule.get("id")
-            if rule_id in RULES_WITH_FALLBACK:
-                detail = "Built-in fallback fix didn't match this violation's markup"
-            elif not Config.GEMINI_API_KEY:
-                detail = "No GEMINI_API_KEY configured — this rule has no built-in fallback fix without one"
-            else:
-                detail = "Gemini did not return a usable patch for this violation"
-            step("Generate fix", False, detail)
-            return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
-        step("Generate fix", True)
+            full_path = repo_dir / file_path
+            file_content = full_path.read_text(encoding="utf-8")
 
-        if not validate_patch(file_content, patch["before"], patch["after"]):
-            step("Validate patch", False, "Patch did not validate against the source file")
-            return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
-        step("Validate patch", True)
-        full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
+            new_content = generate_insertion_patch(rule, file_content)
+            if not new_content:
+                detail = ("No GEMINI_API_KEY configured — this rule needs AI to place the missing element"
+                           if not Config.GEMINI_API_KEY else
+                           "Gemini did not return a usable fix for this violation")
+                step("Generate fix", False, detail)
+                return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
+            step("Generate fix", True)
+            step("Validate patch", True, "placement verified by build + re-scan below, not a text diff")
+            full_path.write_text(new_content, encoding="utf-8")
+            line_no = 1
+        else:
+            located = locate_source(repo_dir, node_html, rule.get("id"))
+            if not located:
+                step("Locate source", False, "Could not uniquely match this violation to a source file")
+                return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
+            file_path, line_no = located
+            step("Locate source", True, f"{file_path}:{line_no}")
+
+            full_path = repo_dir / file_path
+            file_content = full_path.read_text(encoding="utf-8")
+
+            patch = generate_patch(rule, node, file_content)
+            if not patch:
+                rule_id = rule.get("id")
+                if rule_id in RULES_WITH_FALLBACK:
+                    detail = "Built-in fallback fix didn't match this violation's markup"
+                elif not Config.GEMINI_API_KEY:
+                    detail = "No GEMINI_API_KEY configured — this rule has no built-in fallback fix without one"
+                else:
+                    detail = "Gemini did not return a usable patch for this violation"
+                step("Generate fix", False, detail)
+                return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
+            step("Generate fix", True)
+
+            if not validate_patch(file_content, patch["before"], patch["after"]):
+                step("Validate patch", False, "Patch did not validate against the source file")
+                return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
+            step("Validate patch", True)
+            full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
 
         test_result = run_tests(repo_dir)
         if test_result.get("ran") and not test_result.get("passed"):
@@ -735,7 +1061,8 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
         try:
             with build_and_preview(repo_dir) as preview_url:
                 step("Build", True)
-                verified = rescan_and_verify(preview_url, rule.get("id", ""))
+                verified = (verify_page_wide_fix(preview_url, rule) if is_page_wide
+                            else rescan_and_verify(preview_url, rule.get("id", "")))
         except subprocess.CalledProcessError as e:
             step("Build", False, (e.stderr or str(e))[-500:])
             return {"status": "failed", "steps": steps, "error": "Build failed"}
@@ -752,22 +1079,23 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
         branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
         branch_url = push_branch(
             repo_dir, branch_name, link["access_token"],
-            f"ADA Auto-Fix: {rule.get('help', rule_id)}", link["repo_url"],
+            f"ADA Auto-Fix: {rule.get('help', rule_id)}", link["repo_url"], provider,
         )
         step("Push branch", True, branch_url)
 
+        pr_body = (_pr_body_insertion(rule, file_path, file_content, new_content) if is_page_wide
+                   else _pr_body(rule, node, patch, file_path, line_no))
         pr = create_pull_request(
             link["repo_url"], link["access_token"], branch_name, link["default_branch"],
-            f"ADA Auto-Fix: {rule.get('help', rule_id)}",
-            _pr_body(rule, node, patch, file_path, line_no),
+            f"ADA Auto-Fix: {rule.get('help', rule_id)}", pr_body, provider,
         )
         step("Open PR", bool(pr), (pr["url"] if pr else "Branch pushed, but opening the PR failed — open it manually"))
 
         result = {"status": "verified", "steps": steps, "branch_url": branch_url}
         if pr:
             result["pr_url"] = pr["url"]
-            if is_auto_merge_eligible(rule_id):
-                merged = merge_pull_request(link["repo_url"], link["access_token"], pr["number"])
+            if not is_page_wide and is_auto_merge_eligible(rule_id):
+                merged = merge_pull_request(link["repo_url"], link["access_token"], pr["number"], provider)
                 step("Auto-merge", merged, "merged into " + link["default_branch"] if merged else "Merge failed — merge it manually")
                 result["merged"] = merged
 

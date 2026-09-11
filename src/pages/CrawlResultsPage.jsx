@@ -111,14 +111,14 @@ function SortableHeader({ label, sortKey: key, currentSort, currentDir, onSort }
   const active = currentSort === key;
   return (
     <th
-      className="px-4 py-3 text-left text-xs font-semibold text-body dark:text-gray-400 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap"
+      className="px-4 py-3 text-left text-xs font-semibold text-body uppercase tracking-wide cursor-pointer select-none whitespace-nowrap"
       onClick={() => onSort(key)}
     >
       <span className="inline-flex items-center gap-1">
         {label}
         <ArrowUpDown
           size={13}
-          className={active ? 'text-teal' : 'text-gray-300 dark:text-gray-600'}
+          className={active ?'text-teal':'text-gray-300'}
         />
       </span>
     </th>
@@ -130,13 +130,13 @@ function ScoreMiniBar({ score }) {
     score >= 80 ? '#0F766E' : score >= 60 ? '#F59E0B' : '#E76F51';
   return (
     <div className="flex items-center gap-2 min-w-[80px]">
-      <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+      <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
         <div
           className="h-full rounded-full transition-all"
           style={{ width: `${score}%`, backgroundColor: colour }}
         />
       </div>
-      <span className="text-xs font-semibold text-ink dark:text-white w-7 text-right">
+      <span className="text-xs font-semibold text-ink w-7 text-right">
         {score}
       </span>
     </div>
@@ -150,7 +150,7 @@ function FilterPill({ label, active, onClick }) {
       className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
         active
           ? 'bg-teal text-white'
-          : 'bg-gray-100 dark:bg-white/5 text-body dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10'
+          :'bg-gray-100 text-body hover:bg-gray-200'
       }`}
     >
       {label}
@@ -162,14 +162,14 @@ function FilterPill({ label, active, onClick }) {
 function TopViolatingTable({ pages, onRowClick }) {
   if (pages.length === 0) {
     return (
-      <div className="flex items-center justify-center h-48 text-body dark:text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-48 text-body text-sm">
         No violations found across scanned pages
       </div>
     );
   }
   const max = pages[0]?.violations ?? 1;
   return (
-    <div className="divide-y divide-gray-50 dark:divide-white/[0.04]">
+    <div className="divide-y divide-gray-50">
       {pages.map((p, idx) => {
         const pct = max > 0 ? Math.round((p.violations / max) * 100) : 0;
         const scoreColor = p._score >= 80 ? '#0F766E' : p._score >= 60 ? '#F59E0B' : '#E76F51';
@@ -177,16 +177,16 @@ function TopViolatingTable({ pages, onRowClick }) {
           <button
             key={p.url}
             onClick={() => onRowClick && onRowClick(p)}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors text-left"
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
           >
-            <span className="text-[11px] font-mono text-body dark:text-gray-500 w-5 flex-shrink-0">
+            <span className="text-[11px] font-mono text-body w-5 flex-shrink-0">
               #{idx + 1}
             </span>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-ink dark:text-white truncate" title={p.url}>
+              <p className="text-xs font-medium text-ink truncate"title={p.url}>
                 {p.name || p.url}
               </p>
-              <div className="mt-1 h-1 rounded-full bg-gray-100 dark:bg-white/5 overflow-hidden">
+              <div className="mt-1 h-1 rounded-full bg-gray-100 overflow-hidden">
                 <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: '#E76F51', opacity: 0.5 }} />
               </div>
             </div>
@@ -198,7 +198,7 @@ function TopViolatingTable({ pages, onRowClick }) {
             <span className="text-sm font-bold text-coral flex-shrink-0 w-8 text-right">
               {p.violations}
             </span>
-            <ChevronRight size={14} className="text-body dark:text-gray-500 flex-shrink-0" />
+            <ChevronRight size={14} className="text-body flex-shrink-0"/>
           </button>
         );
       })}
@@ -443,11 +443,11 @@ export default function CrawlResultsPage() {
   // ---- empty state ---------------------------------------------------------
   if (!crawlId) {
     return (
-      <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 flex items-center justify-center">
+      <div className="flex-1 overflow-auto bg-ivory p-6 flex items-center justify-center">
         <div className="card p-10 max-w-md w-full text-center space-y-4">
           <Globe className="w-12 h-12 text-teal mx-auto" />
-          <h2 className="font-heading text-2xl text-ink dark:text-white">No crawl selected</h2>
-          <p className="text-body dark:text-gray-400 text-sm">
+          <h2 className="font-heading text-2xl text-ink">No crawl selected</h2>
+          <p className="text-body text-sm">
             Select a crawl from history or start a new site crawl.
           </p>
           <div className="flex gap-3 justify-center flex-wrap">
@@ -466,12 +466,12 @@ export default function CrawlResultsPage() {
   // ---- loading skeleton ----------------------------------------------------
   if (loading) {
     return (
-      <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 space-y-6">
-        <div className="h-10 w-64 bg-gray-200 dark:bg-white/10 rounded-2xl animate-pulse" />
+      <div className="flex-1 overflow-auto bg-ivory p-6 space-y-6">
+        <div className="h-10 w-64 bg-gray-200 rounded-2xl animate-pulse"/>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[0, 1, 2, 3].map((i) => <MetricCard key={i} loading />)}
         </div>
-        <div className="h-64 bg-gray-200 dark:bg-white/10 rounded-2xl animate-pulse" />
+        <div className="h-64 bg-gray-200 rounded-2xl animate-pulse"/>
       </div>
     );
   }
@@ -479,19 +479,19 @@ export default function CrawlResultsPage() {
   // ---- main render ---------------------------------------------------------
   return (
     <>
-      <div className="flex-1 overflow-auto bg-ivory dark:bg-night p-6 space-y-6">
+      <div className="flex-1 overflow-auto bg-ivory p-6 space-y-6">
 
         {/* 1. HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3 flex-wrap">
             <button
               onClick={goToCrawlHistory}
-              className="inline-flex items-center gap-1 text-sm text-body dark:text-gray-400 hover:text-teal transition-colors"
+              className="inline-flex items-center gap-1 text-sm text-body hover:text-teal transition-colors"
             >
               <ChevronLeft size={15} />
               History
             </button>
-            <h2 className="font-heading font-bold text-2xl text-ink dark:text-white">
+            <h2 className="font-heading font-bold text-2xl text-ink">
               Crawl Results
             </h2>
             {job?.status && (isActive || isComplete
@@ -502,7 +502,7 @@ export default function CrawlResultsPage() {
 
           <div className="flex items-center gap-3 flex-wrap">
             {jobUrl && (
-              <code className="text-xs font-mono bg-white dark:bg-charcoal border border-gray-200 dark:border-white/10 px-3 py-1.5 rounded-2xl text-body dark:text-gray-400 max-w-xs truncate">
+              <code className="text-xs font-mono bg-white border border-gray-200 px-3 py-1.5 rounded-2xl text-body max-w-xs truncate">
                 {jobUrl}
               </code>
             )}
@@ -511,7 +511,7 @@ export default function CrawlResultsPage() {
                 onClick={handleStop}
                 disabled={stopLoading}
                 title="Stop this crawl — pages already scanned will be saved"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-coral/30 bg-coral/5 text-coral font-semibold font-heading text-sm hover:bg-coral/10 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed dark:border-coral/20 dark:bg-coral/5 dark:hover:bg-coral/10"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-coral/30 bg-coral/5 text-coral font-semibold font-heading text-sm hover:bg-coral/10 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <OctagonX size={14} />
                 {stopLoading ? 'Stopping…' : 'Stop Crawl'}
@@ -568,10 +568,10 @@ export default function CrawlResultsPage() {
         {isActive && (
           <div className="card p-6 space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-heading font-bold text-ink dark:text-white">Crawl in Progress</h3>
-              <span className="text-sm text-body dark:text-gray-400">{progressPct}%</span>
+              <h3 className="font-heading font-bold text-ink">Crawl in Progress</h3>
+              <span className="text-sm text-body">{progressPct}%</span>
             </div>
-            <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+            <div className="w-full h-2 rounded-full bg-gray-200 overflow-hidden">
               <div
                 className="h-full rounded-full bg-teal transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
@@ -579,15 +579,15 @@ export default function CrawlResultsPage() {
             </div>
             <div className="flex gap-6 flex-wrap text-sm">
               <div>
-                <span className="text-body dark:text-gray-400">Discovered </span>
-                <span className="font-semibold text-ink dark:text-white">{job?.total_discovered ?? 0}</span>
+                <span className="text-body">Discovered </span>
+                <span className="font-semibold text-ink">{job?.total_discovered ?? 0}</span>
               </div>
               <div>
-                <span className="text-body dark:text-gray-400">Scanned </span>
+                <span className="text-body">Scanned </span>
                 <span className="font-semibold text-teal">{job?.total_scanned ?? 0}</span>
               </div>
               <div>
-                <span className="text-body dark:text-gray-400">Failed </span>
+                <span className="text-body">Failed </span>
                 <span className="font-semibold text-coral">{job?.total_failed ?? 0}</span>
               </div>
             </div>
@@ -601,7 +601,7 @@ export default function CrawlResultsPage() {
             subtitle="Pages with 0 violations vs pages with at least one violation"
           >
             {statusPieData.length === 0 ? (
-              <div className="flex items-center justify-center h-48 text-body dark:text-gray-400 text-sm">
+              <div className="flex items-center justify-center h-48 text-body text-sm">
                 No pages scanned yet
               </div>
             ) : (
@@ -657,7 +657,7 @@ export default function CrawlResultsPage() {
         {/* 7. CONTROLS */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="relative flex-1 max-w-sm">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-body dark:text-gray-400 pointer-events-none" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-body pointer-events-none"/>
             <input
               type="text"
               className="input-base pl-9 py-2 text-sm w-full"
@@ -689,7 +689,7 @@ export default function CrawlResultsPage() {
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-b border-gray-100 dark:border-white/5">
+              <thead className="border-b border-gray-100">
                 <tr>
                   <SortableHeader label="URL"        sortKey="url"        currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Score"      sortKey="score"      currentSort={sortKey} currentDir={sortDir} onSort={handleSort} />
@@ -698,10 +698,10 @@ export default function CrawlResultsPage() {
                   <th className="px-4 py-3 w-10" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50 dark:divide-white/5">
+              <tbody className="divide-y divide-gray-50">
                 {filteredPages.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-body dark:text-gray-400">
+                    <td colSpan={5} className="px-4 py-10 text-center text-body">
                       {pages.length === 0 ? 'No pages scanned yet.' : 'No pages match your filters.'}
                     </td>
                   </tr>
@@ -709,11 +709,11 @@ export default function CrawlResultsPage() {
                   filteredPages.map((page, idx) => (
                     <tr
                       key={page.url ?? idx}
-                      className="hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                      className="hover:bg-gray-50 cursor-pointer transition-colors"
                       onClick={() => handleRowClick(page)}
                     >
                       <td className="px-4 py-3 max-w-xs">
-                        <span className="block truncate font-mono text-xs text-ink dark:text-white" title={page.url}>
+                        <span className="block truncate font-mono text-xs text-ink"title={page.url}>
                           {page.url}
                         </span>
                       </td>
@@ -729,7 +729,7 @@ export default function CrawlResultsPage() {
                         <StatusBadge status={page._status} />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <ChevronRight size={16} className="text-body dark:text-gray-400 inline" />
+                        <ChevronRight size={16} className="text-body inline"/>
                       </td>
                     </tr>
                   ))
@@ -738,7 +738,7 @@ export default function CrawlResultsPage() {
             </table>
           </div>
           {filteredPages.length > 0 && (
-            <div className="px-4 py-3 border-t border-gray-100 dark:border-white/5 text-xs text-body dark:text-gray-400">
+            <div className="px-4 py-3 border-t border-gray-100 text-xs text-body">
               Showing {filteredPages.length} of {totalPages} pages
             </div>
           )}
