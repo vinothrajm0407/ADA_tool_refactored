@@ -1,16 +1,34 @@
 import { apiFetch } from '../../utils/api';
-import React, { useState, useEffect, useMemo } from 'react'
-import { Search, ChevronLeft, ChevronRight, Keyboard, Eye, RotateCcw, AlignLeft, Globe, FileText, ExternalLink, ArrowRight, CheckCircle2 } from 'lucide-react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { Search, ChevronLeft, ChevronRight, Eye, RotateCcw, FileText, Accessibility, ExternalLink, ArrowRight, CheckCircle2, CalendarRange, ChevronDown } from 'lucide-react'
 import { formatDateTime } from '../../utils/format'
-import GlowInput from '../ui/GlowInput'
 import PageHeader from '../ui/PageHeader'
 import DataTable from '../ui/DataTable'
 import { StatusBadge } from '../ui/StatusBadge'
 import { useApp } from '../../context/AppContext'
 import { CrawlHistoryContent } from './CrawlHistoryContent'
+import { ReportActions } from './ReportActions'
 
-const DEFAULT_PAGE_SIZE = 10
-const ROWS_PER_PAGE_OPTIONS = [10, 25, 50, 100]
+const DEFAULT_PAGE_SIZE = 5
+const ROWS_PER_PAGE_OPTIONS = [5, 10, 25, 50, 100]
+
+// One shared size/spacing/border so every filter control in the toolbar
+// (search, status, date range, sort) reads as the same control, not a mix
+// of differently-sized pieces.
+const FILTER_CTRL_CLS = 'h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 transition-colors'
+
+// Shows just the host ("web.whatsapp.com") instead of the full URL with
+// scheme and path — matches the compact "app name" the design calls for,
+// full URL is still available via the row's "Open site" action and the
+// native title tooltip.
+function siteLabel(url) {
+  if (!url) return '—'
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
 
 // ─── Shared badge components ─────────────────────────────────────────────────
 
@@ -29,79 +47,37 @@ function PassRateBadge({ value }) {
   )
 }
 
-function ViolationsBadge({ value }) {
-  if (value == null) return '—'
-  const cls =
-    value === 0
-      ?'bg-sage/15 text-sage-700'
-      : value <= 5
-        ?'bg-amber/15 text-amber-700'
-        :'bg-coral/15 text-coral-700'
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>
-      {value}
-    </span>
-  )
-}
-
 function SourceBadge({ usedFallback }) {
   return usedFallback ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber/15 text-amber-700">
-      Fallback
-    </span>
-  ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal/10 text-teal-700">
-      Live run
-    </span>
-  )
+    <span className="text-[11px] text-amber-700">Fallback</span>
+  ) : null
 }
 
-// Every saved history record is, by definition, a finished scan — there's no
-// "in progress" state in this data (in-progress scans live only in the New
-// Scan tab session, not in /api/history), so this is always "Completed"
-// rather than a fabricated multi-state field.
-function CompletedStatusBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sage/15 text-sage-700">
-      <CheckCircle2 size={12} />
-      Completed
-    </span>
-  )
+// Every saved history record is a finished result — there's no "in progress"
+// state in this data (in-progress scans live only in the New Scan tab
+// session), so ADA scans are always "Completed"; assistive tests are always
+// "Passed" or "Failed". Three real states, not a fabricated status list.
+function StatusPill({ status }) {
+  if (status === 'completed') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sage/15 text-sage-700">
+        <CheckCircle2 size={12} /> Completed
+      </span>
+    )
+  }
+  return <StatusBadge status={status === 'passed' ? 'Passed' : 'Failed'} />
 }
 
-// Reuses the existing includeBestPractices flag (previously shown as plain
-// "Profile" text) as the scan-type indicator — no new data invented.
-function ScanProfileBadge({ includeBestPractices }) {
-  const Icon = includeBestPractices ? Globe : FileText
+// "Scan type" as shown in Scan History: a page-level ADA audit, or an
+// assistive test (keyboard / contrast / page structure) — the two kinds of
+// history record this page actually has. Site-wide crawls have their own
+// tab below since a crawl groups many pages under one root URL.
+function ScanTypeCell({ kind }) {
+  const Icon = kind === 'assistive' ? Accessibility : FileText
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-body whitespace-nowrap">
       <Icon size={13} className="flex-shrink-0 text-gray-400" />
-      {includeBestPractices ? 'WCAG 2.1 AA + Best Practices' : 'WCAG 2.1 AA'}
-    </span>
-  )
-}
-
-function ScanTypeBadge({ scanType }) {
-  if (scanType === 'keyboard') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-teal/15 text-teal-700">
-        <Keyboard size={11} />
-        Keyboard
-      </span>
-    )
-  }
-  if (scanType === 'page-structure') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-sage/15 text-sage-700">
-        <AlignLeft size={11} />
-        Page Structure
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-terracotta/15 text-terracotta-700">
-      <Eye size={11} />
-      Contrast
+      {kind === 'assistive' ? 'Assistive test' : 'Page scan'}
     </span>
   )
 }
@@ -169,52 +145,217 @@ export function NoResultsInRange({ message, hint = 'Try adjusting your search or
   )
 }
 
-// ─── ADA Scans tab ────────────────────────────────────────────────────────────
+// ─── Date range filter ────────────────────────────────────────────────────────
+// A single styled control instead of two raw <input type="date"> fields sitting
+// in the toolbar — native date inputs can't be restyled consistently across
+// browsers, so the summary lives on our own button and the pickers only show
+// inside a popover.
 
-const ADA_SORT_OPTIONS = [
+function formatRangeLabel(from, to) {
+  if (!from && !to) return 'All time'
+  const fmt = (iso, withYear) =>
+    new Date(iso).toLocaleDateString(undefined, withYear
+      ? { month: 'short', day: 'numeric', year: 'numeric' }
+      : { month: 'short', day: 'numeric' })
+  if (from && to) return `${fmt(from, false)} – ${fmt(to, true)}`
+  if (from) return `From ${fmt(from, true)}`
+  return `Until ${fmt(to, true)}`
+}
+
+function DateRangeFilter({ dateFrom, dateTo, onChangeFrom, onChangeTo, idPrefix }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef(null)
+  const triggerRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleClickOutside(e) {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
+    }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        className={`flex items-center gap-2 hover:border-gray-400 ${FILTER_CTRL_CLS}`}
+      >
+        <CalendarRange size={15} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+        <span className="whitespace-nowrap">{formatRangeLabel(dateFrom, dateTo)}</span>
+        <ChevronDown size={14} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="absolute z-20 top-full left-0 mt-1.5 w-64 bg-white rounded-xl border border-gray-100 shadow-soft p-4">
+          <div className="space-y-3">
+            <div>
+              <label htmlFor={`${idPrefix}-from`} className="block text-xs font-medium text-body mb-1">From</label>
+              <input
+                id={`${idPrefix}-from`}
+                type="date"
+                value={dateFrom}
+                onChange={e => onChangeFrom(e.target.value)}
+                className="input-base"
+              />
+            </div>
+            <div>
+              <label htmlFor={`${idPrefix}-to`} className="block text-xs font-medium text-body mb-1">To</label>
+              <input
+                id={`${idPrefix}-to`}
+                type="date"
+                value={dateTo}
+                onChange={e => onChangeTo(e.target.value)}
+                className="input-base"
+              />
+            </div>
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              onClick={() => { onChangeFrom(''); onChangeTo('') }}
+              className="mt-3 text-xs font-semibold text-teal hover:underline"
+            >
+              Clear dates
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── All Scans tab (ADA page audits + assistive tests, merged) ───────────────
+// Figma's Scan History has one flat table with a "Scan type" column (Full
+// scan / Page scan / Assistive test) instead of separate tabs per source.
+// We don't have "Full scan" (site-wide crawl) records in this shape — a crawl
+// groups many pages under one root URL with its own compare/analytics UI, so
+// it keeps its own tab below rather than being flattened into this table.
+
+const SORT_OPTIONS = [
   { value: 'newest',          label: 'Newest First' },
   { value: 'oldest',          label: 'Oldest First' },
-  { value: 'violations-desc', label: 'Highest Violations' },
-  { value: 'violations-asc',  label: 'Lowest Violations' },
-  { value: 'pass-rate-desc',  label: 'Highest Pass Rate' },
-  { value: 'pass-rate-asc',   label: 'Lowest Pass Rate' },
+  { value: 'violations-desc', label: 'Highest Issues' },
+  { value: 'violations-asc',  label: 'Lowest Issues' },
+  { value: 'pass-rate-desc',  label: 'Highest Score' },
+  { value: 'pass-rate-asc',   label: 'Lowest Score' },
 ]
 
-function AdaScansTab({ onScanClick }) {
-  const { navigate } = useApp()
-  const [items, setItems] = useState([])
+const STATUS_FILTER_OPTIONS = [
+  { value: '',          label: 'All statuses' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'passed',    label: 'Passed' },
+  { value: 'failed',    label: 'Failed' },
+]
+
+const SCAN_TYPE_FILTER_OPTIONS = [
+  { value: '',          label: 'All types' },
+  { value: 'ada',        label: 'Page scan' },
+  { value: 'assistive',  label: 'Assistive test' },
+]
+
+const SCAN_TYPE_TO_MODULE = {
+  keyboard: 'keyboard',
+  contrast: 'color-contrast',
+  'page-structure': 'page-structure',
+  forms: 'forms',
+}
+
+function normalizeAdaItem(item) {
+  return {
+    key: `ada-${item.id}`,
+    kind: 'ada',
+    url: item.url,
+    idLabel: item.id,
+    score: item.passRate,
+    issues: item.violations,
+    status: 'completed',
+    timestamp: item.timestamp,
+    usedFallback: item.usedFallback,
+    raw: item,
+  }
+}
+
+function normalizeAssistiveItem(item) {
+  return {
+    key: `assistive-${item.id}`,
+    kind: 'assistive',
+    url: item.url,
+    idLabel: item.id,
+    score: null,
+    issues: null,
+    status: item.passed ? 'passed' : 'failed',
+    timestamp: item.timestamp,
+    usedFallback: false,
+    raw: item,
+  }
+}
+
+function AllScansTab({ onScanClick }) {
+  const { navigate, setPendingAssistiveUrl, setPendingAssistiveModule } = useApp()
+  const [adaItems, setAdaItems] = useState([])
+  const [assistiveItems, setAssistiveItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [historyMessage, setHistoryMessage] = useState('')
-  const [historyAvailable, setHistoryAvailable] = useState(true)
+  const [available, setAvailable] = useState(true)
+  const [message, setMessage] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [scanTypeFilter, setScanTypeFilter] = useState('')
   const [sortKey, setSortKey] = useState('newest')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   const handleScanIdClick = (item) => {
-    if (!onScanClick || !item?.id) return
-    const numId = item.id.replace(/^SCAN-/, '')
+    if (!onScanClick || !item.idLabel) return
+    const numId = item.idLabel.replace(/^SCAN-/, '')
     const id = parseInt(numId, 10)
     if (!Number.isNaN(id)) onScanClick(id)
+  }
+
+  function handleRetest(item) {
+    const moduleId = SCAN_TYPE_TO_MODULE[item.raw.scan_type] ?? 'keyboard'
+    setPendingAssistiveUrl(item.url)
+    setPendingAssistiveModule(moduleId)
+    navigate('assistive-test')
   }
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
-    apiFetch('/api/history')
-      .then(res => res.json())
-      .then(data => {
+    Promise.all([
+      apiFetch('/api/history').then(res => res.json()),
+      apiFetch('/api/assistive-history').then(res => res.json()),
+    ])
+      .then(([historyData, assistiveData]) => {
         if (cancelled) return
-        if (data.ok && Array.isArray(data.items)) {
-          setItems(data.items)
-          setHistoryAvailable(data.available !== false)
-          setHistoryMessage(data.message || '')
+        if (historyData.ok && Array.isArray(historyData.items)) {
+          setAdaItems(historyData.items)
+          setAvailable(historyData.available !== false)
+          setMessage(historyData.message || '')
         } else {
-          setError(data.error || 'Failed to load history')
+          setError(historyData.error || 'Failed to load history')
+        }
+        if (assistiveData.ok && Array.isArray(assistiveData.items)) {
+          setAssistiveItems(assistiveData.items)
         }
       })
       .catch(err => { if (!cancelled) setError(err.message || 'Network error') })
@@ -222,17 +363,27 @@ function AdaScansTab({ onScanClick }) {
     return () => { cancelled = true }
   }, [])
 
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, sortKey, dateFrom, dateTo, pageSize])
+  useEffect(() => { setCurrentPage(1) }, [searchQuery, sortKey, dateFrom, dateTo, statusFilter, scanTypeFilter, pageSize])
+
+  const allItems = useMemo(
+    () => [...adaItems.map(normalizeAdaItem), ...assistiveItems.map(normalizeAssistiveItem)],
+    [adaItems, assistiveItems]
+  )
 
   const filteredAndSorted = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     let filtered = q
-      ? items.filter(item =>
+      ? allItems.filter(item =>
           (item.url || '').toLowerCase().includes(q) ||
-          (item.id || '').toLowerCase().includes(q) ||
-          (item.usedFallback ? 'fallback' : 'live run').includes(q)
+          (item.idLabel || '').toLowerCase().includes(q)
         )
-      : items
+      : allItems
+    if (statusFilter) {
+      filtered = filtered.filter(item => item.status === statusFilter)
+    }
+    if (scanTypeFilter) {
+      filtered = filtered.filter(item => item.kind === scanTypeFilter)
+    }
     if (dateFrom) {
       const from = new Date(dateFrom)
       filtered = filtered.filter(item => item.timestamp && new Date(item.timestamp) >= from)
@@ -245,30 +396,29 @@ function AdaScansTab({ onScanClick }) {
     return [...filtered].sort((a, b) => {
       switch (sortKey) {
         case 'oldest':          return new Date(a.timestamp) - new Date(b.timestamp)
-        case 'violations-desc': return (b.violations ?? 0) - (a.violations ?? 0)
-        case 'violations-asc':  return (a.violations ?? 0) - (b.violations ?? 0)
-        case 'pass-rate-desc':  return (b.passRate ?? 0) - (a.passRate ?? 0)
-        case 'pass-rate-asc':   return (a.passRate ?? 0) - (b.passRate ?? 0)
+        case 'violations-desc': return (b.issues ?? 0) - (a.issues ?? 0)
+        case 'violations-asc':  return (a.issues ?? 0) - (b.issues ?? 0)
+        case 'pass-rate-desc':  return (b.score ?? 0) - (a.score ?? 0)
+        case 'pass-rate-asc':   return (a.score ?? 0) - (b.score ?? 0)
         default:                return new Date(b.timestamp) - new Date(a.timestamp)
       }
     })
-  }, [items, searchQuery, sortKey, dateFrom, dateTo])
+  }, [allItems, searchQuery, sortKey, dateFrom, dateTo, statusFilter, scanTypeFilter])
 
   const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize))
   const safePage = Math.min(currentPage, totalPages)
   const paginatedItems = filteredAndSorted.slice((safePage - 1) * pageSize, safePage * pageSize)
-  const showControls = !loading && !error && items.length > 0 && historyAvailable
-  const isFiltering = searchQuery.trim() !== '' || dateFrom !== '' || dateTo !== ''
+  const showControls = !loading && !error && allItems.length > 0 && available
 
   return (
     <>
-      {!loading && !error && historyMessage && (
-        <p className={historyAvailable
+      {!loading && !error && message && (
+        <p className={available
           ?'mt-4 text-[0.95rem] text-body'
           : 'alert-info mt-4'}
-          role={historyAvailable ? undefined : 'status'}
+          role={available ? undefined : 'status'}
         >
-          {historyMessage}
+          {message}
         </p>
       )}
       {loading && <p className="mt-4 text-[0.95rem] text-body">Loading scan history…</p>}
@@ -277,7 +427,7 @@ function AdaScansTab({ onScanClick }) {
           {error}
         </p>
       )}
-      {!loading && !error && items.length === 0 && historyAvailable && (
+      {!loading && !error && allItems.length === 0 && available && (
         <p className="mt-4 text-[0.95rem] text-body">
           No scans yet. Run a URL from the New Scan page and results will appear here.
         </p>
@@ -286,43 +436,51 @@ function AdaScansTab({ onScanClick }) {
       {showControls && (
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mt-4 mb-2">
           <div className="flex flex-col sm:flex-row gap-3 flex-1">
-            <div className="flex-1 min-w-[200px]">
-              <GlowInput
-                icon={Search}
+            <div className={`flex-1 min-w-[200px] flex items-center gap-2 ${FILTER_CTRL_CLS}`}>
+              <Search size={15} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+              <label className="sr-only" htmlFor="history-search">Search scan history by website or ID</label>
+              <input
+                id="history-search"
                 type="search"
                 placeholder="Search websites…"
-                aria-label="Search scan history by website, ID, or source"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
+                className="w-full border-0 p-0 bg-transparent text-sm text-ink placeholder-gray-400 focus:outline-none"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <label className="sr-only" htmlFor="ada-date-from">From date</label>
-              <input
-                id="ada-date-from"
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                className="select-base w-auto pr-3"
-              />
-              <span className="text-body text-sm"aria-hidden="true">–</span>
-              <label className="sr-only" htmlFor="ada-date-to">To date</label>
-              <input
-                id="ada-date-to"
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                className="select-base w-auto pr-3"
-              />
-            </div>
-            <label className="sr-only" htmlFor="ada-sort">Sort scan history</label>
+            <label className="sr-only" htmlFor="history-status-filter">Filter by status</label>
             <select
-              id="ada-sort"
+              id="history-status-filter"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className={`${FILTER_CTRL_CLS} sm:w-36 cursor-pointer`}
+            >
+              {STATUS_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="history-scan-type-filter">Filter by scan type</label>
+            <select
+              id="history-scan-type-filter"
+              value={scanTypeFilter}
+              onChange={e => setScanTypeFilter(e.target.value)}
+              className={`${FILTER_CTRL_CLS} sm:w-36 cursor-pointer`}
+            >
+              {SCAN_TYPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <DateRangeFilter
+              idPrefix="history-date"
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              onChangeFrom={setDateFrom}
+              onChangeTo={setDateTo}
+            />
+            <label className="sr-only" htmlFor="history-sort">Sort scan history</label>
+            <select
+              id="history-sort"
               value={sortKey}
               onChange={e => setSortKey(e.target.value)}
-              className="select-base sm:w-52"
+              className={`${FILTER_CTRL_CLS} sm:w-44 cursor-pointer`}
             >
-              {ADA_SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <button
@@ -337,49 +495,58 @@ function AdaScansTab({ onScanClick }) {
       )}
 
       {showControls && filteredAndSorted.length === 0 && (
-        searchQuery.trim() ? (
-          <NoResultsInRange message={`No scans match "${searchQuery}"${dateFrom || dateTo ? ' in this date range' : ''}.`} />
-        ) : (
-          <NoResultsInRange
-            message="No scans in this date range."
-            hint="Try adjusting the date range to see more results."
-          />
-        )
+        <NoResultsInRange
+          message={searchQuery.trim() ? `No scans match "${searchQuery}".` : 'No scans match your filters.'}
+          hint="Try adjusting your search, status, scan type, or date range to see more results."
+        />
       )}
 
       {showControls && filteredAndSorted.length > 0 && (
         <>
           <div className="mt-3">
-            <DataTable columns={['Website', 'Score', 'Issues', 'Scan type', 'Status', 'Date', 'Actions']}>
-              {paginatedItems.map(item => (
-                    <tr key={item.id}>
-                      <td className="max-w-[220px]">
-                        <span className="font-medium text-ink break-all">{item.url ||'—'}</span>
-                        <span className="block font-mono text-[11px] text-body">{item.id}</span>
+            <DataTable columns={['Website', 'Score', 'Issues', 'Scan type', 'Status', 'Date', 'Actions']} cellBorders>
+              {paginatedItems.map(item => {
+                const reportId = item.kind === 'ada' ? (item.idLabel || '').replace(/^SCAN-/, '') : item.raw.id
+                return (
+                    <tr key={item.key}>
+                      <td className="max-w-[240px] border-r border-gray-100">
+                        <span className="block font-medium text-ink truncate" title={item.url}>{siteLabel(item.url)}</span>
+                        <span className="block font-mono text-[11px] text-body">{item.idLabel}</span>
                       </td>
-                      <td className="whitespace-nowrap"><PassRateBadge value={item.passRate} /></td>
-                      <td className="whitespace-nowrap"><ViolationsBadge value={item.violations} /></td>
-                      <td className="whitespace-nowrap"><ScanProfileBadge includeBestPractices={item.includeBestPractices} /></td>
-                      <td className="whitespace-nowrap">
-                        <div className="flex flex-col gap-1 items-start">
-                          <CompletedStatusBadge />
+                      <td className="whitespace-nowrap border-r border-gray-100"><PassRateBadge value={item.score} /></td>
+                      <td className="whitespace-nowrap text-ink border-r border-gray-100">{item.issues ?? '—'}</td>
+                      <td className="whitespace-nowrap border-r border-gray-100"><ScanTypeCell kind={item.kind} /></td>
+                      <td className="whitespace-nowrap border-r border-gray-100">
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <StatusPill status={item.status} />
                           <SourceBadge usedFallback={item.usedFallback} />
                         </div>
                       </td>
-                      <td className="whitespace-nowrap text-body">
+                      <td className="whitespace-nowrap text-body border-r border-gray-100">
                         {formatDateTime(item.timestamp)}
                       </td>
                       <td className="whitespace-nowrap">
                         <div className="flex items-center gap-1">
-                          {onScanClick && (
+                          {item.kind === 'ada' && onScanClick && (
                             <button
                               type="button"
                               onClick={() => handleScanIdClick(item)}
-                              aria-label={`View scan details for ${item.url || item.id}`}
+                              aria-label={`View scan details for ${item.url || item.idLabel}`}
                               title="View details"
                               className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                             >
                               <Eye size={15} />
+                            </button>
+                          )}
+                          {item.kind === 'assistive' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRetest(item)}
+                              aria-label={`Re-run assistive test for ${item.url || item.idLabel}`}
+                              title="Re-test"
+                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                            >
+                              <RotateCcw size={14} />
                             </button>
                           )}
                           {item.url && (
@@ -394,10 +561,14 @@ function AdaScansTab({ onScanClick }) {
                               <ExternalLink size={14} />
                             </a>
                           )}
+                          {reportId && (
+                            <ReportActions kind={item.kind === 'ada' ? 'scan' : 'assistive'} id={reportId} />
+                          )}
                         </div>
                       </td>
                     </tr>
-              ))}
+                )
+              })}
             </DataTable>
           </div>
           <Paginator
@@ -407,212 +578,14 @@ function AdaScansTab({ onScanClick }) {
             pageSize={pageSize}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
-            label="ADA scan history"
+            label="scan history"
           />
-        </>
-      )}
-    </>
-  )
-}
-
-// ─── Assistive Tests tab ──────────────────────────────────────────────────────
-
-const ASSISTIVE_SORT_OPTIONS = [
-  { value: 'newest',  label: 'Newest First' },
-  { value: 'oldest',  label: 'Oldest First' },
-  { value: 'passed',  label: 'Passed First' },
-  { value: 'failed',  label: 'Failed First' },
-]
-
-const TYPE_FILTER_OPTIONS = [
-  { value: '',               label: 'All Types' },
-  { value: 'keyboard',       label: 'Keyboard' },
-  { value: 'contrast',       label: 'Color Contrast' },
-  { value: 'page-structure', label: 'Page Structure' },
-]
-
-function AssistiveTestsTab() {
-  const { navigate, setPendingAssistiveUrl, setPendingAssistiveModule } = useApp()
-  const [items, setItems] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [available, setAvailable] = useState(true)
-  const [message, setMessage] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [sortKey, setSortKey] = useState('newest')
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-
-  const SCAN_TYPE_TO_MODULE = {
-    keyboard: 'keyboard',
-    contrast: 'color-contrast',
-    'page-structure': 'page-structure',
-  }
-
-  function handleRetest(item) {
-    const moduleId = SCAN_TYPE_TO_MODULE[item.scan_type] ?? 'keyboard'
-    setPendingAssistiveUrl(item.url)
-    setPendingAssistiveModule(moduleId)
-    navigate('assistive-test')
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    apiFetch('/api/assistive-history')
-      .then(res => res.json())
-      .then(data => {
-        if (cancelled) return
-        if (data.ok && Array.isArray(data.items)) {
-          setItems(data.items)
-          setAvailable(data.available !== false)
-          setMessage(data.message || '')
-        } else {
-          setError(data.error || 'Failed to load assistive scan history')
-        }
-      })
-      .catch(err => { if (!cancelled) setError(err.message || 'Network error') })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [])
-
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, typeFilter, sortKey, pageSize])
-
-  const filteredAndSorted = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase()
-    let filtered = typeFilter ? items.filter(i => i.scan_type === typeFilter) : items
-    if (q) {
-      filtered = filtered.filter(i =>
-        (i.url || '').toLowerCase().includes(q) ||
-        (i.scan_type || '').toLowerCase().includes(q)
-      )
-    }
-    return [...filtered].sort((a, b) => {
-      switch (sortKey) {
-        case 'oldest': return new Date(a.timestamp) - new Date(b.timestamp)
-        case 'passed': return (b.passed ? 1 : 0) - (a.passed ? 1 : 0)
-        case 'failed': return (a.passed ? 1 : 0) - (b.passed ? 1 : 0)
-        default:       return new Date(b.timestamp) - new Date(a.timestamp)
-      }
-    })
-  }, [items, searchQuery, typeFilter, sortKey])
-
-  const totalPages = Math.max(1, Math.ceil(filteredAndSorted.length / pageSize))
-  const safePage = Math.min(currentPage, totalPages)
-  const paginatedItems = filteredAndSorted.slice((safePage - 1) * pageSize, safePage * pageSize)
-  const showControls = !loading && !error && items.length > 0 && available
-
-  return (
-    <>
-      {!loading && !error && message && (
-        <p className={available
-          ?'mt-4 text-[0.95rem] text-body'
-          : 'alert-info mt-4'}
-          role={available ? undefined : 'status'}
-        >
-          {message}
-        </p>
-      )}
-      {loading && <p className="mt-4 text-[0.95rem] text-body">Loading assistive test history…</p>}
-      {error && (
-        <p className="alert-danger mt-4" role="alert">
-          {error}
-        </p>
-      )}
-      {!loading && !error && items.length === 0 && available && (
-        <p className="mt-4 text-[0.95rem] text-body">
-          No assistive tests yet. Run a keyboard or color contrast test from the Assistive Testing page.
-        </p>
-      )}
-
-      {showControls && (
-        <div className="flex flex-col sm:flex-row gap-3 mt-4 mb-2">
-          <div className="flex-1">
-            <GlowInput
-              icon={Search}
-              type="search"
-              placeholder="Search by URL or type…"
-              aria-label="Search assistive test history"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+          {(dateFrom || dateTo) && safePage >= totalPages && (
+            <NoResultsInRange
+              message="No older scans in this date range."
+              hint="Try adjusting the date range to see more results."
             />
-          </div>
-          <label className="sr-only" htmlFor="assistive-type-filter">Filter by test type</label>
-          <select
-            id="assistive-type-filter"
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            className="select-base sm:w-44"
-          >
-            {TYPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <label className="sr-only" htmlFor="assistive-sort">Sort assistive test history</label>
-          <select
-            id="assistive-sort"
-            value={sortKey}
-            onChange={e => setSortKey(e.target.value)}
-            className="select-base sm:w-44"
-          >
-            {ASSISTIVE_SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-      )}
-
-      {showControls && filteredAndSorted.length === 0 && (
-        <NoResultsInRange message="No results match your filters." hint="Try adjusting your search or filters to see more results." />
-      )}
-
-      {showControls && filteredAndSorted.length > 0 && (
-        <>
-          <div className="mt-3">
-            <DataTable columns={['ID', 'URL', 'Type', 'Timestamp', 'Result', 'Actions']}>
-              {paginatedItems.map(item => (
-                    <tr key={item.id}>
-                      <td className="whitespace-nowrap font-mono text-xs text-body">
-                        {item.id}
-                      </td>
-                      <td className="max-w-[260px]">
-                        {item.url ? (
-                          <a href={item.url} target="_blank" rel="noopener noreferrer"
-                            className="text-teal hover:underline underline-offset-2 break-all">
-                            {item.url}
-                          </a>
-                        ) : '—'}
-                      </td>
-                      <td className="whitespace-nowrap">
-                        <ScanTypeBadge scanType={item.scan_type} />
-                      </td>
-                      <td className="whitespace-nowrap text-body">
-                        {formatDateTime(item.timestamp)}
-                      </td>
-                      <td className="whitespace-nowrap">
-                        <StatusBadge status={item.passed ? 'Passed' : 'Failed'} />
-                      </td>
-                      <td className="whitespace-nowrap">
-                        <button
-                          onClick={() => handleRetest(item)}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-teal hover:text-teal-700 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 rounded px-1 py-0.5"
-                          aria-label={`Re-run ${item.scan_type || 'assistive'} test for ${item.url || item.id}`}
-                        >
-                          <RotateCcw size={12} />
-                          Re-test
-                        </button>
-                      </td>
-                    </tr>
-              ))}
-            </DataTable>
-          </div>
-          <Paginator
-            currentPage={safePage}
-            totalPages={totalPages}
-            totalItems={filteredAndSorted.length}
-            pageSize={pageSize}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={setPageSize}
-            label="assistive test history"
-          />
+          )}
         </>
       )}
     </>
@@ -622,14 +595,13 @@ function AssistiveTestsTab() {
 // ─── Root component ───────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'ada',       label: 'ADA Scans' },
-  { id: 'assistive', label: 'Assistive Tests' },
-  { id: 'crawls',    label: 'Crawls' },
+  { id: 'all',    label: 'All Scans' },
+  { id: 'crawls', label: 'Crawls' },
 ]
 
 export default function ScanHistoryView({ onScanClick }) {
   const { pendingScanHistoryTab, setPendingScanHistoryTab } = useApp()
-  const [activeTab, setActiveTab] = useState('ada')
+  const [activeTab, setActiveTab] = useState('all')
 
   useEffect(() => {
     if (pendingScanHistoryTab) {
@@ -663,8 +635,7 @@ export default function ScanHistoryView({ onScanClick }) {
         </div>
 
         <div role="tabpanel" id={`scan-history-panel-${activeTab}`} aria-labelledby={`scan-history-tab-${activeTab}`}>
-          {activeTab === 'ada' && <AdaScansTab onScanClick={onScanClick} />}
-          {activeTab === 'assistive' && <AssistiveTestsTab />}
+          {activeTab === 'all' && <AllScansTab onScanClick={onScanClick} />}
           {activeTab === 'crawls' && <CrawlHistoryContent />}
         </div>
 

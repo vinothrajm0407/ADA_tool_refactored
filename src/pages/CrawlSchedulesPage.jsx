@@ -158,7 +158,7 @@ function RunHistoryRow({ scheduleId }) {
 
   return (
     <tr className="bg-gray-50">
-      <td colSpan={9} className="px-4 py-3">
+      <td colSpan={8} className="px-4 py-3">
         {runs === null && !error && (
           <p className="text-xs text-body">Loading run history…</p>
         )}
@@ -327,14 +327,19 @@ export default function CrawlSchedulesPage() {
 
   async function handleToggle(item) {
     setTogglingId(item.id);
+    setActionError('');
     try {
-      await apiFetch(`/api/crawl-schedules/${item.id}`, {
+      const res = await apiFetch(`/api/crawl-schedules/${item.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !item.enabled }),
       });
-      loadSchedules();
-    } catch {}
+      const data = await res.json();
+      if (data.ok) loadSchedules();
+      else setActionError(data.error || 'Failed to update schedule');
+    } catch (e) {
+      setActionError(e.message || 'Network error');
+    }
     setTogglingId(null);
   }
 
@@ -414,24 +419,22 @@ export default function CrawlSchedulesPage() {
 
         {/* KPIs */}
         {!loading && available && items.length > 0 && (
-          <div className="card p-5">
-            <div className="flex flex-col divide-y divide-gray-100 sm:flex-row sm:divide-y-0 sm:divide-x">
-              {[
-                { title: 'Active schedules', value: activeCount, icon: CalendarClock },
-                { title: 'Pages monitored', value: runningCount, icon: Radio },
-                { title: 'Issues found this week', value: attentionCount, icon: AlertTriangle },
-              ].map(({ title, value, icon: Icon }) => (
-                <div key={title} className="flex flex-1 items-center gap-3 py-3 first:pt-0 last:pb-0 sm:px-6 sm:py-0 sm:first:pl-0 sm:last:pr-0">
-                  <div className="w-10 h-10 rounded-xl bg-ivory flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-5 h-5 text-teal" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-body">{title}</p>
-                    <p className="text-2xl font-bold font-heading text-ink mt-0.5">{value}</p>
-                  </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              { title: 'Active schedules', value: activeCount, icon: CalendarClock },
+              { title: 'Currently running', value: runningCount, icon: Radio },
+              { title: 'Needs attention', value: attentionCount, icon: AlertTriangle },
+            ].map(({ title, value, icon: Icon }) => (
+              <div key={title} className="bg-white border border-gray-100 rounded-xl p-5 flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-teal/10 flex items-center justify-center flex-shrink-0">
+                  <Icon className="w-5 h-5 text-teal" />
                 </div>
-              ))}
-            </div>
+                <div>
+                  <p className="text-sm text-body">{title}</p>
+                  <p className="text-2xl font-bold font-heading text-ink mt-0.5">{value}</p>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -658,11 +661,11 @@ export default function CrawlSchedulesPage() {
         {!loading && !error && filteredItems.length > 0 && (
           <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead className="bg-teal/10 border-b-2 border-teal/25">
+              <table className="table-base">
+                <thead>
                   <tr>
-                    {['', 'Schedule', 'URL', 'Frequency', 'Next Run', 'Status', 'Run Now', 'Enable', 'Edit'].map((h, i) => (
-                      <th key={i} className="py-3 px-4 text-left text-xs font-bold text-teal-800 uppercase tracking-wide whitespace-nowrap">
+                    {['Schedule', 'URL', 'Frequency', 'Next Run', 'Last Result', 'Status', 'Run Now', 'Actions'].map((h, i) => (
+                      <th key={i} scope="col" className="whitespace-nowrap">
                         {h}
                       </th>
                     ))}
@@ -679,33 +682,34 @@ export default function CrawlSchedulesPage() {
                             item.enabled ? '' : 'opacity-60'
                           }`}
                         >
-                          <td className="py-3 px-2">
-                            <button
-                              onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                              className="p-1 rounded text-body hover:text-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-                              aria-label={isExpanded ? `Hide run history for ${item.name || item.root_url}` : `Show run history for ${item.name || item.root_url}`}
-                              aria-expanded={isExpanded}
-                              title="Toggle run history"
-                            >
-                              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            </button>
+                          <td className="align-middle py-3 px-4 max-w-[220px]">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <button
+                                onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                                className="p-1 rounded text-body hover:text-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 flex-shrink-0"
+                                aria-label={isExpanded ? `Hide run history for ${item.name || item.root_url}` : `Show run history for ${item.name || item.root_url}`}
+                                aria-expanded={isExpanded}
+                                title="Toggle run history"
+                              >
+                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                              <CalendarClock size={13} className="text-body flex-shrink-0" />
+                              {item.name ? (
+                                <span className="block truncate text-sm font-semibold text-ink" title={item.name}>
+                                  {item.name}
+                                </span>
+                              ) : (
+                                <span className="text-sm text-body">—</span>
+                              )}
+                            </div>
                           </td>
-                          <td className="py-3 px-4 max-w-[200px]">
-                            {item.name ? (
-                              <span className="block truncate text-sm font-semibold text-ink" title={item.name}>
-                                {item.name}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-body">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4 max-w-[200px]">
+                          <td className="align-middle py-3 px-4 max-w-[200px]">
                             <span className="flex items-center gap-1 min-w-0" title={item.root_url}>
                               <span className="truncate min-w-0 flex-1 text-teal text-xs font-medium">{item.root_url}</span>
                               <ExternalLink size={11} className="flex-shrink-0 text-teal" />
                             </span>
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="align-middle py-3 px-4 whitespace-nowrap">
                             {item.schedule_type === 'cron' ? (
                               <span
                                 className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-600 font-mono"
@@ -720,7 +724,7 @@ export default function CrawlSchedulesPage() {
                               <span className="block text-[10px] text-body mt-1">at {utcTimeToLocal(item.time_of_day)}</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap text-xs">
+                          <td className="align-middle py-3 px-4 whitespace-nowrap text-xs">
                             {item.enabled ? (
                               <>
                                 <span className="block font-semibold text-ink">{timeUntil(item.next_run_at, nowTick)}</span>
@@ -728,21 +732,31 @@ export default function CrawlSchedulesPage() {
                               </>
                             ) : '—'}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="align-middle py-3 px-4 whitespace-nowrap">
+                            {item.last_run_status ? (
+                              <>
+                                <StatusBadge status={RUN_STATUS_BADGE[item.last_run_status] || item.last_run_status} />
+                                <span className="block text-[10px] text-body mt-1">{formatDate(item.last_run_at)}</span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-body">Not run yet</span>
+                            )}
+                          </td>
+                          <td className="align-middle py-3 px-4 whitespace-nowrap">
                             <ScheduleStatusBadge status={item.status} />
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="align-middle py-3 px-4 whitespace-nowrap">
                             {isRunning ? (
                               <button
                                 title="Stop this run"
                                 aria-label={`Stop the running crawl for ${item.name || item.root_url}`}
                                 onClick={() => handleStop(item)}
                                 disabled={stoppingId === item.id}
-                                className="p-2.5 rounded-lg border border-gray-300 bg-gray-50 shadow-sm text-body hover:text-amber hover:border-amber/40 hover:bg-amber/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber/40"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-amber hover:bg-amber/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber/40"
                               >
                                 {stoppingId === item.id
-                                  ? <RefreshCw size={20} className="animate-spin" />
-                                  : <Square size={20} />}
+                                  ? <RefreshCw size={16} className="animate-spin" />
+                                  : <Square size={16} />}
                               </button>
                             ) : (
                               <button
@@ -750,50 +764,48 @@ export default function CrawlSchedulesPage() {
                                 aria-label={`Run ${item.name || item.root_url} now`}
                                 onClick={() => handleRunNow(item)}
                                 disabled={runningId === item.id}
-                                className="p-2.5 rounded-lg border border-gray-300 bg-gray-50 shadow-sm text-teal hover:border-teal/40 hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                               >
                                 {runningId === item.id
-                                  ? <RefreshCw size={20} className="animate-spin" />
-                                  : <Play size={20} />}
+                                  ? <RefreshCw size={16} className="animate-spin" />
+                                  : <Play size={16} />}
                               </button>
                             )}
                           </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
-                            <button
-                              title={item.enabled ? 'Pause schedule' : 'Resume schedule'}
-                              aria-label={`${item.enabled ? 'Pause' : 'Resume'} ${item.name || item.root_url}`}
-                              onClick={() => handleToggle(item)}
-                              disabled={togglingId === item.id}
-                              className="p-2.5 rounded-lg border border-gray-300 bg-gray-50 shadow-sm text-body hover:text-teal hover:border-teal/40 hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-                            >
-                              {togglingId === item.id
-                                ? <RefreshCw size={20} className="animate-spin" />
-                                : item.enabled
-                                ? <ToggleRight size={20} />
-                                : <ToggleLeft size={20} />
-                              }
-                            </button>
-                          </td>
-                          <td className="py-3 px-4 whitespace-nowrap">
+                          <td className="align-middle py-3 px-4 whitespace-nowrap">
                             <div className="flex items-center gap-2">
+                              <button
+                                title={item.enabled ? 'Pause schedule' : 'Resume schedule'}
+                                aria-label={`${item.enabled ? 'Pause' : 'Resume'} ${item.name || item.root_url}`}
+                                onClick={() => handleToggle(item)}
+                                disabled={togglingId === item.id}
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                              >
+                                {togglingId === item.id
+                                  ? <RefreshCw size={16} className="animate-spin" />
+                                  : item.enabled
+                                  ? <ToggleRight size={16} />
+                                  : <ToggleLeft size={16} />
+                                }
+                              </button>
                               <button
                                 title="Edit schedule"
                                 aria-label={`Edit ${item.name || item.root_url}`}
                                 onClick={() => openEditForm(item)}
-                                className="p-2.5 rounded-lg border border-gray-300 bg-gray-50 shadow-sm text-body hover:text-teal hover:border-teal/40 hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                               >
-                                <Pencil size={20} />
+                                <Pencil size={16} />
                               </button>
                               <button
                                 title="Delete schedule"
                                 aria-label={`Delete ${item.name || item.root_url}`}
                                 onClick={() => handleDelete(item.id)}
                                 disabled={deletingId === item.id}
-                                className="p-2.5 rounded-lg border border-gray-300 bg-gray-50 shadow-sm text-body hover:text-coral hover:border-coral/40 hover:bg-coral/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
+                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
                               >
                                 {deletingId === item.id
-                                  ? <RefreshCw size={20} className="animate-spin" />
-                                  : <Trash2 size={20} />
+                                  ? <RefreshCw size={16} className="animate-spin" />
+                                  : <Trash2 size={16} />
                                 }
                               </button>
                             </div>

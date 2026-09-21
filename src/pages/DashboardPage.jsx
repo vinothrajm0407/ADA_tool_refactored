@@ -1,7 +1,7 @@
 import { apiFetch } from '../utils/api';
 import { useState, useEffect } from 'react';
 import {
-  AlertCircle, FileText, CheckCircle2, Shield, ScanLine, Upload, ArrowRight,
+  AlertCircle, FileText, CheckCircle2, Shield, ScanLine, History, ArrowRight,
 } from 'lucide-react';
 import { formatUrl, formatShortDate } from '../utils/format';
 import {
@@ -12,7 +12,7 @@ import { useApp } from '../context/AppContext';
 
 const QUICK_ACTIONS = [
   { label: 'Run audit', sub: 'Start a new accessibility scan', page: 'new-scan', icon: ScanLine },
-  { label: 'Upload results', sub: 'Import results from a tool', page: 'scan-history', icon: Upload },
+  { label: 'Scan history', sub: 'View all past audits', page: 'scan-history', icon: History },
 ];
 
 const TREND_RANGES = [

@@ -30,6 +30,7 @@ export default function CrawlForm({
   notifyEmail,
   onNotifyEmailChange,
   crawlLoading,
+  crawlError,
   onStartCrawl,
   hideUrlField,
 }) {
@@ -141,6 +142,12 @@ export default function CrawlForm({
       <Divider />
 
       <div className="pt-5">
+        {crawlError && (
+          <div className="flex items-center gap-2.5 bg-coral/10 text-coral px-4 py-3 rounded-xl text-sm mb-3">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            {crawlError}
+          </div>
+        )}
         <button
           onClick={onStartCrawl}
           disabled={crawlLoading || !crawlUrl.trim()}

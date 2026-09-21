@@ -72,7 +72,7 @@ export default function SingleScanForm({
           <button
             onClick={onStartScan}
             disabled={!scanUrl.trim()}
-            className="btn-primary flex-1 justify-center py-2.5 text-sm font-semibold"
+            className="btn-primary py-2.5 text-sm font-semibold"
           >
             <ShieldCheck className="w-4 h-4" />
             Run audit

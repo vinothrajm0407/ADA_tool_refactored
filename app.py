@@ -48,6 +48,8 @@ from backend.services.crawl_service import (
     get_crawl_pages,
     cancel_crawl_job,
 )
+from backend.services import report_pdf_service
+from backend.services.email_service import send_report_attachment
 
 # Create database and table automatically if MSSQL_CONN_STR is set (Azure, AWS, or local)
 db.init_db()
@@ -1066,6 +1068,63 @@ def api_crawl_ai_summary(crawl_id):
     return jsonify({"ok": True, "available": True, "summary": summary})
 
 
+# ── Full technical audit report: download or email one run's PDF ────────────
+# Covers all three run types a technical architect would want a full log
+# for: a page scan, an assistive test, or a crawl.
+
+_FULL_REPORT_BUILDERS = {
+    "scan": lambda record_id: report_pdf_service.render_full_scan_report(int(record_id)),
+    "assistive": lambda record_id: report_pdf_service.render_full_assistive_report(int(record_id)),
+    "crawl": lambda record_id: report_pdf_service.render_full_crawl_report(record_id),
+}
+
+
+def _build_full_report_pdf(kind: str, record_id: str):
+    builder = _FULL_REPORT_BUILDERS.get(kind)
+    if not builder:
+        return None
+    try:
+        return builder(record_id)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route("/api/report/<string:kind>/<string:record_id>", methods=["GET"])
+@require_auth
+def api_full_report_download(kind, record_id):
+    """Download the full technical audit report (PDF) for one run."""
+    pdf_bytes = _build_full_report_pdf(kind, record_id)
+    if pdf_bytes is None:
+        return jsonify({"ok": False, "error": "Report not found or failed to generate"}), 404
+    filename = f"audit-report-{kind}-{record_id}.pdf"
+    return Response(pdf_bytes, mimetype="application/pdf",
+                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.route("/api/report/<string:kind>/<string:record_id>/email", methods=["POST"])
+@require_auth
+def api_full_report_email(kind, record_id):
+    """Email the full technical audit report (PDF) for one run."""
+    data = request.get_json(silent=True) or {}
+    to_email = (data.get("email") or "").strip()
+    if not to_email:
+        return jsonify({"ok": False, "error": "email is required"}), 400
+    pdf_bytes = _build_full_report_pdf(kind, record_id)
+    if pdf_bytes is None:
+        return jsonify({"ok": False, "error": "Report not found or failed to generate"}), 404
+    filename = f"audit-report-{kind}-{record_id}.pdf"
+    sent = send_report_attachment(
+        to_email,
+        subject=f"ADA Full Audit Report — {kind.title()} {record_id}",
+        intro_html=f"<p>Attached is the full technical audit report for {kind} run <strong>{record_id}</strong>.</p>",
+        pdf_bytes=pdf_bytes,
+        filename=filename,
+    )
+    if not sent:
+        return jsonify({"ok": False, "error": "Failed to send email. Check SMTP configuration."}), 502
+    return jsonify({"ok": True})
+
+
 # ── Phase 3: Alerts (Feature 3) ────────────────────────────────────────────────
 
 @app.route("/api/alerts", methods=["GET"])
@@ -1957,51 +2016,56 @@ def api_integration_send():
         return jsonify({"ok": False, "error": "Delivery failed — check connection settings"}), 500
 
 
-@app.route("/_ada_test_fixture")
-def _ada_test_fixture():
-    """Temporary: serves the GitLab Auto-Fix test page through the public ngrok
-    tunnel, since the scanner's SSRF guard blocks private/loopback addresses —
-    remove this route once GitLab testing is done."""
-    fixture_path = Path(
-        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
-        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_lab_artifact.html"
-    )
-    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+_ADA_GITLAB_RELAY_PAGES = {"index.html", "settings.html", "search.html"}
+_ADA_BITBUCKET_RELAY_PAGES = {"index.html", "profile.html", "search.html"}
 
 
-@app.route("/_ada_test_fixture2")
-def _ada_test_fixture2():
-    """Temporary: serves the wider ada-test-app fixture (GitLab copy) through the
-    public ngrok tunnel — same reason as _ada_test_fixture above."""
-    fixture_path = Path(
-        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
-        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_app_fixture.html"
-    )
-    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+@app.route("/_ada_gitlab_relay/", defaults={"page": "index.html"})
+@app.route("/_ada_gitlab_relay/<page>")
+def _ada_gitlab_relay(page):
+    """Live-proxies ADA-AutoFix-Test-GitLab's docs/ pages through the public
+    ngrok tunnel on every request — GitLab Pages needs identity-verified CI
+    minutes this account doesn't have, and proxying live (vs. a static local
+    snapshot) is what makes a rescan reflect whatever is actually merged."""
+    if page not in _ADA_GITLAB_RELAY_PAGES:
+        return "Not found", 404
+    try:
+        req = urllib.request.Request(
+            f"https://gitlab.com/vinothrajm1/ADA-AutoFix-Test-GitLab/-/raw/main/docs/{page}",
+            headers={"Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8")
+    except Exception:
+        logging.exception("ADA-AutoFix-Test-GitLab live fetch failed for %s", page)
+        return "Upstream fetch failed", 502
+    return html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
 
-@app.route("/_ada_test_fixture3")
-def _ada_test_fixture3():
-    """Temporary: serves the wider ada-test-app fixture (Bitbucket copy) through
-    the public ngrok tunnel — Bitbucket has no free static-pages hosting, same
-    reason as _ada_test_fixture2 above for GitLab."""
-    fixture_path = Path(
-        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
-        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_app_fixture_bitbucket.html"
-    )
-    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+@app.route("/_ada_bitbucket_relay/", defaults={"page": "index.html"})
+@app.route("/_ada_bitbucket_relay/<page>")
+def _ada_bitbucket_relay(page):
+    """Live-proxies the Bitbucket Auto-Fix test app's docs/ pages through the
+    public ngrok tunnel on every request — Bitbucket has no free static-pages
+    hosting, so this is the same live-proxy technique as the GitLab relay.
 
-
-@app.route("/_ada_test_fixture4")
-def _ada_test_fixture4():
-    """Temporary: serves the ada-test-clean fixture (GitLab, zero-violation
-    baseline) through the public ngrok tunnel — same reason as
-    _ada_test_fixture2 above."""
-    fixture_path = Path(
-        r"C:\Users\utlap\AppData\Local\Temp\claude\c--Users-utlap-Desktop-UI-Design--2--UI-Design"
-        r"\71d6f8fd-3d28-4afe-a059-d22f7a1bd2ad\scratchpad\ada_test_clean_fixture.html"
-    )
-    return fixture_path.read_text(encoding="utf-8"), 200, {"Content-Type": "text/html; charset=utf-8"}
+    Repurposes the pre-existing ada_test_tool/testing_tool repo (fully
+    replaced with a fresh app) rather than a brand-new repo, because the
+    available Bitbucket access token is scoped to this one repository and
+    cannot create new repos at the workspace level."""
+    if page not in _ADA_BITBUCKET_RELAY_PAGES:
+        return "Not found", 404
+    try:
+        req = urllib.request.Request(
+            f"https://bitbucket.org/ada_test_tool/testing_tool/raw/main/docs/{page}",
+            headers={"Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8")
+    except Exception:
+        logging.exception("Bitbucket test app live fetch failed for %s", page)
+        return "Upstream fetch failed", 502
+    return html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
 
 @app.route("/", defaults={"path": ""})

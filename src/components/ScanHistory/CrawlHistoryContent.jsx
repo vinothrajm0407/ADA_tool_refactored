@@ -15,6 +15,7 @@ import GlowInput from '../ui/GlowInput';
 import { StatusBadge } from '../ui/StatusBadge';
 import MetricCard from '../ui/MetricCard';
 import { NoResultsInRange } from './ScanHistoryView';
+import { ReportActions } from './ReportActions';
 
 const PAGE_SIZE = 25;
 
@@ -606,7 +607,7 @@ export function CrawlHistoryContent() {
                       <thead>
                         <tr>
                           <th scope="col" className="w-8" />
-                          {['Site URL', 'Date', 'Pages', 'Violations', 'Avg Pass Rate', 'Site Score', 'Duration', 'Status', ''].map((h) => (
+                          {['Site URL', 'Date', 'Pages', 'Violations', 'Avg Pass Rate', 'Site Score', 'Duration', 'Status', 'Report', ''].map((h) => (
                             <th key={h} scope="col" className="whitespace-nowrap">
                               {h}
                             </th>
@@ -683,6 +684,11 @@ export function CrawlHistoryContent() {
                               {/* Status */}
                               <td className="whitespace-nowrap">
                                 <StatusBadge status={normaliseStatus(item.status)} />
+                              </td>
+
+                              {/* Full audit report */}
+                              <td className="whitespace-nowrap">
+                                <ReportActions kind="crawl" id={item.crawl_id} />
                               </td>
 
                               {/* Re-crawl */}

@@ -300,6 +300,7 @@ export default function NewScanPage() {
   const [fullSite, setFullSite]         = useState(false);
   const [notifyEmail, setNotifyEmail]   = useState('');
   const [crawlLoading, setCrawlLoading] = useState(false);
+  const [crawlError, setCrawlError]     = useState('');
 
   const activeSession = scanSessions.find(s => s.id === activeScanSessionId) ?? null;
   const doneSessions  = scanSessions.filter(s => s.phase === 'done');
@@ -374,7 +375,7 @@ export default function NewScanPage() {
         body: JSON.stringify({ url, includeBestPractices }),
       });
       const data = await res.json();
-      if (!data.ok) { updateScanSession(sessionId, { phase: 'failed', error: data.message ?? 'Failed to start scan.' }); return; }
+      if (!data.ok) { updateScanSession(sessionId, { phase: 'failed', error: data.error ?? 'Failed to start scan.' }); return; }
       pollScan(sessionId, data.jobId);
     } catch { updateScanSession(sessionId, { phase: 'failed', error: 'Network error. Please try again.' }); }
   }, [updateScanSession, pollScan]);
@@ -403,6 +404,7 @@ export default function NewScanPage() {
     const url = crawlUrl.trim();
     if (!url) return;
     setCrawlLoading(true);
+    setCrawlError('');
     try {
       const res  = await apiFetch('/api/crawl', {
         method: 'POST',
@@ -410,10 +412,10 @@ export default function NewScanPage() {
         body: JSON.stringify({ url, maxPages, maxDepth, fullSite, notifyEmail: notifyEmail.trim() || undefined }),
       });
       const data = await res.json();
-      if (!data.ok) { setCrawlLoading(false); return; }
+      if (!data.ok) { setCrawlLoading(false); setCrawlError(data.error || 'Failed to start crawl.'); return; }
       setCrawlId(data.crawl_id);
       navigate('crawl-results');
-    } catch { setCrawlLoading(false); }
+    } catch { setCrawlLoading(false); setCrawlError('Network error. Please try again.'); }
   }, [crawlUrl, maxPages, maxDepth, fullSite, notifyEmail, setCrawlId, navigate]);
 
   const result     = activeSession?.result ?? null;
@@ -519,7 +521,10 @@ export default function NewScanPage() {
                 id="scan-url"
                 type="url"
                 value={activeTab === 'crawl' ? crawlUrl : composeUrl}
-                onChange={e => (activeTab === 'crawl' ? setCrawlUrl : setComposeUrl)(e.target.value)}
+                onChange={e => {
+                  if (activeTab === 'crawl') { setCrawlUrl(e.target.value); setCrawlError(''); }
+                  else setComposeUrl(e.target.value);
+                }}
                 onKeyDown={e => {
                   if (e.key !== 'Enter') return;
                   if (activeTab === 'crawl') { if (!crawlLoading && crawlUrl.trim()) handleStartCrawl(); }
@@ -529,6 +534,7 @@ export default function NewScanPage() {
                 disabled={activeTab === 'crawl' && crawlLoading}
                 className="w-full border-2 border-teal rounded-lg px-4 py-2.5 text-sm text-ink placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal/20 focus:ring-offset-1 transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
               />
+              <p className="text-xs text-body mt-1.5">Enter the full URL including https://</p>
             </section>
 
             <div className="border-t border-gray-100" />
@@ -562,6 +568,7 @@ export default function NewScanPage() {
                 notifyEmail={notifyEmail}
                 onNotifyEmailChange={setNotifyEmail}
                 crawlLoading={crawlLoading}
+                crawlError={crawlError}
                 onStartCrawl={handleStartCrawl}
                 hideUrlField
               />

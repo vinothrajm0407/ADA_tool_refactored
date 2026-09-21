@@ -247,7 +247,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
               </span>
 
               <h1 className="font-heading font-bold text-5xl sm:text-6xl lg:text-[4rem] xl:text-[4.5rem] text-ink leading-[1.08] tracking-tight">
-                Find and fix accessibility issues across your entire site
+                Find and <span className="text-teal">fix accessibility issues</span> across your entire site
               </h1>
 
               <p className="text-body text-lg mt-5 leading-relaxed max-w-[480px]">
