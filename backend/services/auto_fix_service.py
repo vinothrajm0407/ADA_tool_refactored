@@ -43,8 +43,20 @@ _PREVIEW_START_TIMEOUT = 20
 # predictable and always deserves a human's review first.
 RULES_WITH_FALLBACK = {
     "button-name", "image-alt", "label", "html-has-lang",
-    "link-name", "heading-order", "color-contrast",
+    "link-name", "heading-order", "color-contrast", "svg-img-alt",
+    "document-title", "page-has-heading-one",
+    "aria-command-name", "aria-hidden-focus", "aria-roles", "aria-required-parent",
+    "aria-required-attr", "aria-valid-attr-value", "aria-allowed-attr",
 }
+
+# Falsy (so existing `if not patch:` callers keep working unchanged) but
+# distinguishable by identity from a plain "couldn't find a match" None —
+# lets the caller tell "nothing to fix here, it's already accessible" apart
+# from "the fallback's pattern-matcher doesn't understand this markup".
+class _AlreadyFixed:
+    def __bool__(self): return False
+
+ALREADY_FIXED = _AlreadyFixed()
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -109,27 +121,106 @@ def _clone_repo(repo_url: str, token: str, branch: str, provider: str = "github"
     return tmp_dir
 
 
-def _grep_repo(repo_dir: Path, pattern: re.Pattern, extensions: tuple[str, ...] = (".jsx", ".tsx")) -> list[Path]:
-    """Files (given extensions, skipping node_modules) whose content matches pattern."""
-    hits = []
+# Source file extensions the generic locate path searches by default. Rule-
+# specific callers (html-has-lang, color-contrast) keep their own narrower
+# lists. Broadened from the original (.jsx, .tsx) to cover the app types this
+# locator is actually expected to work against.
+SOURCE_EXTENSIONS = (".jsx", ".tsx", ".js", ".ts", ".html", ".htm", ".vue", ".svelte")
+
+# Directories that never hold real application source, even if a name inside
+# them happens to match a violation's markup — a stale dist/ or build/ copy of
+# a page shadowing its own source file has bitten this locator for real (see
+# the ada-test-app Vite-scaffold cleanup earlier this project).
+EXCLUDED_DIRS = {"node_modules", ".git", "dist", "build", "coverage", ".cache"}
+
+
+def _iter_source_files(repo_dir: Path, extensions: tuple[str, ...]):
     for path in repo_dir.rglob("*"):
-        if path.suffix not in extensions or "node_modules" in path.parts:
+        if path.suffix not in extensions:
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except Exception:
+        if EXCLUDED_DIRS.intersection(path.parts):
             continue
-        if pattern.search(text):
-            hits.append(path)
-    return hits
+        yield path
 
 
-def _locate_by_needle(repo_dir: Path, needle: re.Pattern, extensions: tuple[str, ...] = (".jsx", ".tsx", ".html")) -> tuple[str, int] | None:
+def _safe_read(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _grep_repo(repo_dir: Path, pattern: re.Pattern, extensions: tuple[str, ...] = SOURCE_EXTENSIONS) -> list[Path]:
+    """Files (given extensions, skipping generated/dependency dirs) whose content matches pattern."""
+    return [p for p in _iter_source_files(repo_dir, extensions) if pattern.search(_safe_read(p))]
+
+
+def _page_path_hint(page_url: str | None) -> str | None:
+    """Best-effort guess at which file under docs/ the scanned page IS, from
+    the scanned URL's own path — e.g. .../search.html -> docs/search.html, a
+    trailing slash or no path -> docs/index.html. Used only to narrow an
+    otherwise-ambiguous multi-file match (the same bare `<html>` tag, say,
+    legitimately exists on every page of a multi-page static site) down to
+    the one file that's actually the page being fixed — never to force a
+    match that wasn't already found by real content, and never applied when
+    a single unambiguous match already exists on its own."""
+    if not page_url:
+        return None
+    try:
+        path = urllib.parse.urlparse(page_url).path
+    except Exception:
+        return None
+    name = path.rsplit("/", 1)[-1] if path else ""
+    if not name or not name.endswith((".html", ".htm")):
+        name = "index.html"
+    return f"docs/{name}"
+
+
+NAME_MISSING_RULES = {"aria-command-name", "button-name", "link-name", "svg-img-alt"}
+
+
+def _disambiguate_by_missing_name(
+    repo_dir: Path, rule_id: str | None, ambiguous: list[tuple[str, int, str]],
+) -> tuple[str, int] | None:
+    """
+    Free, deterministic tie-breaker for the "element has no accessible name"
+    rule family, tried before ever spending a Gemini call on disambiguation.
+    The violation itself already says the target element currently has no
+    accessible name — so whichever tied candidate is the ONLY one that still
+    lacks aria-label is provably the right one, no AI guessing required (e.g.
+    two elements share a class, one already has aria-label from an earlier
+    fix/unrelated markup, the other doesn't — that's decisive on its own).
+    """
+    if rule_id not in NAME_MISSING_RULES or not ambiguous:
+        return None
+    unnamed = []
+    for path, line_no, _snippet in ambiguous:
+        full_path = repo_dir / path
+        if not full_path.is_file():
+            continue
+        lines = _safe_read(full_path).splitlines()
+        if not (1 <= line_no <= len(lines)):
+            continue
+        if 'aria-label="' not in lines[line_no - 1]:
+            unnamed.append((path, line_no))
+    if len(unnamed) == 1:
+        logger.info("[LocateSource] Deterministic disambiguation: only one candidate still lacks aria-label -> %s:%d", *unnamed[0])
+        return unnamed[0]
+    return None
+
+
+def _locate_by_needle(
+    repo_dir: Path, needle: re.Pattern, extensions: tuple[str, ...] = SOURCE_EXTENSIONS, page_hint: str | None = None,
+) -> tuple[str, int] | None:
     hits = _grep_repo(repo_dir, needle, extensions)
+    if len(hits) > 1 and page_hint:
+        narrowed = [p for p in hits if p.relative_to(repo_dir).as_posix() == page_hint]
+        if len(narrowed) == 1:
+            hits = narrowed
     if len(hits) != 1:
         return None
     path = hits[0]
-    text = path.read_text(encoding="utf-8")
+    text = _safe_read(path)
     # A file can be the only one that matches yet still contain the needle more
     # than once (two buttons with the same class, say) — taking the first hit
     # in that case would silently patch the wrong one, so require it unique here too.
@@ -140,29 +231,373 @@ def _locate_by_needle(repo_dir: Path, needle: re.Pattern, extensions: tuple[str,
     return (path.relative_to(repo_dir).as_posix(), line_no)
 
 
-def locate_source(repo_dir: Path, node_html: str, rule_id: str | None = None) -> tuple[str, int] | None:
+def _parse_target_chain(target: list[str] | str | None) -> list[dict]:
+    """
+    Parse axe's `target` CSS selector path into an ordered ancestor chain,
+    outermost to innermost, ending with the violating element itself. Axe
+    gives one selector string per non-iframe element (a list only matters for
+    iframe-nested content, which this locator doesn't drill into — same scope
+    as today), child-combinator (">") separated, e.g.
+    "div.card:nth-child(2) > button.icon-btn > svg". Each returned segment is
+    {"tag": str|None, "id": str|None, "classes": list[str], "nth": int|None}.
+    Returns [] for anything missing or unparseable — every caller already
+    treats "no ancestor information" as a no-op, not an error.
+    """
+    if not target:
+        return []
+    selector = target[-1] if isinstance(target, list) else target
+    if not isinstance(selector, str) or not selector.strip():
+        return []
+    seg_re = re.compile(
+        r"^(?P<tag>[a-zA-Z][\w-]*)?"
+        r"(?P<rest>(?:[.#][\w-]+)*)"
+        r".*?(?::nth-(?:child|of-type)\((?P<nth>\d+)\))?$"
+    )
+    chain = []
+    for seg in (s.strip() for s in selector.split(">")):
+        if not seg:
+            continue
+        m = seg_re.match(seg)
+        if not m:
+            continue
+        rest = m.group("rest") or ""
+        id_match = re.search(r"#([\w-]+)", rest)
+        chain.append({
+            "tag": (m.group("tag") or "").lower() or None,
+            "id": id_match.group(1) if id_match else None,
+            "classes": re.findall(r"\.([\w-]+)", rest),
+            "nth": int(m.group("nth")) if m.group("nth") else None,
+        })
+    return chain
+
+
+def _nearest_identified_ancestor(chain: list[dict]) -> dict | None:
+    """Nearest ancestor (closest to the violating element, excluding it) that
+    carries a class or id — the strongest available scoping signal for an
+    element that has neither on its own, like a bare <svg>."""
+    for seg in reversed(chain[:-1]):
+        if seg.get("id") or seg.get("classes"):
+            return seg
+    return None
+
+
+def _ancestor_open_prefix(ancestor: dict) -> str:
+    """Regex fragment matching the ancestor's own opening tag plus its
+    identifying attribute, as capture group 1 (so the rest of the pattern can
+    reference \\1 to stop at that specific ancestor's own closing tag rather
+    than leaking into an unrelated sibling that happens to contain the same
+    descendant tag) — shared by both candidate patterns below."""
+    anc_tag = re.escape(ancestor["tag"]) if ancestor.get("tag") else r"[a-zA-Z][\w-]*"
+    if ancestor.get("id"):
+        anc_signal = r'\bid="' + re.escape(ancestor["id"]) + r'"'
+    else:
+        anc_signal = r'\bclass(?:Name)?="[^"]*\b' + re.escape(ancestor["classes"][0]) + r'\b[^"]*"'
+    return r"<(" + anc_tag + r")\b[^>]*" + anc_signal + r"[^>]*>(?:(?!</\1\b).)*?"
+
+
+def _ancestor_scoped_pattern(ancestor: dict, tag: str) -> re.Pattern:
+    # The target tag itself is wrapped in its own capture group (group 2,
+    # after the ancestor-tag-name group 1) — see _match_line, which uses this
+    # group's start instead of the whole match's start. Without it, a line
+    # number computed from match.start() lands on the ANCESTOR's own opening
+    # tag (the match begins there and spans down to the target), not on the
+    # target tag several lines later — exactly what made a real, valid
+    # ancestor-scoped hit unlocatable afterward by _locate_patch_target.
+    return re.compile(_ancestor_open_prefix(ancestor) + r"(<" + re.escape(tag) + r"[\s/>])", re.DOTALL)
+
+
+def _ancestor_scoped_attr_pattern(ancestor: dict, tag: str, attr: str, value: str) -> re.Pattern:
+    return re.compile(
+        _ancestor_open_prefix(ancestor) + r"(<" + re.escape(tag) + r"\b[^>]*" + re.escape(f'{attr}="{value}"') + r")",
+        re.DOTALL,
+    )
+
+
+# Attributes checked as an identifying signal, in rough order of how likely
+# each is to actually be unique. "id" is handled separately (see locate_source)
+# since it's the strongest possible signal and deserves top priority always.
+_ATTR_ORDER = ("aria-label", "name", "href", "src", "alt", "placeholder", "role")
+
+
+def _generate_fallback_candidates(html: str, tag: str | None, chain: list[dict]) -> list[tuple[re.Pattern, tuple, float, str]]:
+    """
+    Ordered, scored needles tried only once the violating element has NEITHER
+    an id nor a class of its own (see locate_source — an element that *does*
+    carry one of those uses it exclusively, succeed or fail, and never reaches
+    this function): an ancestor-scoped match first, then attributes (each
+    optionally also tried ancestor-scoped as a recovery step), then visible
+    text, then bare tag name. `score` is used for logging and for the
+    AI-disambiguation fallback, not for re-sorting — order already encodes
+    priority, and locate_source stops at the first candidate that resolves.
+
+    The ancestor-scoped candidate (score 0.85) is the fix for a genuinely
+    identity-less element like a bare <svg> — the actual bug this rewrite was
+    written to fix — that used to fall straight to "bare tag name" and search
+    the whole repo for `<svg`. It isn't SVG-specific: the same mechanism scopes
+    any bare/generic element (an unlabeled <input>, a plain <path>, etc.) to
+    its nearest identified ancestor from axe's own selector path instead.
+    """
+    candidates: list[tuple[re.Pattern, tuple, float, str]] = []
+    ancestor = _nearest_identified_ancestor(chain) if len(chain) > 1 else None
+
+    # The bare ancestor+tag candidate (no other signal) is handled separately
+    # by _try_ancestor_scoped_candidate in locate_source, not added here — it
+    # needs to enumerate every occurrence of `tag` under the ancestor and
+    # apply axe's nth-child index, since more than one bare `<button>` (say)
+    # under the same ancestor is common and a flat regex match always
+    # resolves to whichever comes first regardless of which one violated.
+
+    for attr in _ATTR_ORDER:
+        attr_match = re.search(re.escape(attr) + r'="([^"]+)"', html)
+        if not attr_match:
+            continue
+        value = attr_match.group(1)
+        candidates.append((
+            re.compile(re.escape(f'{attr}="{value}"')), SOURCE_EXTENSIONS, 0.75, f'{attr}="{value}"',
+        ))
+        if ancestor and tag:
+            candidates.append((
+                _ancestor_scoped_attr_pattern(ancestor, tag, attr, value), SOURCE_EXTENSIONS, 0.7,
+                f'ancestor + {attr}="{value}"',
+            ))
+
+    # Still nothing — try the element's own visible text (e.g. a heading or
+    # button with no class or attributes at all, just a label). Skip anything
+    # too short to be a safe signal on its own.
+    text = re.sub(r"<[^>]+>", "", html).strip()
+    if len(text) >= 3:
+        candidates.append((re.compile(re.escape(text)), SOURCE_EXTENSIONS, 0.65, f'text="{text[:40]}"'))
+
+    if tag and tag not in ("div", "span"):
+        candidates.append((re.compile(r"<" + re.escape(tag) + r"[\s/>]"), SOURCE_EXTENSIONS, 0.3, f"<{tag}>"))
+
+    return candidates
+
+
+def _match_line(text: str, m: re.Match) -> int:
+    """1-based line of the actual target tag within `m` — group 2 when the
+    pattern is one of the ancestor-scoped ones (see _ancestor_scoped_pattern),
+    otherwise the whole match's own start (every other candidate pattern is a
+    single-position match, where that's already correct)."""
+    pos = m.start(2) if m.re.groups >= 2 else m.start()
+    return text[:pos].count("\n") + 1
+
+
+def _snippet_around(text: str, pos: int, context_lines: int = 10) -> str:
+    lines = text.splitlines()
+    line_idx = text[:pos].count("\n")
+    lo, hi = max(0, line_idx - context_lines), min(len(lines), line_idx + context_lines + 1)
+    return "\n".join(lines[lo:hi])
+
+
+def _try_candidate(
+    repo_dir: Path, pattern: re.Pattern, extensions: tuple, score: float, label: str, chain: list[dict],
+    page_hint: str | None = None,
+) -> tuple[tuple[str, int] | None, list[tuple[str, int, str]]]:
+    """
+    Search one candidate needle across the repo. Returns (result, ambiguous):
+    `result` is (relpath, line_no) if it resolves to exactly one file and one
+    occurrence, or a file with several occurrences that axe's target
+    nth-child/nth-of-type index can pick between; otherwise None, alongside up
+    to 5 (relpath, line_no, snippet) tuples describing whatever ambiguity was
+    found, for the AI-disambiguation fallback.
+    """
+    files = [p for p in _iter_source_files(repo_dir, extensions) if pattern.search(_safe_read(p))]
+    if not files:
+        logger.info("[Candidate] %-32s -> no match", label)
+        return None, []
+
+    if len(files) > 1 and page_hint:
+        narrowed = [p for p in files if p.relative_to(repo_dir).as_posix() == page_hint]
+        if len(narrowed) == 1:
+            files = narrowed
+
+    if len(files) > 1:
+        logger.info("[Candidate] %-32s -> ambiguous: %d files matched", label, len(files))
+        ambiguous = []
+        for p in files[:5]:
+            text = _safe_read(p)
+            m = pattern.search(text)
+            if not m:
+                continue
+            relpath = p.relative_to(repo_dir).as_posix()
+            ambiguous.append((relpath, _match_line(text, m), _snippet_around(text, m.start())))
+        return None, ambiguous
+
+    path = files[0]
+    text = _safe_read(path)
+    matches = list(pattern.finditer(text))
+    relpath = path.relative_to(repo_dir).as_posix()
+
+    if len(matches) == 1:
+        line_no = _match_line(text, matches[0])
+        logger.info("[Candidate] %-32s -> %s:%d score=%.2f SELECTED", label, relpath, line_no, score)
+        logger.info("[LocateSource] Selected %s:%d confidence=%.2f", relpath, line_no, score)
+        return (relpath, line_no), []
+
+    # Same file, multiple occurrences of the same pattern (e.g. duplicate
+    # class names from a .map() loop) — try axe's own nth-child/nth-of-type
+    # index for the violating element to pick which occurrence is the one
+    # that actually fired. Never a blind first-match guess.
+    nth = chain[-1].get("nth") if chain else None
+    if nth and 1 <= nth <= len(matches):
+        chosen = matches[nth - 1]
+        line_no = _match_line(text, chosen)
+        confidence = round(score * 0.9, 2)
+        logger.info(
+            "[Candidate] %-32s -> %s has %d occurrences, picked #%d via target nth-child, score=%.2f SELECTED",
+            label, relpath, len(matches), nth, confidence,
+        )
+        logger.info("[LocateSource] Selected %s:%d confidence=%.2f", relpath, line_no, confidence)
+        return (relpath, line_no), []
+
+    logger.info(
+        "[Candidate] %-32s -> %s has %d occurrences, no nth-child hint to disambiguate",
+        label, relpath, len(matches),
+    )
+    ambiguous = [
+        (relpath, _match_line(text, m), _snippet_around(text, m.start()))
+        for m in matches[:5]
+    ]
+    return None, ambiguous
+
+
+def _try_ancestor_scoped_candidate(
+    repo_dir: Path, ancestor: dict, tag: str, chain: list[dict], extensions: tuple, label: str,
+    page_hint: str | None = None,
+) -> tuple[tuple[str, int] | None, list[tuple[str, int, str]]]:
+    """Ancestor-scoped candidate for an element with no id/class/attribute/text
+    signal of its own (a bare <button>, a classless <svg>...) — scoped to the
+    nearest identified ancestor from axe's own selector chain, exactly like
+    _generate_fallback_candidates' other candidates, but enumerating every
+    occurrence of `tag` inside that ancestor's own span rather than only the
+    first. A single flat regex match (the original approach) always resolves
+    to whichever occurrence comes first in the file, silently misidentifying
+    the target the moment an ancestor contains more than one bare <tag> — a
+    real risk for something that can auto-merge without review. This mirrors
+    the nth-child disambiguation the unscoped bare-tag-name candidate already
+    gets in _try_candidate.
+    """
+    anc_tag = re.escape(ancestor["tag"]) if ancestor.get("tag") else r"[a-zA-Z][\w-]*"
+    if ancestor.get("id"):
+        anc_signal = r'\bid="' + re.escape(ancestor["id"]) + r'"'
+    else:
+        anc_signal = r'\bclass(?:Name)?="[^"]*\b' + re.escape(ancestor["classes"][0]) + r'\b[^"]*"'
+    span_pattern = re.compile(
+        r"<(" + anc_tag + r")\b[^>]*" + anc_signal + r"[^>]*>((?:(?!</\1\b).)*?)</\1\s*>", re.DOTALL,
+    )
+    tag_pattern = re.compile(r"<" + re.escape(tag) + r"[\s/>]")
+
+    # (path, full file text, absolute positions of every `tag` occurrence
+    # inside this file's matching ancestor span)
+    hits: list[tuple[Path, str, list[int]]] = []
+    for p in _iter_source_files(repo_dir, extensions):
+        text = _safe_read(p)
+        span_m = span_pattern.search(text)
+        if not span_m:
+            continue
+        span_start = span_m.start(2)
+        positions = [span_start + tm.start() for tm in tag_pattern.finditer(span_m.group(2))]
+        if positions:
+            hits.append((p, text, positions))
+
+    if not hits:
+        logger.info("[Candidate] %-32s -> no match", label)
+        return None, []
+
+    if len(hits) > 1 and page_hint:
+        narrowed = [h for h in hits if h[0].relative_to(repo_dir).as_posix() == page_hint]
+        if len(narrowed) == 1:
+            hits = narrowed
+
+    if len(hits) > 1:
+        logger.info("[Candidate] %-32s -> ambiguous: %d files matched", label, len(hits))
+        ambiguous = [
+            (p.relative_to(repo_dir).as_posix(), text[:positions[0]].count("\n") + 1, _snippet_around(text, positions[0]))
+            for p, text, positions in hits[:5]
+        ]
+        return None, ambiguous
+
+    path, text, positions = hits[0]
+    relpath = path.relative_to(repo_dir).as_posix()
+    score = 0.85
+
+    if len(positions) == 1:
+        line_no = text[:positions[0]].count("\n") + 1
+        logger.info("[Candidate] %-32s -> %s:%d score=%.2f SELECTED", label, relpath, line_no, score)
+        logger.info("[LocateSource] Selected %s:%d confidence=%.2f", relpath, line_no, score)
+        return (relpath, line_no), []
+
+    nth = chain[-1].get("nth") if chain else None
+    if nth and 1 <= nth <= len(positions):
+        pos = positions[nth - 1]
+        line_no = text[:pos].count("\n") + 1
+        confidence = round(score * 0.9, 2)
+        logger.info(
+            "[Candidate] %-32s -> %s has %d occurrences, picked #%d via target nth-child, score=%.2f SELECTED",
+            label, relpath, len(positions), nth, confidence,
+        )
+        logger.info("[LocateSource] Selected %s:%d confidence=%.2f", relpath, line_no, confidence)
+        return (relpath, line_no), []
+
+    logger.info(
+        "[Candidate] %-32s -> %s has %d occurrences, no nth-child hint to disambiguate",
+        label, relpath, len(positions),
+    )
+    ambiguous = [
+        (relpath, text[:pos].count("\n") + 1, _snippet_around(text, pos))
+        for pos in positions[:5]
+    ]
+    return None, ambiguous
+
+
+def locate_source(repo_dir: Path, node_html: str, rule_id: str | None = None,
+                   target: list[str] | str | None = None, page_url: str | None = None) -> tuple[str, int] | None:
     """
     Match a violation's outerHTML to a unique source file + line.
 
-    `html-has-lang` is special-cased: the <html> tag lives in index.html, not
-    a .jsx/.tsx component, so it needs its own file-type and needle.
+    `page_url` (the page that was actually scanned) is optional and used only
+    to narrow an otherwise-ambiguous multi-file match down to the one file
+    that's really the scanned page — see _page_path_hint. It never overrides
+    a match that's already unique on content alone, and `document-title` /
+    `page-has-heading-one` (see below) require it outright since those
+    violations carry no other identifying signal at all.
 
-    Otherwise tries the element's class name first (most specific signal). If
-    it has no class attribute at all, falls back to the bare tag name — still
-    safe, because a component rendered from a .map() (e.g. three <img>
-    product cards) has exactly one source line for that tag regardless of
-    which rendered instance triggered the violation, so "the only <img> in
-    the repo" is still the correct place to fix. Never guesses across files:
-    any ambiguity (zero or multiple matching files) returns None.
+    `html-has-lang`, `color-contrast`, `document-title` and `page-has-heading-one`
+    are special-cased: the target lives in a different kind of file (index.html
+    / a stylesheet) than a JSX/HTML component, or — for the latter two — the
+    violating node is just a bare <html> with no content signal whatsoever, so
+    only the scanned page's own URL can say which file is missing it.
+
+    Otherwise, two stages:
+
+    1. If the element itself carries an id or class, that is used EXCLUSIVELY
+       (id preferred when both are present) — succeed or fail, never degrading
+       to a weaker, unrelated signal. An element that positively carries an
+       id/class absent from the whole repo almost always means a stale scan or
+       the wrong repo; guessing via some other attribute at that point is a
+       real correctness risk, not a helpful fallback. (This is the original
+       behavior for "class present", generalized to also cover id.)
+    2. Only when the element has NEITHER — a bare <svg>, an icon <path>, an
+       unlabeled <input> — does it fall through increasingly generic signals
+       (see _generate_fallback_candidates): an ancestor-scoped match using
+       axe's own `target` CSS selector path, other attributes (optionally also
+       ancestor-scoped), visible text, then bare tag name.
+
+    Either way, whatever ambiguity remains at the end goes to a Gemini-assisted
+    disambiguation (see _ai_disambiguate) only when a key is configured; with
+    no key, or if the AI isn't confident either, this returns None exactly as
+    the original always did on ambiguity.
     """
     html = (node_html or "").strip()
+    page_hint = _page_path_hint(page_url)
 
     if rule_id == "html-has-lang":
         # Match only an <html> tag that's actually missing lang= — a bare tag-name
         # needle would hit every page in a multi-page static site and never be
         # "the one" file, even though only one of them lacks the attribute.
         needle = re.compile(r"<html(?![^>]*\blang=)[^>]*>")
-        return _locate_by_needle(repo_dir, needle, extensions=(".html",))
+        return _locate_by_needle(repo_dir, needle, extensions=(".html", ".htm"), page_hint=page_hint)
 
     if rule_id == "color-contrast":
         # The fix belongs in CSS, not the component — find the element's own
@@ -170,49 +605,257 @@ def locate_source(repo_dir: Path, node_html: str, rule_id: str | None = None) ->
         # Static sites often keep this in a <style> block inside the page
         # itself rather than a separate stylesheet, so look in both.
         class_match = re.search(r'class="([^"]+)"', html)
-        if not class_match:
+        if class_match:
+            class_name = class_match.group(1).strip().split()[0]
+            needle = re.compile(re.escape(f".{class_name}") + r"\s*\{")
+            result = _locate_by_needle(repo_dir, needle, extensions=(".css", ".html", ".htm"), page_hint=page_hint)
+            if result:
+                return result
+        # No class (or its CSS rule couldn't be pinned down) — a lot of quick
+        # static-site markup styles color directly with `style="color:...`
+        # instead of a stylesheet class. Match that literal inline value
+        # directly rather than requiring a class that doesn't exist here.
+        style_match = re.search(r'style="[^"]*\bcolor\s*:\s*(#[0-9a-fA-F]{3,8})', html)
+        if style_match:
+            needle = re.compile(r"color:\s*" + re.escape(style_match.group(1)), re.IGNORECASE)
+            return _locate_by_needle(repo_dir, needle, extensions=(".html", ".htm"), page_hint=page_hint)
+        return None
+
+    if rule_id in ("document-title", "page-has-heading-one"):
+        # The violating node is always just a bare <html> with nothing to
+        # search content-wise — only the scanned page's own URL can say which
+        # file this is. Never guess without it, and re-confirm the element is
+        # genuinely still missing in that exact file before handing back a
+        # location (the page_url could be stale relative to the repo).
+        if not page_hint:
+            logger.info("[LocateSource] %s has no distinguishing content — needs the scanned page's URL to target safely, declining", rule_id)
             return None
-        class_name = class_match.group(1).strip().split()[0]
-        needle = re.compile(re.escape(f".{class_name}") + r"\s*\{")
-        return _locate_by_needle(repo_dir, needle, extensions=(".css", ".html"))
+        full_path = repo_dir / page_hint
+        if not full_path.is_file():
+            logger.info("[LocateSource] %s -> scanned page %s not found in repo", rule_id, page_hint)
+            return None
+        text = _safe_read(full_path)
+        already_present = (
+            re.search(r"<title\b", text, re.IGNORECASE) if rule_id == "document-title"
+            else re.search(r"<h1\b", text, re.IGNORECASE)
+        )
+        if already_present:
+            logger.info("[LocateSource] %s -> %s already has one, nothing to fix", rule_id, page_hint)
+            return None
+        logger.info("[LocateSource] %s -> %s (targeted directly via the scanned page's URL)", rule_id, page_hint)
+        return (page_hint, 1)
 
+    chain = _parse_target_chain(target)
+    tag_match = re.match(r"<(\w+)", html)
+    tag = tag_match.group(1).lower() if tag_match else None
+
+    logger.info(
+        "[LocateSource] Violation rule=%s element=%s selector=%s",
+        rule_id, tag or "?", (target[-1] if isinstance(target, list) and target else target),
+    )
+
+    id_match = re.search(r'\bid="([^"]+)"', html)
     class_match = re.search(r'class="([^"]+)"', html)
-    if class_match:
-        class_name = class_match.group(1).strip().split()[0]
-        # Accept both the JSX (className) and plain-HTML (class) spellings —
-        # a violation's outerHTML always reports the rendered "class" attribute
-        # regardless of which one the source actually wrote.
-        needle = re.compile(r'\bclass(?:Name)?="' + re.escape(class_name) + r'"')
-        return _locate_by_needle(repo_dir, needle)
 
-    # No class — try other attributes next. Unlike className/htmlFor/tabIndex
-    # etc, these are written identically in JSX and in the rendered DOM, so a
-    # literal search for them is safe. Ordered roughly by how likely each is
-    # to actually be unique.
-    for attr in ("id", "aria-label", "name", "href", "src", "alt", "placeholder", "role"):
-        attr_match = re.search(re.escape(attr) + r'="([^"]+)"', html)
-        if not attr_match:
-            continue
-        needle = re.compile(re.escape(f'{attr}="{attr_match.group(1)}"'))
-        located = _locate_by_needle(repo_dir, needle)
-        if located:
-            return located
+    if id_match or class_match:
+        if id_match:
+            pattern = re.compile(r'\bid="' + re.escape(id_match.group(1)) + r'"')
+            label, score = f'id="{id_match.group(1)}"', 0.97
+        else:
+            full_value = class_match.group(1).strip()
+            pattern = re.compile(r'\bclass(?:Name)?="' + re.escape(full_value) + r'"')
+            label, score = f'class="{full_value}"', 0.9
+        logger.info("[LocateSource] Element has its own %s — using it exclusively", label)
+        result, ambiguous = _try_candidate(repo_dir, pattern, SOURCE_EXTENSIONS, score, label, chain, page_hint)
+        if result:
+            return result
+        if ambiguous:
+            deterministic = _disambiguate_by_missing_name(repo_dir, rule_id, ambiguous)
+            if deterministic:
+                return deterministic
+            ai_result = _ai_disambiguate(rule_id, html, target, ambiguous)
+            if ai_result:
+                return ai_result
+        logger.info("[LocateSource] Auto-fix blocked for safety")
+        return None
 
-    # Still nothing — try the element's own visible text (e.g. a heading or
-    # button with no class or attributes at all, just a label). Skip anything
-    # too short to be a safe signal on its own.
-    text = re.sub(r"<[^>]+>", "", html).strip()
-    if len(text) >= 3:
-        located = _locate_by_needle(repo_dir, re.compile(re.escape(text)))
-        if located:
-            return located
+    last_ambiguous: list[tuple[str, int, str]] = []
+    ancestor = _nearest_identified_ancestor(chain) if len(chain) > 1 else None
+    if ancestor and tag:
+        anc_desc = f"#{ancestor['id']}" if ancestor.get("id") else f".{ancestor['classes'][0]}"
+        anc_label = f"{ancestor.get('tag') or '*'}{anc_desc} > {tag}"
+        result, ambiguous = _try_ancestor_scoped_candidate(repo_dir, ancestor, tag, chain, SOURCE_EXTENSIONS, anc_label, page_hint)
+        if result:
+            return result
+        if ambiguous:
+            last_ambiguous = ambiguous
 
-    tag_match = re.match(r'<(\w+)', html)
-    if not tag_match or tag_match.group(1).lower() in ("div", "span"):
-        return None  # too generic a tag to safely treat as a unique signal
-    tag = tag_match.group(1).lower()
-    needle = re.compile(r"<" + re.escape(tag) + r"[\s/>]")
-    return _locate_by_needle(repo_dir, needle)
+    candidates = _generate_fallback_candidates(html, tag, chain)
+    logger.info("[LocateSource] No id/class on the element — trying %d fallback candidates", len(candidates))
+    for pattern, extensions, score, label in candidates:
+        result, ambiguous = _try_candidate(repo_dir, pattern, extensions, score, label, chain, page_hint)
+        if result:
+            return result
+        if ambiguous:
+            last_ambiguous = ambiguous
+
+    if last_ambiguous:
+        deterministic = _disambiguate_by_missing_name(repo_dir, rule_id, last_ambiguous)
+        if deterministic:
+            return deterministic
+        ai_result = _ai_disambiguate(rule_id, html, target, last_ambiguous)
+        if ai_result:
+            return ai_result
+
+    logger.info("[LocateSource] No confident candidate found — Auto-fix blocked for safety")
+    return None
+
+
+def _gemini_call(payload: bytes, timeout: int, label: str) -> str | None:
+    """POST one Gemini generateContent request, return its raw text response
+    (or None on failure). Gemini's shared/free-tier endpoint occasionally
+    503s or 429s under load — that's Google's capacity, not a real failure of
+    this specific request — so a transient HTTP error gets a couple of short
+    retries before giving up. A genuine non-transient error (bad request,
+    auth, malformed response) fails immediately instead of being retried
+    pointlessly. Shared by every Gemini call site (patch generation, AI
+    disambiguation) so this resilience only needs to exist once."""
+    last_error: Exception | None = None
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        req = urllib.request.Request(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent"
+            f"?key={Config.GEMINI_API_KEY}",
+            data=payload,
+            headers={"content-type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                result = json.loads(resp.read())
+            candidate = (result.get("candidates") or [{}])[0]
+            text = ((candidate.get("content") or {}).get("parts") or [{}])[0].get("text", "").strip()
+            if text:
+                return text
+            # A 200 with no text isn't success — gemini-3.6-flash sometimes
+            # burns its whole output budget on hidden reasoning and writes
+            # nothing after it (finishReason MAX_TOKENS, empty parts). That's
+            # exactly as transient as a 503: same request again usually reasons
+            # less and leaves room for the actual answer.
+            finish_reason = candidate.get("finishReason", "?")
+            last_error = RuntimeError(f"Gemini {label} returned no text (finishReason={finish_reason})")
+            if attempt < max_attempts - 1:
+                logger.warning("Gemini %s returned empty text (finishReason=%s), retrying (%d/%d)…", label, finish_reason, attempt + 1, max_attempts - 1)
+                time.sleep(min(1.5 * (attempt + 1), 6))
+                continue
+            break
+        except urllib.error.HTTPError as e:
+            last_error = e
+            if e.code in (429, 500, 502, 503, 504) and attempt < max_attempts - 1:
+                logger.warning("Gemini %s request failed (HTTP %s), retrying (%d/%d)…", label, e.code, attempt + 1, max_attempts - 1)
+                time.sleep(min(1.5 * (attempt + 1), 6))
+                continue
+            break
+        except (TimeoutError, urllib.error.URLError) as e:
+            # A slow/unresponsive read is exactly the same "Google's capacity,
+            # not this request" situation as a 503 — just without an HTTP
+            # status to key off, since the connection never got that far.
+            last_error = e
+            if attempt < max_attempts - 1:
+                logger.warning("Gemini %s request timed out, retrying (%d/%d)…", label, attempt + 1, max_attempts - 1)
+                time.sleep(min(1.5 * (attempt + 1), 6))
+                continue
+            break
+        except Exception as e:
+            last_error = e
+            break
+    logger.error("Gemini %s request failed", label, exc_info=last_error)
+    return None
+
+
+def _parse_gemini_json(text: str) -> dict | None:
+    """Parse a Gemini JSON reply leniently: strip a markdown code fence if
+    present, then decode only the leading JSON value and ignore anything the
+    model appended after it (commentary, a second object, trailing prose) —
+    despite being told to answer with ONLY JSON, it sometimes doesn't."""
+    text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        logger.error("Gemini response was not valid JSON: %r", text[:300])
+        return None
+
+
+def _ai_disambiguate(
+    rule_id: str | None, node_html: str, target: list[str] | str | None,
+    candidates: list[tuple[str, int, str]],
+) -> tuple[str, int] | None:
+    """
+    Last-resort disambiguation when deterministic candidate scoring still
+    can't settle on one source location. Sends only the violation's own
+    fingerprint plus a short (±10 line) snippet around each remaining
+    candidate — never a whole file, never the rest of the repo — and asks for
+    a single best match with a confidence score. A low-confidence or
+    unparseable answer is treated exactly like no answer at all: this never
+    "picks the first candidate" as a fallback of its own.
+    """
+    if not Config.GEMINI_API_KEY or not candidates:
+        return None
+    candidates = candidates[:5]
+    listing = "\n\n".join(
+        f"Candidate {i + 1}: {path}:{line}\n```\n{snippet}\n```"
+        for i, (path, line, snippet) in enumerate(candidates)
+    )
+    selector = target[-1] if isinstance(target, list) and target else (target or "(not available)")
+    prompt = f"""An automated accessibility scanner flagged one DOM element on a web page as
+violating rule "{rule_id}". Several source-code locations could plausibly be the one that
+rendered it, and plain text matching couldn't tell them apart. Pick the single correct one.
+
+Violation element (rendered outerHTML): {node_html}
+CSS selector path from the live page: {selector}
+
+Candidate source locations:
+{listing}
+
+Respond with ONLY valid JSON in this exact shape, no other text:
+{{"selected_file": "path/from/one/candidate/above", "reason": "explanation in 10 words or fewer", "confidence": 0.0}}
+
+If you are not genuinely confident which candidate is correct, set "confidence" below 0.5 — do
+not guess just to provide an answer."""
+
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        # thinkingBudget 0: this task needs a direct structured answer, not
+        # hidden chain-of-thought — without this, gemini-3.6-flash spends the
+        # whole output budget "thinking" and returns empty text (finishReason
+        # MAX_TOKENS with no content at all, even on trivial prompts).
+        "generationConfig": {"maxOutputTokens": 1024, "thinkingConfig": {"thinkingBudget": 0}},
+    }).encode()
+    text = _gemini_call(payload, timeout=20, label="disambiguation")
+    if not text:
+        return None
+    decision = _parse_gemini_json(text)
+    if decision is None:
+        return None
+    try:
+        confidence = float(decision.get("confidence", 0) or 0)
+        selected = decision.get("selected_file")
+        if confidence < 0.85 or not selected:
+            logger.info("[LocateSource] AI disambiguation inconclusive (confidence=%.2f)", confidence)
+            return None
+        for path, line, _ in candidates:
+            if path == selected:
+                logger.info(
+                    "[LocateSource] AI disambiguation selected %s:%d confidence=%.2f reason=%s",
+                    path, line, confidence, decision.get("reason", ""),
+                )
+                return (path, line)
+        logger.info("[LocateSource] AI disambiguation named a file not among the candidates — ignoring")
+        return None
+    except Exception:
+        logger.exception("Auto-fix AI disambiguation response was not valid JSON")
+        return None
 
 
 def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
@@ -277,29 +920,371 @@ def _parse_contrast_data(node: dict) -> tuple[str, str, float] | None:
     return fg_match.group(1), bg_match.group(1), ratio
 
 
-def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
+def _pick_match_by_line(matches: list[re.Match], file_content: str, line_no: int | None) -> re.Match | None:
+    """From several regex matches for the same rule pattern, pick the one at
+    (or nearest) line_no — the exact occurrence locate_source identified —
+    instead of always blindly taking the first. line_no=None (no location
+    hint given, e.g. a direct unit-test call) keeps the original behavior of
+    just using the first match."""
+    if not matches:
+        return None
+    if line_no is None:
+        return matches[0]
+    return min(matches, key=lambda m: abs((file_content[:m.start()].count("\n") + 1) - line_no))
+
+
+def _widen_until_unique(file_content: str, match_start: int, before: str, after: str,
+                         max_lines: int = 4) -> dict | None:
+    """
+    Grow (before, after) outward by whole lines until `before` is a unique
+    substring of file_content. Needed when the located occurrence's own
+    matched text is byte-identical to a sibling occurrence (three
+    <button class="icon-btn"> from a .map() loop, say) — validate_patch
+    requires file_content.count(before) == 1, and the bare tag text alone
+    would still count every sibling. Returns None (safe failure) rather than
+    ever replacing "whichever duplicate comes first in the file".
+    """
+    if file_content.count(before) == 1:
+        return {"before": before, "after": after}
+    lines = file_content.splitlines(keepends=True)
+    offset, line_idx = 0, 0
+    for i, line in enumerate(lines):
+        if offset <= match_start < offset + len(line):
+            line_idx = i
+            break
+        offset += len(line)
+    for widen in range(1, max_lines + 1):
+        lo, hi = max(0, line_idx - widen), min(len(lines), line_idx + widen + 1)
+        context_start = sum(len(l) for l in lines[:lo])
+        window = "".join(lines[lo:hi])
+        rel = match_start - context_start
+        # The window itself must be unique in the file, AND the original
+        # occurrence must still be found at its own exact offset within it —
+        # a plain window.replace(before, after, 1) would silently edit
+        # whichever copy of `before` happens to come first in the window,
+        # which isn't necessarily the one this patch was generated for if the
+        # window grew to contain more than one sibling occurrence.
+        if rel < 0 or window[rel:rel + len(before)] != before:
+            continue
+        if file_content.count(window) != 1:
+            continue
+        widened_after = window[:rel] + after + window[rel + len(before):]
+        return {"before": window, "after": widened_after}
+    return None
+
+
+def _finalize_patch(file_content: str, match_start: int, before: str, after: str) -> dict | None:
+    return _widen_until_unique(file_content, match_start, before, after)
+
+
+def _scan_tag_end(file_content: str, tag_start: int) -> tuple[int, str, bool] | None:
+    """
+    Given the index of a tag's opening '<', scan forward tracking quote state
+    and JSX `{...}` brace depth until the tag's own *unquoted, unnested* '>' —
+    so an attribute expression (`onClick={() => x > 1}`) or a quoted value
+    can't end the tag early, unlike the `[^>]*?` patterns used elsewhere in
+    this file for a single known attribute. Not a parser — just enough
+    structural awareness to find a tag's true boundary reliably across HTML/
+    JSX/TSX/Vue text, which is all every caller here actually needs.
+
+    Returns (index_after_closing_'>', tag_name, self_closing), or None if the
+    file ends before the tag closes (malformed/truncated source).
+    """
+    m = re.match(r"<([A-Za-z][\w.:-]*)", file_content[tag_start:])
+    if not m:
+        return None
+    tag_name = m.group(1)
+    i = tag_start + m.end()
+    n = len(file_content)
+    quote = None
+    brace_depth = 0
+    while i < n:
+        c = file_content[i]
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in ("'", '"', "`"):
+            quote = c
+        elif c == "{":
+            brace_depth += 1
+        elif c == "}":
+            brace_depth = max(0, brace_depth - 1)
+        elif brace_depth == 0 and c == ">":
+            self_closing = file_content[i - 1] == "/"
+            return (i + 1, tag_name, self_closing)
+        i += 1
+    return None
+
+
+def _find_tag_occurrences(file_content: str, tag_names: tuple[str, ...]) -> list[dict]:
+    """Every opening tag matching one of tag_names, anywhere in file_content,
+    with exact boundaries from _scan_tag_end (not a `[^>]*?` regex, so a JSX
+    attribute expression containing '>' can't truncate the match)."""
+    occurrences = []
+    alternation = "|".join(re.escape(t) for t in tag_names)
+    for m in re.finditer(r"<(?:" + alternation + r")\b", file_content):
+        bounds = _scan_tag_end(file_content, m.start())
+        if not bounds:
+            continue
+        end, tag_name, self_closing = bounds
+        attrs_end = end - (2 if self_closing else 1)
+        occurrences.append({
+            "start": m.start(), "end": end, "tag": tag_name,
+            "attrs": file_content[m.end():attrs_end], "self_closing": self_closing,
+            "line": file_content[:m.start()].count("\n") + 1,
+            "full": file_content[m.start():end],
+        })
+    return occurrences
+
+
+def _line_start_offset(file_content: str, line_no: int) -> int:
+    lines = file_content.splitlines(keepends=True)
+    idx = max(0, min(line_no - 1, len(lines) - 1))
+    return sum(len(l) for l in lines[:idx])
+
+
+def _find_enclosing_tag(file_content: str, pos: int, tag_names: tuple[str, ...]) -> dict | None:
+    """The nearest tag (by start position) from tag_names whose open...close
+    span encloses pos — used when the element locate_source actually resolved
+    (e.g. a classed <svg>) isn't itself a valid fix target for this rule, but
+    sits inside an interactive ancestor that is (a <button> or <a>)."""
+    best = None
+    for name in tag_names:
+        for om in re.finditer(r"<" + re.escape(name) + r"\b", file_content):
+            if om.start() >= pos:
+                continue
+            bounds = _scan_tag_end(file_content, om.start())
+            if not bounds:
+                continue
+            tag_end, _, self_closing = bounds
+            if self_closing or tag_end > pos:
+                continue
+            close_m = re.search(r"</" + re.escape(name) + r"\s*>", file_content[tag_end:])
+            if not close_m or not (tag_end <= pos <= tag_end + close_m.start()):
+                continue
+            if best is None or om.start() > best["start"]:
+                best = {
+                    "start": om.start(), "end": tag_end, "tag": name,
+                    "attrs": file_content[om.end():tag_end - 1], "self_closing": False,
+                    "line": file_content[:om.start()].count("\n") + 1,
+                    "full": file_content[om.start():tag_end],
+                }
+    return best
+
+
+def _locate_patch_target(file_content: str, line_no: int | None, tag_names: tuple[str, ...]) -> dict | None:
+    """
+    Find the tag a fallback fix should actually modify — replaces each rule
+    branch independently re-deriving its own class-based search, which is
+    exactly why a classless element (`<button></button>`, a JSX custom icon
+    with no wrapper class) could never be fixed even after locate_source
+    already found the right file and line.
+
+    1. A tag from tag_names starting on line_no exactly — the common case,
+       since locate_source already resolved line_no to the right spot,
+       *including* the ancestor-scoped case, where it already points at the
+       ancestor's own opening tag (the <button>), not a nested decorative
+       child — confirmed live against real GitHub/GitLab repos this session.
+    2. If line_no's own tag isn't one of tag_names (the violation's own
+       class/id is what locate_source matched, and that element itself isn't
+       fixable for this rule — a classed <svg> with no wrapper class) — the
+       nearest *enclosing* tag from tag_names.
+    3. No line_no at all (legacy/direct calls, e.g. existing unit tests) —
+       the only occurrence of tag_names in the whole file. Anything more is
+       genuinely ambiguous without a location hint.
+    """
+    occurrences = _find_tag_occurrences(file_content, tag_names)
+    if line_no is not None:
+        exact = [o for o in occurrences if o["line"] == line_no]
+        if len(exact) == 1:
+            return exact[0]
+        if len(exact) > 1:
+            pos = _line_start_offset(file_content, line_no)
+            return min(exact, key=lambda o: abs(o["start"] - pos))
+        pos = _line_start_offset(file_content, line_no)
+        return _find_enclosing_tag(file_content, pos, tag_names)
+    if len(occurrences) == 1:
+        return occurrences[0]
+    return None
+
+
+def _apply_attribute(tag_info: dict, attr: str, value: str) -> dict:
+    """Add attr="value" to a tag already located by _locate_patch_target,
+    formatted the same way every rule branch below built its patch by hand."""
+    attrs = tag_info["attrs"].rstrip()
+    tail = " />" if tag_info["self_closing"] else ">"
+    after = f'<{tag_info["tag"]}{attrs} {attr}="{value}"{tail}'
+    return {"before": tag_info["full"], "after": after}
+
+
+_MEANINGLESS_WORDS = {"icon", "btn", "button", "link", "svg", "img", "image", "el", "element"}
+_DECORATIVE_AFFIXES = ("icon-", "-icon", "btn-", "-btn", "-button", "button-", "link-", "-link")
+
+
+def _humanize_slug(slug: str) -> str:
+    """'trail-jacket_v2' -> 'Trail Jacket V2' — the same derivation image-alt
+    already used for filenames, extracted so label inference can share it."""
+    name = re.sub(r"[-_]+", " ", slug).strip()
+    return name.title() if name else ""
+
+
+def _derive_page_title(file_content: str) -> str:
+    """Best-effort human-readable title for a page missing a <title>/<h1> —
+    prefers the site's own <meta name="description"> (present on every real
+    page, unlike a title), falls back to an existing <h1>/<h2>'s text, and
+    only as a last resort a generic "Page" placeholder. Never fabricates
+    specific claims about the site, just names it."""
+    meta_match = re.search(r'<meta\s+name="description"\s+content="([^"]+)"', file_content, re.IGNORECASE)
+    if meta_match:
+        return meta_match.group(1).strip()
+    heading_match = re.search(r"<h[12][^>]*>(.*?)</h[12]>", file_content, re.IGNORECASE | re.DOTALL)
+    if heading_match:
+        text = re.sub(r"<[^>]+>", "", heading_match.group(1)).strip()
+        if text:
+            return text
+    return "Page"
+
+
+def _strip_decorative_affixes(token: str) -> str:
+    changed = True
+    while changed:
+        changed = False
+        for affix in _DECORATIVE_AFFIXES:
+            if affix.startswith("-") and token.endswith(affix):
+                token = token[: -len(affix)]
+                changed = True
+            elif affix.endswith("-") and token.startswith(affix):
+                token = token[len(affix):]
+                changed = True
+    return token
+
+
+def _component_derived_label(html: str) -> str | None:
+    """`<DownloadIcon />` -> "Download" — a capitalized JSX tag name is
+    always a custom component, never a real HTML element, so this is a safe
+    signal wherever it's found (not just as the direct violating element —
+    `<button><DownloadIcon /></button>`'s button-name fix should still infer
+    "Download" from its icon child)."""
+    m = re.search(r"<([A-Z]\w*)", html)
+    if not m:
+        return None
+    name = re.sub(r"(Icon|Svg|Glyph|Button)$", "", m.group(1)) or m.group(1)
+    words = re.findall(r"[A-Z][a-z0-9]*|[A-Z]+(?![a-z])", name)
+    label = " ".join(words)
+    return label if label and label.lower() not in _MEANINGLESS_WORDS else None
+
+
+def _class_or_id_derived_label(html: str) -> str | None:
+    """The element's (or its icon child's) own id or class, first token, with
+    decorative affixes stripped — "menu-btn" -> "Menu", "download-btn" ->
+    "Download", id="download-action" -> "Download Action". An id is just as
+    real a developer-chosen semantic signal as a class, so both are tried
+    (id first — it's typically the more specific of the two when an element
+    has one at all). A token that's *only* decorative filler ("icon-btn" ->
+    "icon") is rejected rather than used, same as any other meaningless
+    guess."""
+    for attr in ("id", "class"):
+        attr_match = re.search(attr + r'="([^"]+)"', html)
+        if not attr_match:
+            continue
+        token = attr_match.group(1).strip().split()[0] if attr_match.group(1).strip() else ""
+        if not token:
+            continue
+        stripped = _strip_decorative_affixes(token)
+        if stripped and stripped.lower() not in _MEANINGLESS_WORDS:
+            return _humanize_slug(stripped)
+    return None
+
+
+def _href_derived_label(html: str) -> str | None:
+    """href="/download" -> "Download" — only for links; a fragment-only or
+    empty href carries no signal."""
+    href_match = re.search(r'href="([^"]+)"', html)
+    if not href_match or href_match.group(1) in ("#", ""):
+        return None
+    path = href_match.group(1).split("?")[0].split("#")[0].rstrip("/")
+    segment = path.rsplit("/", 1)[-1]
+    if not segment:
+        return None
+    label = _humanize_slug(re.sub(r"\.\w+$", "", segment))
+    return label if label and label.lower() not in _MEANINGLESS_WORDS else None
+
+
+def _text_derived_label(html: str) -> str | None:
+    text = re.sub(r"<[^>]+>", "", html).strip()
+    return text if len(text) >= 2 else None
+
+
+def _infer_accessible_name(html: str, last_resort: str) -> tuple[str, str]:
+    """
+    Context-aware label inference, replacing a hard-coded generic string.
+    Tried in order — a custom icon component's name, the element's (or its
+    icon child's) own class, the link's href path, then any real visible
+    text — before ever falling back to `last_resort`, which only fires when
+    every one of those comes up with nothing (e.g. a genuinely bare
+    `<button></button>` with zero surrounding context, the ticket's own
+    simplest example — still worth a working fix rather than none at all).
+    Returns (label, source) — source is for the [FallbackFix] log line.
+    """
+    for label, source in (
+        (_component_derived_label(html), "component name"),
+        (_class_or_id_derived_label(html), "id/class"),
+        (_href_derived_label(html), "href"),
+        (_text_derived_label(html), "text content"),
+    ):
+        if label:
+            return label, source
+    return last_resort, "last-resort default"
+
+
+def _fallback_patch(rule: dict, node: dict, file_content: str, line_no: int | None = None) -> dict | None:
     """
     Deterministic placeholder fixes used only when GEMINI_API_KEY isn't configured.
     These prove the rest of the pipeline works without needing a live Gemini call;
     the generated text is a
     generic/derived placeholder, not a real contextual label — add a real API key for that.
+
+    `line_no`, when given, is the exact occurrence locate_source identified —
+    every branch below picks the regex match at that line instead of always
+    the first, and widens (before, after) with surrounding context if that
+    occurrence's own text isn't unique in the file on its own (see
+    _widen_until_unique). Optional and defaults to today's "first match"
+    behavior so every existing direct call/test is unaffected.
     """
     rule_id = rule.get("id")
     html = (node or {}).get("html", "")
 
-    if rule_id == "button-name":
-        class_match = re.search(r'class="([^"]+)"', html)
-        if not class_match:
+    if rule_id in ("button-name", "link-name", "svg-img-alt"):
+        # Shared strategy for every "needs an accessible name" rule — find the
+        # right tag (the element itself if it's already the fixable kind, its
+        # nearest interactive ancestor otherwise — see _locate_patch_target),
+        # infer a meaningful label from context instead of a hard-coded
+        # string, and add aria-label. This is what makes a *classless*
+        # `<button></button>` or a JSX custom icon (`<DownloadIcon />` inside
+        # an unclassed <button>) fixable at all — the old code required a
+        # `class` attribute on the violating element just to find it again,
+        # even after locate_source had already found the right file and line.
+        tag_names, last_resort = {
+            "button-name": (("button",), "Menu"),
+            "link-name": (("a",), "Learn more"),
+            "svg-img-alt": (("svg",), "Image"),
+        }[rule_id]
+        target = _locate_patch_target(file_content, line_no, tag_names)
+        if not target:
+            logger.info("[FallbackFix] Rule: %s", rule_id)
+            logger.info("[FallbackFix] No supported fix strategy for this markup")
+            logger.info("[FallbackFix] Reason: no <%s> found at or enclosing the located line", "/".join(tag_names))
             return None
-        class_name = class_match.group(1).strip().split()[0]
-        pattern = re.compile(r'<button([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
-        m = pattern.search(file_content)
-        if not m or "aria-label" in m.group(1):
-            return None
-        attrs, self_close = m.group(1).rstrip(), m.group(2)
-        before = m.group(0)
-        after = f'<button{attrs} aria-label="Menu"' + (' ' if self_close else '') + f'{self_close}>'
-        return {"before": before, "after": after}
+        if "aria-label" in target["attrs"]:
+            return ALREADY_FIXED
+        label, source = _infer_accessible_name(html, last_resort)
+        confidence = 0.95 if target["line"] == line_no else (0.85 if line_no is not None else 0.8)
+        logger.info("[FallbackFix] Rule: %s", rule_id)
+        logger.info("[FallbackFix] Selected candidate: %s:%d", target["tag"], target["line"])
+        logger.info("[FallbackFix] Fix strategy: add aria-label (label from %s)", source)
+        logger.info("[FallbackFix] Confidence: %.2f", confidence)
+        patch = _apply_attribute(target, "aria-label", label)
+        return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
 
     if rule_id == "image-alt":
         # Derive alt text from the rendered src's filename (e.g. /jacket.svg -> "Jacket").
@@ -309,17 +1294,16 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         if src_match:
             filename = src_match.group(1).rsplit("/", 1)[-1]
             name = re.sub(r"\.\w+$", "", filename)
-            name = re.sub(r"[-_]+", " ", name).strip()
-            if name:
-                alt_text = name.title()
+            alt_text = _humanize_slug(name) or "Image"
         pattern = re.compile(r"<img([^>]*?)(/?)>")
-        m = pattern.search(file_content)
-        if not m or "alt=" in m.group(1):
+        matches = [m for m in pattern.finditer(file_content) if "alt=" not in m.group(1)]
+        m = _pick_match_by_line(matches, file_content, line_no)
+        if not m:
             return None
         attrs, self_close = m.group(1).rstrip(), m.group(2)
         before = m.group(0)
         after = f'<img{attrs} alt="{alt_text}"' + (' ' if self_close else '') + f'{self_close}>'
-        return {"before": before, "after": after}
+        return _finalize_patch(file_content, m.start(), before, after)
 
     if rule_id == "label":
         # Derive aria-label from the specific input's own placeholder text — this
@@ -331,43 +1315,29 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         tag_match = re.match(r"<(\w+)", html.strip())
         tag = tag_match.group(1) if tag_match else "input"
         pattern = re.compile(r"<" + re.escape(tag) + r"([^>]*?)(/?)>")
-        for m in pattern.finditer(file_content):
-            attrs = m.group(1)
-            if f'placeholder="{placeholder}"' in attrs and "aria-label=" not in attrs:
-                self_close = m.group(2)
-                before = m.group(0)
-                after = f'<{tag}{attrs.rstrip()} aria-label="{placeholder}"' + (' ' if self_close else '') + f'{self_close}>'
-                return {"before": before, "after": after}
-        return None
+        matches = [
+            m for m in pattern.finditer(file_content)
+            if f'placeholder="{placeholder}"' in m.group(1) and "aria-label=" not in m.group(1)
+        ]
+        m = _pick_match_by_line(matches, file_content, line_no)
+        if not m:
+            return None
+        attrs, self_close = m.group(1), m.group(2)
+        before = m.group(0)
+        after = f'<{tag}{attrs.rstrip()} aria-label="{placeholder}"' + (' ' if self_close else '') + f'{self_close}>'
+        return _finalize_patch(file_content, m.start(), before, after)
 
     if rule_id == "html-has-lang":
         # Always correct, no guessing needed: the site's own text content is English.
         pattern = re.compile(r"<html([^>]*?)(/?)>")
-        m = pattern.search(file_content)
-        if not m or "lang=" in m.group(1):
+        matches = [m for m in pattern.finditer(file_content) if "lang=" not in m.group(1)]
+        m = _pick_match_by_line(matches, file_content, line_no)
+        if not m:
             return None
         attrs, self_close = m.group(1).rstrip(), m.group(2)
         before = m.group(0)
         after = f'<html{attrs} lang="en"' + (' ' if self_close else '') + f'{self_close}>'
-        return {"before": before, "after": after}
-
-    if rule_id == "link-name":
-        # A generic accessible name (screen readers read aria-label over visible
-        # text) — satisfies the rule mechanically without changing what's on screen.
-        class_match = re.search(r'class="([^"]+)"', html)
-        if not class_match:
-            return None
-        class_name = class_match.group(1).strip().split()[0]
-        tag_match = re.match(r"<(\w+)", html.strip())
-        tag = tag_match.group(1) if tag_match else "a"
-        pattern = re.compile(r"<" + re.escape(tag) + r'([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>')
-        m = pattern.search(file_content)
-        if not m or "aria-label" in m.group(1):
-            return None
-        attrs, self_close = m.group(1).rstrip(), m.group(2)
-        before = m.group(0)
-        after = f'<{tag}{attrs} aria-label="Learn more"' + (' ' if self_close else '') + f'{self_close}>'
-        return {"before": before, "after": after}
+        return _finalize_patch(file_content, m.start(), before, after)
 
     if rule_id == "heading-order":
         # Shift the heading down exactly one level (h3 -> h2, etc). This is a
@@ -387,13 +1357,14 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
             body = r'<' + old_tag + r'([^>]*\bclass(?:Name)?="' + re.escape(class_name) + r'"[^>]*?)(/?)>(.*?)</' + old_tag + r'>'
         else:
             body = r"<" + old_tag + r"([^>]*?)(/?)>(.*?)</" + old_tag + r">"
-        m = re.compile(body, re.DOTALL).search(file_content)
+        matches = list(re.compile(body, re.DOTALL).finditer(file_content))
+        m = _pick_match_by_line(matches, file_content, line_no)
         if not m:
             return None
         attrs, self_close, inner = m.group(1), m.group(2), m.group(3)
         before = m.group(0)
         after = f"<{new_tag}{attrs}{self_close}>{inner}</{new_tag}>"
-        return {"before": before, "after": after}
+        return _finalize_patch(file_content, m.start(), before, after)
 
     if rule_id == "color-contrast":
         # Genuinely computable, not a guess: WCAG contrast is a defined formula.
@@ -405,39 +1376,210 @@ def _fallback_patch(rule: dict, node: dict, file_content: str) -> dict | None:
         fg_hex, bg_hex, target_ratio = contrast_data
         new_fg = _adjust_to_ratio(fg_hex, bg_hex, target_ratio)
         pattern = re.compile(r"color:\s*" + re.escape(fg_hex), re.IGNORECASE)
-        m = pattern.search(file_content)
+        matches = list(pattern.finditer(file_content))
+        m = _pick_match_by_line(matches, file_content, line_no)
         if not m:
             return None
         before = m.group(0)
         after = f"color: {new_fg}"
-        return {"before": before, "after": after}
+        return _finalize_patch(file_content, m.start(), before, after)
+
+    if rule_id == "document-title":
+        # locate_source only hands this rule a location when it already
+        # confirmed (against the actual scanned page's file) that no <title>
+        # exists yet — safe to insert one right after <head ...>.
+        m = re.search(r"<head\b[^>]*>", file_content, re.IGNORECASE)
+        if not m:
+            return None
+        title_text = _derive_page_title(file_content)
+        before = m.group(0)
+        after = f"{before}\n  <title>{title_text}</title>"
+        return _finalize_patch(file_content, m.start(), before, after)
+
+    if rule_id == "page-has-heading-one":
+        # Same guarantee as above — locate_source already confirmed this
+        # exact page has no <h1> anywhere before handing back a location.
+        m = re.search(r"<body\b[^>]*>", file_content, re.IGNORECASE)
+        if not m:
+            return None
+        heading_text = _derive_page_title(file_content)
+        before = m.group(0)
+        after = f"{before}\n  <h1>{heading_text}</h1>"
+        return _finalize_patch(file_content, m.start(), before, after)
+
+    if rule_id == "aria-command-name":
+        # A role="button"/"link"/etc element with no accessible name — same
+        # "add aria-label, infer from whatever real signal exists" strategy
+        # as button-name/link-name, just for an element identified by its
+        # ARIA role instead of by being a native <button>/<a>.
+        tag_match = re.match(r"<(\w+)", html.strip())
+        if not tag_match:
+            return None
+        target = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        if not target:
+            return None
+        if "aria-label" in target["attrs"]:
+            return ALREADY_FIXED
+        role_match = re.search(r'role="([^"]+)"', html)
+        last_resort = _humanize_slug(role_match.group(1)) if role_match else "Action"
+        label, source = _infer_accessible_name(html, last_resort)
+        logger.info("[FallbackFix] Rule: %s", rule_id)
+        logger.info("[FallbackFix] Fix strategy: add aria-label (label from %s)", source)
+        patch = _apply_attribute(target, "aria-label", label)
+        return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
+
+    if rule_id == "aria-hidden-focus":
+        # A focusable element left reachable by keyboard inside an
+        # aria-hidden ancestor. Removing aria-hidden could un-hide content
+        # that's intentionally hidden (a closed panel, etc) — the safe,
+        # always-correct fix is to take the focusable element itself out of
+        # the tab order instead, which is what the rule actually requires.
+        tag_match = re.match(r"<(\w+)", html.strip())
+        if not tag_match:
+            return None
+        target = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        if not target:
+            return None
+        if re.search(r'tabindex="-?\d+"', target["attrs"]):
+            return ALREADY_FIXED
+        patch = _apply_attribute(target, "tabindex", "-1")
+        return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
+
+    if rule_id in ("aria-roles", "aria-required-parent"):
+        # An invalid role value, or a role used outside the specific parent
+        # structure it requires (e.g. role="option" with no listbox
+        # ancestor). Neither has a deterministic "correct" role to guess —
+        # removing the unsupported role is the only fix that's never wrong:
+        # the element just reverts to its native (valid) implicit semantics.
+        role_match = re.search(r'\srole="[^"]*"', html)
+        if not role_match:
+            return None
+        tag_match = re.match(r"<(\w+)", html.strip())
+        if not tag_match:
+            return None
+        target = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        if not target or "role=" not in target["attrs"]:
+            return ALREADY_FIXED if target else None
+        before = target["full"]
+        after = re.sub(r'\srole="[^"]*"', "", before, count=1)
+        return _finalize_patch(file_content, target["start"], before, after)
+
+    if rule_id == "aria-required-attr":
+        # role="checkbox"/"switch" without aria-checked, role="combobox"
+        # without aria-expanded, etc — each of these ARIA roles has exactly
+        # one commonly-missing required state attribute, and "false"/"0" is
+        # always a valid, safe starting value for it (never wrong, even if
+        # not yet the live value once the page's JS takes over).
+        role_match = re.search(r'role="([^"]+)"', html)
+        if not role_match:
+            return None
+        required_attr = {
+            "checkbox": ("aria-checked", "false"), "switch": ("aria-checked", "false"),
+            "menuitemcheckbox": ("aria-checked", "false"), "radio": ("aria-checked", "false"),
+            "combobox": ("aria-expanded", "false"), "slider": ("aria-valuenow", "0"),
+            "scrollbar": ("aria-valuenow", "0"),
+        }.get(role_match.group(1))
+        if not required_attr:
+            return None
+        attr, value = required_attr
+        tag_match = re.match(r"<(\w+)", html.strip())
+        if not tag_match:
+            return None
+        target = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        if not target:
+            return None
+        if attr in target["attrs"]:
+            return ALREADY_FIXED
+        patch = _apply_attribute(target, attr, value)
+        return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
+
+    if rule_id == "aria-valid-attr-value":
+        # A boolean ARIA attribute set to something other than true/false
+        # (aria-expanded="perhaps"). There's no way to guess the *intended*
+        # state, but "false" is always a valid token for it — same
+        # never-wrong-just-not-yet-live-state reasoning as aria-required-attr.
+        m = re.search(r'\s(aria-[\w-]+)="(?!true"|false")([^"]*)"', html)
+        if not m:
+            return None
+        attr = m.group(1)
+        pattern = re.compile(re.escape(attr) + r'="[^"]*"')
+        matches = list(pattern.finditer(file_content))
+        fm = _pick_match_by_line(matches, file_content, line_no)
+        if not fm:
+            return None
+        before = fm.group(0)
+        after = f'{attr}="false"'
+        return _finalize_patch(file_content, fm.start(), before, after)
+
+    if rule_id == "aria-allowed-attr":
+        # An ARIA attribute not permitted on this element's implicit role
+        # (aria-checked on a plain <img>). No fix can guess a *replacement*
+        # attribute that carries the original intent — removing the
+        # disallowed one is the only always-correct action, so this is
+        # scoped to <img>, where "not allowed" is unambiguous rather than
+        # role-dependent.
+        if not html.strip().lower().startswith("<img"):
+            return None
+        aria_match = re.search(r'\s(aria-[\w-]+)="[^"]*"', html)
+        if not aria_match:
+            return None
+        attr = aria_match.group(1)
+        pattern = re.compile(r"<img([^>]*?)(/?)>")
+        matches = [m for m in pattern.finditer(file_content) if attr in m.group(1)]
+        m = _pick_match_by_line(matches, file_content, line_no)
+        if not m:
+            return None
+        before = m.group(0)
+        new_attrs = re.sub(r'\s' + re.escape(attr) + r'="[^"]*"', "", m.group(1))
+        after = f"<img{new_attrs}{m.group(2)}>"
+        return _finalize_patch(file_content, m.start(), before, after)
 
     return None
 
 
-def generate_patch(rule: dict, node: dict, file_content: str) -> dict | None:
+def generate_patch(rule: dict, node: dict, file_content: str, line_no: int | None = None, file_path: str | None = None) -> dict | None:
     """
     Ask Gemini for a verbatim before/after snippet. Returns None on any failure.
     Rules with a deterministic fallback always use it, key or no key — that's
     what keeps those auto-merge-eligible regardless of whether Gemini is configured.
+
+    `line_no`, when given, is the exact source line locate_source resolved the
+    violation to — the file content shown to Gemini is windowed to the ±40
+    lines around it instead of sent in full. Smaller prompt, and it
+    structurally disambiguates: only one instance of any repeated markup
+    pattern is ever in view, so there's nothing for Gemini to confuse it with.
+    The "before" it returns is still validated as a substring of the *full*
+    file by validate_patch, unchanged.
     """
     rule_id = rule.get("id", "unknown")
     if rule_id in RULES_WITH_FALLBACK:
-        return _fallback_patch(rule, node, file_content)
+        return _fallback_patch(rule, node, file_content, line_no)
     if not Config.GEMINI_API_KEY:
         return None
-    prompt = f"""You are fixing a web accessibility violation in a React (JSX) source file.
+
+    context = file_content
+    if line_no is not None:
+        lines = file_content.splitlines(keepends=True)
+        lo, hi = max(0, line_no - 41), min(len(lines), line_no + 40)
+        windowed = "".join(lines[lo:hi])
+        if windowed.strip():
+            context = windowed
+
+    is_jsx = (file_path or "").endswith((".jsx", ".tsx"))
+    language = "React (JSX)" if is_jsx else "HTML"
+    element_kind = "JSX" if is_jsx else "HTML"
+    prompt = f"""You are fixing a web accessibility violation in a {language} source file.
 
 Violation: {rule_id} — {rule.get("help", "")}
 Details: {rule.get("description", "")}
 The offending rendered HTML: {(node or {}).get("html", "")}
 
-Here is the full source file content:
+Here is the relevant slice of the source file content (around the flagged element):
 ---
-{file_content}
+{context}
 ---
 
-Find the exact JSX element responsible for this violation and provide a minimal fix (e.g. add an aria-label). Respond with ONLY valid JSON in this exact shape, no other text:
+Find the exact {element_kind} element responsible for this violation and provide a minimal fix (e.g. add an aria-label). The element in the source file may look slightly different from "the offending rendered HTML" above (e.g. the browser adds implicit attributes) — trust the source file content as the ground truth to edit. Respond with ONLY valid JSON in this exact shape, no other text, no reasoning, no commentary before or after it:
 {{
   "before": "the exact original lines from the file above that need to change, copied character-for-character including whitespace",
   "after": "the corrected replacement for those exact lines"
@@ -447,30 +1589,19 @@ The "before" value MUST be an exact substring of the file content given above �
 
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        # gemini-3.6-flash spends a chunk of this budget on hidden reasoning
-        # before it ever writes the JSON answer — 800 was tuned for Claude,
-        # which has no such step, and left real patches truncated to nothing.
-        "generationConfig": {"maxOutputTokens": 4096},
+        # thinkingBudget 0: disables gemini-3.6-flash's hidden reasoning step
+        # so it writes the JSON answer directly instead of burning the output
+        # budget on invisible "thinking" and returning nothing (finishReason
+        # MAX_TOKENS with empty content — observed even on trivial prompts).
+        "generationConfig": {"maxOutputTokens": 2048, "thinkingConfig": {"thinkingBudget": 0}},
     }).encode()
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent"
-        f"?key={Config.GEMINI_API_KEY}",
-        data=payload,
-        headers={"content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-        text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-        text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        patch = json.loads(text)
-        if not patch.get("before") or not patch.get("after"):
-            return None
-        return {"before": patch["before"], "after": patch["after"]}
-    except Exception:
-        logger.exception("Auto-fix patch generation failed")
+    text = _gemini_call(payload, timeout=30, label="patch generation")
+    if not text:
         return None
+    patch = _parse_gemini_json(text)
+    if patch is None or not patch.get("before") or not patch.get("after"):
+        return None
+    return {"before": patch["before"], "after": patch["after"]}
 
 
 # Conventional root-component locations, checked in order — first one that
@@ -523,7 +1654,7 @@ Respond with ONLY the complete, corrected file content — no markdown fences, n
 
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 4096},
+        "generationConfig": {"maxOutputTokens": 4096, "thinkingConfig": {"thinkingBudget": 0}},
     }).encode()
 
     # Retries a plain urllib socket hang observed directly during testing — the
@@ -1023,7 +2154,7 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
             full_path.write_text(new_content, encoding="utf-8")
             line_no = 1
         else:
-            located = locate_source(repo_dir, node_html, rule.get("id"))
+            located = locate_source(repo_dir, node_html, rule.get("id"), (node or {}).get("target"), page_url)
             if not located:
                 step("Locate source", False, "Could not uniquely match this violation to a source file")
                 return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
@@ -1033,7 +2164,10 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
             full_path = repo_dir / file_path
             file_content = full_path.read_text(encoding="utf-8")
 
-            patch = generate_patch(rule, node, file_content)
+            patch = generate_patch(rule, node, file_content, line_no, file_path)
+            if patch is ALREADY_FIXED:
+                step("Generate fix", True, "This element already has the required attribute — nothing to fix")
+                return {"status": "already_fixed", "steps": steps}
             if not patch:
                 rule_id = rule.get("id")
                 if rule_id in RULES_WITH_FALLBACK:

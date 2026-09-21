@@ -68,6 +68,10 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sage flex-shrink-0">
         <CheckCircle2 size={13} /> {result.merged ? 'Fixed & merged' : 'Fixed'}
       </span>
+    ) : result.status === 'already_fixed' ? (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sage flex-shrink-0">
+        <CheckCircle2 size={13} /> Already fixed
+      </span>
     ) : (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-coral flex-shrink-0">
         <XCircle size={13} /> Failed
@@ -108,6 +112,10 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
       {result.status === 'verified' ? (
         <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
           <CheckCircle2 size={14} /> {result.merged ? 'Fix Verified & Merged' : 'Fix Verified'}
+        </span>
+      ) : result.status === 'already_fixed' ? (
+        <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
+          <CheckCircle2 size={14} /> Already Fixed
         </span>
       ) : (
         <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-coral">
@@ -158,6 +166,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   const fixAllKey = `fixall::${rule.id}`;
   const session = scanSessions.find(s => s.id === sessionId);
   const fixAll = session?.autoFixState?.[fixAllKey] || { status: 'idle', results: [] };
+  const [expandedIdx, setExpandedIdx] = useState(null);
 
   if (!pageUrl || nodes.length < 2) return null;
 
@@ -205,7 +214,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
       );
     }
     const results = fixAll.results;
-    const verifiedCount = results.filter(r => r.status === 'verified').length;
+    const verifiedCount = results.filter(r => r.status === 'verified' || r.status === 'already_fixed').length;
     return fixAll.status === 'running' ? (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal flex-shrink-0">
         <Loader2 size={12} className="animate-spin" /> Fixing…
@@ -227,7 +236,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   }
 
   const results = fixAll.results;
-  const verifiedCount = results.filter(r => r.status === 'verified').length;
+  const verifiedCount = results.filter(r => r.status === 'verified' || r.status === 'already_fixed').length;
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[12px] font-semibold text-teal">
@@ -236,19 +245,65 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
           : `${verifiedCount} of ${nodes.length} fixed`}
       </span>
       <div className="flex flex-wrap gap-1.5">
-        {results.map((r, i) => (
-          <span key={i} className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
-            r.status === 'verified' ? 'bg-sage/10 text-sage' :
-            r.status === 'failed' ? 'bg-coral/10 text-coral' :
-            'bg-gray-100 text-gray-400'
-          }`}>
-            {r.status === 'running' && <Loader2 size={10} className="animate-spin" />}
-            {r.status === 'verified' && <CheckCircle2 size={10} />}
-            {r.status === 'failed' && <XCircle size={10} />}
-            #{i + 1}
-          </span>
-        ))}
+        {results.map((r, i) => {
+          const hasDetail = r.status === 'verified' || r.status === 'already_fixed' || r.status === 'failed';
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={!hasDetail}
+              onClick={() => setExpandedIdx(prev => prev === i ? null : i)}
+              className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full transition-colors ${
+                hasDetail ? 'cursor-pointer' : 'cursor-default'
+              } ${
+                r.status === 'verified' || r.status === 'already_fixed'
+                  ? `bg-sage/10 text-sage ${expandedIdx === i ? 'ring-1 ring-sage/40' : ''}`
+                  : r.status === 'failed'
+                  ? `bg-coral/10 text-coral ${expandedIdx === i ? 'ring-1 ring-coral/40' : ''}`
+                  : 'bg-gray-100 text-gray-400'
+              }`}
+            >
+              {r.status === 'running' && <Loader2 size={10} className="animate-spin" />}
+              {(r.status === 'verified' || r.status === 'already_fixed') && <CheckCircle2 size={10} />}
+              {r.status === 'failed' && <XCircle size={10} />}
+              #{i + 1}
+            </button>
+          );
+        })}
       </div>
+      {expandedIdx !== null && results[expandedIdx] && (
+        <div className="flex flex-col gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2.5">
+          <p className="text-[11.5px] font-semibold text-ink m-0">
+            #{expandedIdx + 1} — {results[expandedIdx].status === 'already_fixed' ? 'Already Fixed' : results[expandedIdx].status === 'verified' ? (results[expandedIdx].merged ? 'Fix Verified & Merged' : 'Fix Verified') : 'Failed'}
+          </p>
+          {(results[expandedIdx].steps || []).length > 0 && (
+            <div className="flex flex-col gap-1">
+              {results[expandedIdx].steps.map((s, j) => (
+                <div key={j} className="flex items-center gap-1.5 text-[11px]">
+                  {s.ok ? <CheckCircle2 size={10} className="text-sage flex-shrink-0" /> : <XCircle size={10} className="text-coral flex-shrink-0" />}
+                  <span className="text-body">{s.name}</span>
+                  {s.detail && <span className="text-gray-400 truncate">— {s.detail}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {results[expandedIdx].status === 'verified' && results[expandedIdx].pr_url && (
+            <a href={results[expandedIdx].pr_url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal hover:underline w-fit">
+              <GitBranch size={11} /> {results[expandedIdx].merged ? 'View merged Pull Request' : 'View Pull Request'}
+            </a>
+          )}
+          {results[expandedIdx].status === 'verified' && !results[expandedIdx].pr_url && results[expandedIdx].branch_url && (
+            <a href={results[expandedIdx].branch_url} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal hover:underline w-fit">
+              <GitBranch size={11} /> View branch
+            </a>
+          )}
+          {results[expandedIdx].status === 'failed' && results[expandedIdx].error && (
+            <p className="text-[11px] text-coral m-0">{results[expandedIdx].error}</p>
+          )}
+        </div>
+      )}
       {fixAll.status === 'done' && results.some(r => r.status === 'failed') && (
         <div className="flex flex-col gap-1 mt-1">
           {results.map((r, i) => r.status === 'failed' && (

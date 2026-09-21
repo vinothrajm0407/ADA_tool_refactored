@@ -19,8 +19,12 @@ export async function apiFetch(url, opts = {}) {
 
   if (res.status === 401) {
     window.dispatchEvent(new CustomEvent('ada:auth-expired'));
-    const err = new Error('token_expired');
+    // Callers generally do `catch(err => setError(err.message || ...))` — a
+    // friendly message here (rather than an internal code) is what briefly
+    // shows if that redirect hasn't unmounted the page yet.
+    const err = new Error('Your session has expired. Redirecting to login…');
     err.status = 401;
+    err.code = 'token_expired';
     throw err;
   }
 

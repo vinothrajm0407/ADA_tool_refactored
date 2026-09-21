@@ -5,6 +5,7 @@ Uses stdlib smtplib only — no third-party email packages.
 import logging
 import smtplib
 import ssl
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -459,6 +460,30 @@ def _build_report_html(job: dict, pages: list) -> str:
 # SMTP sender
 # ---------------------------------------------------------------------------
 
+def _deliver(msg, to: str) -> None:
+    """Connect to the configured SMTP server and send *msg* to *to*."""
+    host = Config.SMTP_HOST
+    port = int(Config.SMTP_PORT or 587)
+    user = Config.SMTP_USER or ""
+    password = Config.SMTP_PASS or ""
+
+    if port == 465:
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(host, port, context=context) as server:
+            if user and password:
+                server.login(user, password)
+            server.sendmail(msg["From"], [to], msg.as_string())
+    else:
+        with smtplib.SMTP(host, port) as server:
+            server.ehlo()
+            if port == 587:
+                server.starttls(context=ssl.create_default_context())
+                server.ehlo()
+            if user and password:
+                server.login(user, password)
+            server.sendmail(msg["From"], [to], msg.as_string())
+
+
 def _send_email(to: str, subject: str, html_body: str) -> bool:
     """
     Send *html_body* to *to* via SMTP.
@@ -472,30 +497,52 @@ def _send_email(to: str, subject: str, html_body: str) -> bool:
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-        host = Config.SMTP_HOST
-        port = int(Config.SMTP_PORT or 587)
-        user = Config.SMTP_USER or ""
-        password = Config.SMTP_PASS or ""
+        _deliver(msg, to)
 
-        if port == 465:
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(host, port, context=context) as server:
-                if user and password:
-                    server.login(user, password)
-                server.sendmail(msg["From"], [to], msg.as_string())
-        else:
-            with smtplib.SMTP(host, port) as server:
-                server.ehlo()
-                if port == 587:
-                    server.starttls(context=ssl.create_default_context())
-                    server.ehlo()
-                if user and password:
-                    server.login(user, password)
-                server.sendmail(msg["From"], [to], msg.as_string())
-
-        logger.info("Crawl report sent | to=%s subject=%s", to, subject)
+        logger.info("Email sent | to=%s subject=%s", to, subject)
         return True
 
     except Exception:
         logger.exception("_send_email: failed to send to=%s subject=%s", to, subject)
+        return False
+
+
+def send_report_attachment(to_email: str, subject: str, intro_html: str, pdf_bytes: bytes, filename: str) -> bool:
+    """
+    Send *pdf_bytes* as a PDF attachment to *to_email*, with *intro_html* as
+    the email body. Used for on-demand "email me this report" actions.
+
+    Returns True on success, False on any failure (never raises).
+    """
+    try:
+        if not Config.SMTP_ENABLED:
+            logger.debug("send_report_attachment: SMTP disabled — skipping.")
+            return False
+        to_email = (to_email or "").strip()
+        if not to_email:
+            logger.debug("send_report_attachment: blank recipient — skipping.")
+            return False
+        if not Config.SMTP_HOST:
+            logger.warning("send_report_attachment: SMTP_HOST not configured — skipping.")
+            return False
+        if not pdf_bytes:
+            logger.warning("send_report_attachment: no PDF bytes to send.")
+            return False
+
+        msg = MIMEMultipart("mixed")
+        msg["From"]    = Config.SMTP_FROM or Config.SMTP_USER
+        msg["To"]      = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(intro_html, "html", "utf-8"))
+        part = MIMEApplication(pdf_bytes, _subtype="pdf")
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+
+        _deliver(msg, to_email)
+
+        logger.info("Report attachment sent | to=%s subject=%s", to_email, subject)
+        return True
+
+    except Exception:
+        logger.exception("send_report_attachment: failed to send to=%s subject=%s", to_email, subject)
         return False

@@ -2961,6 +2961,39 @@ def get_assistive_scans(
         conn.close()
 
 
+def get_assistive_scan_result(scan_id: int) -> dict | None:
+    """Return one AssistiveScanHistory row with its full ResultPayload."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT Id, ScanType, Url, TimestampUtc, Passed, ResultPayload
+                FROM dbo.AssistiveScanHistory WHERE Id = ?
+                """,
+                (scan_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            payload = json.loads(row.ResultPayload) if row.ResultPayload else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        return {
+            "id": row.Id,
+            "scan_type": row.ScanType,
+            "url": row.Url or "",
+            "timestamp": _ts(row.TimestampUtc),
+            "passed": bool(row.Passed),
+            "payload": payload,
+        }
+    finally:
+        conn.close()
+
+
 # ── Integration CRUD ──────────────────────────────────────────────────────────
 
 def save_integration(user_id: int, platform: str, workspace_id: str,

@@ -1,4 +1,4 @@
-export default function DataTable({ columns, children, className = '' }) {
+export default function DataTable({ columns, children, className = '', cellBorders = false }) {
   return (
     <div className={`bg-white border border-gray-100 rounded-xl overflow-hidden ${className}`}>
       <div className="overflow-x-auto">
@@ -11,7 +11,7 @@ export default function DataTable({ columns, children, className = '' }) {
                   <th
                     key={label + i}
                     scope="col"
-                    className={`whitespace-nowrap ${align === 'right' ? 'text-right' : ''}`}
+                    className={`whitespace-nowrap ${align === 'right' ? 'text-right' : ''} ${cellBorders && i < columns.length - 1 ? 'border-r border-gray-100' : ''}`}
                   >
                     {label}
                   </th>

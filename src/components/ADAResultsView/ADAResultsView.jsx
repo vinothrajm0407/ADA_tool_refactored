@@ -386,6 +386,10 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
                   <CheckCircle2 size={14} /> {autoFixResult.merged ? 'Fix Verified & Merged' : 'Fix Verified'}
                 </span>
+              ) : autoFixResult.status === 'already_fixed' ? (
+                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-sage">
+                  <CheckCircle2 size={14} /> Already Fixed
+                </span>
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-coral">
                   <XCircle size={14} /> Auto Fix Failed

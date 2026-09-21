@@ -11,25 +11,12 @@ import { MODULES, buildAssistiveResult } from '../config/assistiveModules';
 // axe rule tag each module roughly corresponds to, so "needs review" history
 // items can be attributed to the module that most likely flagged them —
 // approximate, but grounded in each module's real endpoint/description.
-const SCAN_TYPE_TO_MODULE_ID = { keyboard: 'keyboard', contrast: 'color-contrast', 'page-structure': 'page-structure' };
+const SCAN_TYPE_TO_MODULE_ID = { keyboard: 'keyboard', contrast: 'color-contrast', 'page-structure': 'page-structure', forms: 'forms' };
 
 // ─── Test module status row (mirrors the mockup's "Test modules" list) ──────
-function ModuleRow({ mod, status, isActiveTab, checked, onToggle, disabled }) {
+function ModuleRow({ mod, isActiveTab, checked, onToggle, disabled }) {
   const Icon = mod.icon;
   const isPlanned = mod.status !== 'active';
-  const statusPill = isPlanned || !status || status === 'not-tested' ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 whitespace-nowrap">
-      <CircleMinus size={12} /> Not tested
-    </span>
-  ) : status === 'passed' ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sage/15 text-sage-700 whitespace-nowrap">
-      <CheckCircle2 size={12} /> Completed
-    </span>
-  ) : status === 'needs-review' ? (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber/15 text-amber-700 whitespace-nowrap">
-      <AlertCircle size={12} /> Needs review
-    </span>
-  ) : null;
 
   return (
     <div className={`flex items-center gap-4 px-4 py-3.5 rounded-xl border transition-colors ${
@@ -44,7 +31,6 @@ function ModuleRow({ mod, status, isActiveTab, checked, onToggle, disabled }) {
         <p className="text-sm font-semibold text-ink m-0">{mod.label}</p>
         <p className="text-xs text-body m-0 leading-relaxed">{mod.description}</p>
       </div>
-      {statusPill}
       {!isPlanned && (
         <input
           type="checkbox"
@@ -77,6 +63,10 @@ export default function AssistiveTestingPage() {
   // Results from the most recent multi-module run, shown inline below since
   // there's no single results page to navigate to for more than one module.
   const [multiResults, setMultiResults] = useState([]);
+  // Coverage reflects real history, but only once a test has actually run in
+  // this visit — otherwise a URL that happens to have old history looks like
+  // it was already tested before the user has clicked "Start test".
+  const [hasTestedThisSession, setHasTestedThisSession] = useState(false);
 
   const toggleModuleSelected = useCallback((id, isChecked) => {
     setSelectedModuleIds((prev) => {
@@ -194,6 +184,7 @@ export default function AssistiveTestingPage() {
     }
 
     setLoading(false);
+    setHasTestedThisSession(true);
     if (firstError) setError(firstError);
 
     // Refresh the "Test modules" status list / coverage gauge with whatever
@@ -266,7 +257,7 @@ export default function AssistiveTestingPage() {
                       id="assistive-url"
                       type="url"
                       value={url}
-                      onChange={(e) => setUrl(e.target.value)}
+                      onChange={(e) => { setUrl(e.target.value); setHasTestedThisSession(false); }}
                       onKeyDown={(e) => { if (e.key === 'Enter') handleRunTest(); }}
                       placeholder="https://example.com"
                       className="glow-input glow-input--large-text has-left-icon"
@@ -305,7 +296,6 @@ export default function AssistiveTestingPage() {
                 <ModuleRow
                   key={mod.id}
                   mod={mod}
-                  status={moduleStatus[mod.id]}
                   isActiveTab={mod.id === activeModuleId}
                   disabled={loading}
                   checked={selectedModuleIds.has(mod.id)}
@@ -338,7 +328,7 @@ export default function AssistiveTestingPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <p className="font-heading font-semibold text-sm text-ink mb-4">Test coverage</p>
-            {url.trim() ? (
+            {url.trim() && hasTestedThisSession ? (
               <>
                 <div className="flex justify-center mb-4">
                   <ScoreGauge score={coverage.percentComplete} label="Complete" color="#0F766E" size={130} />
@@ -362,14 +352,16 @@ export default function AssistiveTestingPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => { setPendingScanHistoryTab('assistive'); navigate('scan-history'); }}
+                  onClick={() => { setPendingScanHistoryTab('all'); navigate('scan-history'); }}
                   className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-teal hover:underline"
                 >
                   View full results <ArrowRight size={12} />
                 </button>
               </>
             ) : (
-              <p className="text-sm text-body">Enter a URL to see coverage across all test modules.</p>
+              <p className="text-sm text-body">
+                {url.trim() ? 'Run a test to see coverage for this URL.' : 'Enter a URL to see coverage across all test modules.'}
+              </p>
             )}
           </div>
 

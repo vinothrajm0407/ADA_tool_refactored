@@ -107,7 +107,12 @@ describe('apiFetch', () => {
 
   it('throws an error on 401 response', async () => {
     fetchMock.mockReturnValue(makeResponse(401));
-    await expect(apiFetch('/api/history')).rejects.toThrow('token_expired');
+    await expect(apiFetch('/api/history')).rejects.toThrow(/session has expired/i);
+  });
+
+  it('tags the 401 error with a stable machine-readable code', async () => {
+    fetchMock.mockReturnValue(makeResponse(401));
+    await expect(apiFetch('/api/history')).rejects.toMatchObject({ code: 'token_expired' });
   });
 
   it('thrown error on 401 has status property equal to 401', async () => {

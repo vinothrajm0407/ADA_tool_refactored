@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Menu, Bell, LogOut } from 'lucide-react';
+import { Menu, Bell, LogOut, ChevronDown } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
 
@@ -33,7 +33,7 @@ export default function AppHeader() {
   const initials = user
     ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase()
     : '?';
-  const displayName = user ? `${user.firstName} ${user.lastName}` : '';
+  const displayName = user ? [user.firstName, user.lastName].filter(Boolean).join(' ') : '';
   const email = user?.email ?? '';
 
   const title = pageTitles[activePage] ?? 'Dashboard';
@@ -138,12 +138,16 @@ export default function AppHeader() {
           <button
             ref={menuTriggerRef}
             onClick={() => setMenuOpen(o => !o)}
-            className="w-8 h-8 rounded-full bg-teal flex items-center justify-center text-white text-xs font-bold select-none hover:opacity-80 transition-opacity focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
+            className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-full hover:bg-gray-100 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-2"
             aria-label="User menu"
             aria-haspopup="true"
             aria-expanded={menuOpen}
           >
-            {initials}
+            <span className="w-8 h-8 rounded-full bg-teal flex items-center justify-center text-white text-xs font-bold select-none flex-shrink-0">
+              {initials}
+            </span>
+            <span className="hidden sm:block text-sm font-medium text-ink whitespace-nowrap">{displayName}</span>
+            <ChevronDown className="hidden sm:block w-4 h-4 text-body flex-shrink-0" aria-hidden="true" />
           </button>
 
           {menuOpen && (

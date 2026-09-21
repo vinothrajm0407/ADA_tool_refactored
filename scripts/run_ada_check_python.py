@@ -95,8 +95,15 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
             except TypeError:
                 results = axe.run(page)
 
-        # Full-page screenshot so user can scroll to see entire page in modal
-        full_screenshot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=True)
+        # Full-page screenshot so user can scroll to see entire page in modal.
+        # Best-effort only: axe has already run by this point, so a slow/hung
+        # page (e.g. a web font that never finishes loading) failing THIS step
+        # must not throw away real, already-captured violation data — that
+        # was turning a successful scan into a hard "Scan failed" for the user.
+        try:
+            full_screenshot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=True, timeout=5000)
+        except Exception:
+            full_screenshot_bytes = None
 
         # Per-violation screenshots: highlighted viewport capture for the first MAX_VIOLATION_SCREENSHOTS
         # violations only. Viewport (not full_page) is 5–10× faster; the overview screenshot above
@@ -137,7 +144,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
                     el.style.setProperty('z-index', '999999');
                 }"""
                 )
-                shot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=False)
+                shot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=False, timeout=5000)
                 shot_b64 = base64.b64encode(shot_bytes).decode("ascii")
                 # Backwards-compatible violation-level screenshot for existing UI paths
                 violation["screenshot"] = shot_b64
@@ -164,8 +171,9 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
     data["url"] = url
     if "timestamp" not in data:
         data["timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    data["screenshot"] = base64.b64encode(full_screenshot_bytes).decode("ascii")
-    data["screenshotType"] = "image/jpeg"
+    if full_screenshot_bytes:
+        data["screenshot"] = base64.b64encode(full_screenshot_bytes).decode("ascii")
+        data["screenshotType"] = "image/jpeg"
     return data
 
 

@@ -60,7 +60,7 @@ function ShieldMark({ size = 40 }) {
  *   "compact"  — icon only (mobile header)
  *   "landing"  — icon + product name (landing page header)
  */
-export default function BrandLogo({ variant = 'sidebar' }) {
+export default function BrandLogo({ variant = 'sidebar', dark = false }) {
   if (variant === 'compact') {
     return <ShieldMark size={30} />;
   }
@@ -80,10 +80,10 @@ export default function BrandLogo({ variant = 'sidebar' }) {
     <div className="flex items-center gap-3">
       <ShieldMark size={34} />
       <div>
-        <span className="block font-heading font-bold text-ink text-xl tracking-tight leading-none">
+        <span className={`block font-heading font-bold text-xl tracking-tight leading-none ${dark ? 'text-white' : 'text-ink'}`}>
           {BRAND.productName}
         </span>
-        <span className="block text-[11px] font-medium text-body tracking-wide mt-0.5">
+        <span className={`block text-[11px] font-medium tracking-wide mt-0.5 ${dark ? 'text-gray-400' : 'text-body'}`}>
           {BRAND.companyName}
         </span>
       </div>
