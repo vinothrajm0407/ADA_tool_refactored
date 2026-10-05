@@ -28,6 +28,21 @@ function IssueCard({ issue, testType, url }) {
           testType, url,
           message: issue.message, detail: issue.detail, severity: issue.severity,
           html: issue.html,
+          // "skipped_level"/"no_h1" map to a real axe rule with a free,
+          // deterministic fallback fixer (see RULES_WITH_FALLBACK in
+          // auto_fix_service.py) — "skipped_level" carries the exact
+          // heading to shift down a level, "no_h1" needs no element at all
+          // since that fixer inserts a new <h1> from the scanned page's own
+          // URL alone. "unlabelled_navs" has no deterministic fixer, but
+          // giving it axe's own real rule id (landmark-unique) instead of a
+          // generic slug is what lets verify_page_wide_fix check the right
+          // condition afterward (unique nav labels) instead of falling
+          // back to a free-text guess that can collide with an unrelated
+          // issue's wording (see auto_fix_service.py:verify_page_wide_fix).
+          ruleId: issue.type === 'skipped_level' ? 'heading-order'
+                : issue.type === 'no_h1' ? 'page-has-heading-one'
+                : issue.type === 'unlabelled_navs' ? 'landmark-unique'
+                : undefined,
         })}
         node={{ html: issue.html || '' }}
       />

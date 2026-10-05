@@ -56,6 +56,34 @@ class TestAutoFix:
         mock_run.assert_not_called()
         db_mock.save_fix.assert_not_called()
 
+    def test_duplicate_open_fix_skips_pipeline_azure_devops(self, client, db_mock, authed_headers):
+        # Found live 2026-09-29: Azure DevOps PR urls end in /pullrequest/<n>
+        # (singular, no hyphen) — a different shape from all three other
+        # providers, which the dedup regex didn't recognize at all, so it
+        # opened a duplicate PR on every "Run again" instead of reusing the
+        # still-open one.
+        db_mock.get_repo_link_for_url.return_value = {
+            **FAKE_LINK, "provider": "azure",
+            "repo_url": "https://dev.azure.com/acme/proj/_git/example-site",
+        }
+        db_mock.get_open_fix.return_value = {
+            "pr_url": "https://dev.azure.com/acme/proj/_git/example-site/pullrequest/1379",
+            "branch_url": "https://dev.azure.com/acme/proj/_git/example-site?version=GBada/fix/color-contrast-abc",
+        }
+        with patch("backend.services.auto_fix_service.run_auto_fix") as mock_run, \
+             patch("backend.services.auto_fix_service.is_pull_request_open", return_value=True) as mock_open:
+            resp = client.post("/api/auto-fix", json=VALID_BODY, headers=authed_headers)
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["status"] == "verified"
+        assert data["duplicate"] is True
+        assert data["pr_url"].endswith("/pullrequest/1379")
+        mock_run.assert_not_called()
+        # Confirms the PR number was actually extracted (1379) and checked
+        # against the real provider, not just short-circuited some other way.
+        mock_open.assert_called_once()
+        assert mock_open.call_args[0][2] == 1379
+
     def test_stale_duplicate_record_reruns_when_pr_no_longer_open(self, client, db_mock, authed_headers):
         # The DB still has an "open" fix on record, but the PR was since closed
         # (or the repo archived) on GitHub's side — should not block a re-run.

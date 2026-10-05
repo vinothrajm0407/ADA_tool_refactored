@@ -5,6 +5,11 @@ const AUTH_KEY     = 'ada_auth';
 const POST_AUTH_REDIRECT_KEY = 'ada_post_auth_redirect';
 const REDUCED_MOTION_KEY = 'ada-tool-reduced-motion';
 
+// Shared creation-order counter for scan/crawl sessions, so the unified tab
+// strip in NewScanPage can sort both kinds of tabs into one real chronological
+// order instead of always listing all scans before all crawls.
+let tabSeqCounter = 0;
+
 const PAGE_TO_PATH = {
   landing:              '/',
   login:                '/login',
@@ -106,11 +111,17 @@ export const AppContext = createContext({
   activeScanSessionId: null,
   setActiveScanSessionId: () => {},
   createScanSession: () => {},
-  createDraftScanSession: () => {},
   updateScanSession: () => {},
   closeScanSession: () => {},
   updateSessionAutoFix: () => {},
   updateSessionAssistive: () => {},
+  crawlSessions: [],
+  activeCrawlSessionId: null,
+  setActiveCrawlSessionId: () => {},
+  createCrawlSession: () => {},
+  updateCrawlSession: () => {},
+  retargetCrawlSession: () => {},
+  closeCrawlSession: () => {},
   user: null,
   token: null,
   isAuthenticated: false,
@@ -161,23 +172,7 @@ export function AppProvider({ children }) {
       phase: 'scanning', result: null, error: '',
       autoFixState: {},
       assistiveState: {},
-    };
-    setScanSessions(prev => [...prev, session]);
-    setActiveScanSessionIdState(id);
-    return id;
-  }, []);
-
-  // An empty, not-yet-run tab — lets someone open several "new scan" tabs at
-  // once (each keeping its own typed-but-unsubmitted URL) instead of there
-  // only ever being one shared blank compose form. Converts in place into a
-  // real running session (via updateScanSession) once its scan actually starts.
-  const createDraftScanSession = useCallback(() => {
-    const id = (crypto.randomUUID && crypto.randomUUID()) || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const session = {
-      id, url: '', includeBestPractices: false,
-      phase: 'draft', result: null, error: '',
-      autoFixState: {},
-      assistiveState: {},
+      seq: ++tabSeqCounter,
     };
     setScanSessions(prev => [...prev, session]);
     setActiveScanSessionIdState(id);
@@ -195,6 +190,49 @@ export function AppProvider({ children }) {
   const closeScanSession = useCallback((id) => {
     setScanSessions(prev => prev.filter(s => s.id !== id));
     setActiveScanSessionIdState(prev => (prev === id ? null : prev));
+  }, []);
+
+  // Crawl sessions — same reasoning and shape as scanSessions above (lives
+  // here so an in-progress crawl survives navigating away and back), but
+  // simpler: there's no "draft" phase, and the session's own id is just the
+  // real backend crawl_id (crawl jobs are always created with a URL already
+  // in hand, unlike a scan tab which can sit blank first) — so creating one
+  // is a single step, not create-draft-then-convert.
+  const [crawlSessions, setCrawlSessions] = useState([]);
+  const [activeCrawlSessionId, setActiveCrawlSessionIdState] = useState(null);
+
+  const setActiveCrawlSessionId = useCallback((id) => {
+    setActiveCrawlSessionIdState(id);
+  }, []);
+
+  const createCrawlSession = useCallback((crawlId, rootUrl) => {
+    const session = { id: crawlId, url: rootUrl, phase: 'scanning', violationsCount: 0, seq: ++tabSeqCounter };
+    setCrawlSessions(prev => [...prev, session]);
+    setActiveCrawlSessionIdState(crawlId);
+    return crawlId;
+  }, []);
+
+  const updateCrawlSession = useCallback((id, updater) => {
+    setCrawlSessions(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const patch = typeof updater === 'function' ? updater(s) : updater;
+      return { ...s, ...patch };
+    }));
+  }, []);
+
+  // Re-crawling from inside an open tab starts a genuinely new crawl_id —
+  // this keeps that tab in the same place (not a new one at the end) by
+  // swapping the id it points at, rather than closing and re-opening it.
+  const retargetCrawlSession = useCallback((oldId, newId) => {
+    setCrawlSessions(prev => prev.map(s => (
+      s.id === oldId ? { ...s, id: newId, phase: 'scanning', violationsCount: 0 } : s
+    )));
+    setActiveCrawlSessionIdState(prev => (prev === oldId ? newId : prev));
+  }, []);
+
+  const closeCrawlSession = useCallback((id) => {
+    setCrawlSessions(prev => prev.filter(s => s.id !== id));
+    setActiveCrawlSessionIdState(prev => (prev === id ? null : prev));
   }, []);
 
   // Per-violation Auto-Fix state (idle/running/done + result), keyed by rule id +
@@ -364,11 +402,17 @@ export function AppProvider({ children }) {
         activeScanSessionId,
         setActiveScanSessionId,
         createScanSession,
-        createDraftScanSession,
         updateScanSession,
         closeScanSession,
         updateSessionAutoFix,
         updateSessionAssistive,
+        crawlSessions,
+        activeCrawlSessionId,
+        setActiveCrawlSessionId,
+        createCrawlSession,
+        updateCrawlSession,
+        retargetCrawlSession,
+        closeCrawlSession,
         user,
         token,
         isAuthenticated: !!token,

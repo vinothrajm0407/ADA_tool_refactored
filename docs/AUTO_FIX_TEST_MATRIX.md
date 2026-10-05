@@ -76,30 +76,35 @@ correctly through the existing plain-static-site fast path instead.
 (AI-authored, by design), 2 genuine gaps found and root-caused (not
 patched — out of scope for this task).**
 
-## Genuine engine gaps discovered (not fixed — reported per the task's scope)
+## Genuine engine gaps discovered
 
-1. **`label` rule's fallback fixer can never fire on any real violation.**
-   axe's accessible-name computation treats `placeholder` as a valid name
-   source, so a placeholder-only input is *never* flagged under the
-   `label` rule (confirmed directly: an input with a placeholder passes,
-   an input with none fails). But `_fallback_patch`'s `label` branch
-   requires a `placeholder` attribute to derive its text and returns
-   `None` otherwise. So the only input shape the fixer knows how to patch
-   is exactly the shape axe never flags — a complete dead code path for
-   this rule as currently written.
+1. ~~`label` rule's fallback fixer can never fire on any real violation.~~
+   **Fixed 2026-09-28.** axe's accessible-name computation treats
+   `placeholder` as a valid name source, so a placeholder-only input was
+   never flagged under the `label` rule, yet the old fixer required a
+   `placeholder` to derive its text — a complete dead code path. Rewrote
+   the `label` branch of `_fallback_patch` to locate the actual
+   input/textarea (same content-then-line disambiguation as every other
+   branch) and derive a label from whatever real signal it has: its
+   `name` attribute first (most reliable — `name="email"` → "Email"),
+   then `id`/`class`, then its `type` (`search` → "Search", `tel` →
+   "Phone number", etc.), only falling to a generic default when none of
+   those are present either. Covered by 6 new unit tests in
+   `TestFallbackPatchLabel` (`tests/unit/test_auto_fix_service.py`), all
+   540 backend tests pass.
 
-2. **`html-has-lang` can't disambiguate across a multi-page repo.** axe
-   reports this violation's node as a generic, attribute-less `<html>` tag
-   with no distinguishing content. `locate_source` has no page-path
-   context — it only receives the DOM node and the repo — so on a 3-page
-   repo where every page has its own `<html>` tag, it can't tell which
-   file's tag actually failed and correctly declines rather than guessing.
-   This didn't surface earlier this session because every prior fixture
-   was single-page.
+2. ~~`html-has-lang` can't disambiguate across a multi-page repo.~~ **Fixed**
+   in commit `3876902` (Sep 21) — the scanned page's URL is now threaded
+   through to `locate_source` via a `page_hint` (see `_page_path_hint` in
+   `auto_fix_service.py`), which narrows an otherwise-ambiguous multi-file
+   `<html>`-missing-lang match down to the one file that's actually the
+   scanned page. Re-verified 2026-09-28 against a local clone of the
+   GitHub test repo with the seeded violation simulated on all 3 pages
+   at once (the genuinely-ambiguous case): without a page URL it still
+   correctly declines (`None`); with one, it resolves to the exact right
+   file every time (`index.html` / `profile.html` / `search.html`).
 
-Both are real, reproducible findings, out of scope to patch here (this
-task was building the test environment, not further engine changes) —
-flagged for a follow-up.
+Both gaps are now fixed.
 
 ## Incidental notes
 

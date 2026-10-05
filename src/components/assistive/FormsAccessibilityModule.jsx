@@ -106,6 +106,11 @@ function IssueCard({ issue, testType, url }) {
           message: issue.message, detail: issue.detail,
           severity: issue.severity, wcag: issue.wcag, selector: issue.selector,
           html: issue.html,
+          // "missing_label" is exactly axe's own `label` rule (a genuinely
+          // nameless input) — passing it through as the real rule id
+          // qualifies it for the free, deterministic fallback fixer
+          // instead of always costing a Gemini call.
+          ruleId: issue.type === 'missing_label' ? 'label' : undefined,
         })}
         node={{ html: issue.html || '' }}
       />

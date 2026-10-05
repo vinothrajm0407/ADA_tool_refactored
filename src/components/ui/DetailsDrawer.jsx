@@ -1,4 +1,5 @@
-import { X, Loader2, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { X, Loader2, AlertCircle, Copy, Check } from 'lucide-react';
 import ScoreGauge from './ScoreGauge';
 import StatusBadge from './StatusBadge';
 import IssueCard from './IssueCard';
@@ -19,7 +20,17 @@ function mapViolationToCard(v) {
 }
 
 export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
+  const [copied, setCopied] = useState(false);
+
   if (!row) return null;
+
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(row.url || '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  };
 
   const {
     url,
@@ -78,9 +89,20 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
             <p className="text-xs font-body font-medium text-body uppercase tracking-wide mb-1.5">
               URL
             </p>
-            <code className="block w-full bg-gray-50 text-ink text-sm font-mono px-3 py-2 rounded-2xl border border-gray-100 break-all">
-              {url}
-            </code>
+            <div className="flex items-start gap-2 bg-gray-50 rounded-2xl border border-gray-100 px-3 py-2">
+              <code className="flex-1 min-w-0 text-ink text-sm font-mono break-all">
+                {url}
+              </code>
+              <button
+                type="button"
+                onClick={copyUrl}
+                className="btn-ghost shrink-0 p-1 rounded-lg text-body hover:text-ink transition-colors"
+                aria-label="Copy URL"
+                title="Copy URL"
+              >
+                {copied ? <Check size={15} className="text-sage" /> : <Copy size={15} />}
+              </button>
+            </div>
           </div>
 
           {/* Score + Pass Rate row */}

@@ -156,11 +156,11 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
   );
 }
 
-// Runs Auto-Fix across every affected element, one at a time, and tracks a
-// per-element result so a violation with many nodes doesn't need N separate
-// clicks. State lives in AppContext (see AutoFixControl above) — the sequential
-// loop keeps running and its updates keep landing even if the page that started
-// it unmounts, and progress is still there if the user comes back to it.
+// Runs Auto-Fix across every affected element in a single clone/build/PR pass
+// (see run_auto_fix_batch on the backend) and tracks a per-element result so a
+// violation with many nodes doesn't need N separate clicks — or N separate
+// PRs. State lives in AppContext (see AutoFixControl above), so progress is
+// still there if the user navigates away and back while it's running.
 function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   const { scanSessions, updateSessionAutoFix } = useApp();
   const fixAllKey = `fixall::${rule.id}`;
@@ -170,7 +170,11 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
 
   if (!pageUrl || nodes.length < 2) return null;
 
-  async function fixOne(i, next) {
+  // One element flagged as an outlier (retrying just that one) still goes
+  // through the single-element endpoint — no need to re-batch every element
+  // again just to fix the one that failed.
+  async function retryOne(i) {
+    const next = [...fixAll.results];
     next[i] = { status: 'running' };
     updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: [...next] });
     try {
@@ -184,21 +188,33 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
     } catch {
       next[i] = { status: 'failed', error: 'Could not reach the server' };
     }
-    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: [...next] });
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'done', results: [...next] });
   }
 
   async function handleFixAll() {
-    const next = nodes.map(() => ({ status: 'pending' }));
-    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: next });
-    for (let i = 0; i < nodes.length; i++) {
-      await fixOne(i, next);
+    updateSessionAutoFix(sessionId, fixAllKey, { status: 'running', results: nodes.map(() => ({ status: 'running' })) });
+    let batch;
+    try {
+      const res = await apiFetch('/api/auto-fix-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_url: pageUrl, rule, nodes }),
+      });
+      const data = await res.json();
+      batch = data.ok ? data : { status: 'failed', error: data.error || 'Auto-Fix failed', results: [] };
+    } catch {
+      batch = { status: 'failed', error: 'Could not reach the server', results: [] };
     }
+    // Per-element rows share the one PR/branch/steps the batch produced —
+    // only status/file/line/error differ per element (see run_auto_fix_batch).
+    const shared = { steps: batch.steps, pr_url: batch.pr_url, branch_url: batch.branch_url, merged: batch.merged };
+    const next = nodes.map((_, i) => {
+      const r = (batch.results || [])[i] || { status: 'failed', error: batch.error || 'Auto-Fix failed' };
+      if (r.status === 'patched') return { ...shared, status: 'verified', file_path: r.file_path, line_no: r.line_no };
+      if (r.status === 'already_fixed') return { ...shared, status: 'already_fixed', file_path: r.file_path, line_no: r.line_no };
+      return { status: 'failed', error: r.error };
+    });
     updateSessionAutoFix(sessionId, fixAllKey, { status: 'done', results: next });
-  }
-
-  async function retryOne(i) {
-    const next = [...fixAll.results];
-    await fixOne(i, next);
   }
 
   // Compact form for the collapsed row header — see AutoFixControl's compact
@@ -209,7 +225,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
       return (
         <button type="button" onClick={(e) => { e.stopPropagation(); handleFixAll(); }}
           className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors flex-shrink-0">
-          <Wand2 size={11} /> Fix all {nodes.length}
+          <Wand2 size={11} /> Auto Fix
         </button>
       );
     }
@@ -229,8 +245,8 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   if (fixAll.status === 'idle') {
     return (
       <button type="button" onClick={handleFixAll}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border border-teal text-teal hover:bg-teal/10 transition-colors w-fit">
-        <Wand2 size={13} /> Fix All {nodes.length} Elements
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors w-fit">
+        <Wand2 size={13} /> Auto Fix
       </button>
     );
   }
@@ -489,11 +505,15 @@ function RecommendedFixCard({ violation, wcagMeta, pageUrl, sessionId }) {
         </div>
       )}
 
-      {/* ── Auto Fix — only when there's exactly one affected element; with
-          multiple elements, "Fix All" + the per-element controls below cover it,
-          and this single-element control would otherwise silently only ever
-          fix the first one while looking like it fixed the whole violation. ── */}
-      {pageUrl && (violation.nodes?.length ?? 0) <= 1 && (
+      {/* ── Auto Fix — one control regardless of how many elements this
+          violation has. FixAllControl batches every element into a single
+          PR (see run_auto_fix_batch) and returns null itself when there's
+          fewer than 2, so exactly one of these two ever renders. ── */}
+      {pageUrl && (violation.nodes?.length ?? 0) >= 2 ? (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <FixAllControl pageUrl={pageUrl} rule={violation} nodes={violation.nodes} sessionId={sessionId} />
+        </div>
+      ) : pageUrl && (
         <div className="px-4 py-3 border-b border-gray-100">
           <AutoFixControl pageUrl={pageUrl} rule={violation} node={violation.nodes?.[0]} sessionId={sessionId} />
         </div>
@@ -630,12 +650,9 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
           {/* Affected elements */}
           {nodes.length > 0 && (
             <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-body m-0">
-                  Affected Elements <span className="font-normal normal-case tracking-normal">({nodes.length})</span>
-                </p>
-                <FixAllControl pageUrl={pageUrl} rule={violation} nodes={nodes} sessionId={sessionId} />
-              </div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-body m-0 mb-2">
+                Affected Elements <span className="font-normal normal-case tracking-normal">({nodes.length})</span>
+              </p>
               <div className="space-y-2">
                 {nodes.slice(0, showAllNodes ? nodes.length : 3).map((node, ni) => (
                   <div key={ni}>
@@ -656,11 +673,6 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
                         {copiedNode === ni ? '✓ Copied' : 'Copy'}
                       </button>
                     </div>
-                    {pageUrl && nodes.length > 1 && (
-                      <div className="mt-2">
-                        <AutoFixControl pageUrl={pageUrl} rule={violation} node={node} sessionId={sessionId} />
-                      </div>
-                    )}
                   </div>
                 ))}
                 {nodes.length > 3 && (

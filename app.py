@@ -9,10 +9,12 @@ Setup: pip install -r requirements.txt  # includes axe-playwright-python
        python -m playwright install chromium
 Run:   npm run build && python app.py
 """
+import base64
 import json
 import logging
 import os
 import re
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -21,6 +23,22 @@ try:
     load_dotenv()
 except ImportError:
     pass
+
+# Some networks (confirmed on this dev machine) return a working DNS AAAA
+# record for a host but silently black-hole the actual IPv6 route to it —
+# no RST, no ICMP unreachable, just silence until the OS's own connect
+# timeout fires. Python's socket layer tries the first getaddrinfo() result
+# (IPv6, since that's what DNS returned) and hangs for that full timeout —
+# observed as a consistent ~21s delay on every single gitlab.com/bitbucket.org
+# API call — before ever falling back to the IPv4 result that connects in
+# under a second. curl avoids this via parallel "happy eyeballs"; Python's
+# stdlib doesn't. Restricting resolution to IPv4 for the whole process
+# sidesteps it entirely, with no effect on any host that resolves fine over
+# IPv6 in the first place.
+_original_getaddrinfo = socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _ipv4_only_getaddrinfo
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -79,7 +97,16 @@ def _check_scan_rate_limit(ip: str) -> tuple[bool, int]:
     On the first call from an IP (or after the window expires) the timestamp
     is recorded and (False, 0) is returned.  Subsequent calls within the window
     return (True, seconds_remaining).
+
+    Exempts localhost — this throttle exists to stop one IP from hammering
+    scans (real abuse protection for a deployed instance), but during local
+    dev/demo every scan comes from the same loopback address regardless of
+    who's testing what, so it was blocking rapid back-to-back scans against
+    different test apps during normal local use rather than anything
+    resembling abuse.
     """
+    if ip in ("127.0.0.1", "::1", "localhost"):
+        return False, 0
     now = time.monotonic()
     with _rate_limit_lock:
         elapsed = now - _rate_limit_store.get(ip, 0.0)
@@ -1242,11 +1269,17 @@ def api_auto_fix():
         # has no idea if it was since closed, or the repo archived. Check the
         # provider directly rather than trust a record that could be stale.
         # GitHub PR urls end in /pull/<n>, GitLab MR urls in /merge_requests/<n>,
-        # Bitbucket PR urls in /pull-requests/<n>.
+        # Bitbucket PR urls in /pull-requests/<n>, Azure DevOps PR urls in
+        # /pullrequest/<n> (singular, no hyphen — easy to miss, and missing it
+        # meant this dedup check silently never matched Azure PRs at all, so
+        # every "Run again" opened a brand new PR instead of reusing the
+        # still-open one — found live 2026-09-29, two duplicate PRs for the
+        # same violation on data_qa_v1_frontend).
         pr_url_val = existing["pr_url"] or ""
         pr_match = re.search(r"/pull/(\d+)$", pr_url_val) \
             or re.search(r"/merge_requests/(\d+)$", pr_url_val) \
-            or re.search(r"/pull-requests/(\d+)$", pr_url_val)
+            or re.search(r"/pull-requests/(\d+)$", pr_url_val) \
+            or re.search(r"/pullrequest/(\d+)$", pr_url_val)
         still_open = bool(pr_match) and is_pull_request_open(
             link["repo_url"], link["access_token"], int(pr_match.group(1)), link.get("provider") or "github"
         )
@@ -1265,6 +1298,53 @@ def api_auto_fix():
         result.get("branch_url"), result.get("error"), result.get("pr_url"),
         result.get("merged", False), node_signature,
     )
+    return jsonify({"ok": True, **result})
+
+
+@app.route("/api/auto-fix-batch", methods=["POST"])
+@require_auth
+def api_auto_fix_batch():
+    """Same pipeline as /api/auto-fix, but for every element flagged by one
+    rule on one page in a single clone/build/PR pass — see run_auto_fix_batch's
+    docstring for why this replaces looping the single-element endpoint."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
+    body     = request.get_json(silent=True) or {}
+    page_url = (body.get("page_url") or "").strip()
+    rule     = body.get("rule") or {}
+    nodes    = body.get("nodes") or []
+
+    if not page_url or not rule.get("id") or not nodes:
+        return jsonify({"ok": False, "error": "page_url, rule and nodes are required"}), 400
+
+    link = db.get_repo_link_for_url(page_url, g.current_user_id)
+    if not link:
+        return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
+
+    import hashlib
+    from backend.services.auto_fix_service import run_auto_fix_batch
+
+    result = run_auto_fix_batch(link, page_url, rule, nodes)
+    node_results = result.get("results", [])
+
+    # One Fix History row per element (all sharing the same PR) — keeps the
+    # existing per-element history/dedup behavior intact even though they
+    # were produced by a single batched run, not N separate ones.
+    for i, node in enumerate(nodes):
+        node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
+        node_result = node_results[i] if i < len(node_results) else {}
+        status = node_result.get("status", "failed")
+        was_patched = status == "patched"
+        db.save_fix(
+            g.current_user_id, page_url, rule.get("id", ""),
+            result.get("status", "failed") if was_patched else status,
+            result.get("branch_url") if was_patched else None,
+            node_result.get("error"),
+            result.get("pr_url") if was_patched else None,
+            result.get("merged", False) if was_patched else False,
+            node_signature,
+        )
+
     return jsonify({"ok": True, **result})
 
 
@@ -1812,6 +1892,21 @@ _GITLAB_REPO_RE = re.compile(
 _BITBUCKET_REPO_RE = re.compile(
     r"^https?://bitbucket\.org/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)(?:\.git)?/?$"
 )
+# Azure DevOps repo URLs carry an org/project/repo triple rather than a flat
+# owner/repo, and come in two host shapes — the current dev.azure.com and the
+# legacy {org}.visualstudio.com — both routing through a literal "_git" segment.
+# Unlike GitHub/GitLab/Bitbucket, Azure project names routinely contain spaces
+# (URL-encoded as %20, or literal spaces if pasted from the browser bar) — the
+# project group has to allow anything but a slash, not just [\w.-]. The Clone
+# button's copy-paste URL also prefixes the host with "{org}@" (HTTP userinfo,
+# e.g. https://myorg@dev.azure.com/myorg/proj/_git/repo) — that optional
+# prefix is swallowed and ignored since the org already appears in the path.
+_AZURE_REPO_RE = re.compile(
+    r"^https?://(?:[\w.-]+@)?dev\.azure\.com/(?P<org>[\w.-]+)/(?P<project>[^/]+)/_git/(?P<repo>[\w.-]+?)/?$"
+)
+_AZURE_VSTS_REPO_RE = re.compile(
+    r"^https?://(?P<org>[\w.-]+)\.visualstudio\.com/(?P<project>[^/]+)/_git/(?P<repo>[\w.-]+?)/?$"
+)
 
 
 @app.route("/api/repo-links", methods=["GET"])
@@ -1827,13 +1922,15 @@ def api_repo_links_create():
     if not request.is_json:
         return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
     body = request.get_json(silent=True) or {}
-    site_url       = (body.get("site_url") or "").strip()
-    repo_url       = (body.get("repo_url") or "").strip()
-    access_token   = (body.get("access_token") or "").strip()
-    default_branch = (body.get("default_branch") or "main").strip()
-    edit_link_id   = body.get("link_id")
-    is_edit        = bool(edit_link_id)
-
+    site_url        = (body.get("site_url") or "").strip()
+    repo_url        = (body.get("repo_url") or "").strip()
+    access_token    = (body.get("access_token") or "").strip()
+    default_branch  = (body.get("default_branch") or "main").strip()
+    edit_link_id    = body.get("link_id")
+    is_edit         = bool(edit_link_id)
+    # Set when the repo was picked from the GitHub App's own repo list
+    # (api_github_app_repos) rather than a pasted URL+token — access is
+    # already proven by the installation itself, no token to collect at all.
     if not site_url or not repo_url:
         return jsonify({"ok": False, "error": "site_url and repo_url are required"}), 400
     if not access_token and not is_edit:
@@ -1848,9 +1945,10 @@ def api_repo_links_create():
     gh_match = _GITHUB_REPO_RE.match(repo_url)
     gl_match = None if gh_match else _GITLAB_REPO_RE.match(repo_url)
     bb_match = None if (gh_match or gl_match) else _BITBUCKET_REPO_RE.match(repo_url)
-    if not gh_match and not gl_match and not bb_match:
-        return jsonify({"ok": False, "error": "repo_url must look like https://github.com/owner/repo, https://gitlab.com/owner/repo, or https://bitbucket.org/workspace/repo"}), 400
-    provider = "github" if gh_match else "gitlab" if gl_match else "bitbucket"
+    az_match = None if (gh_match or gl_match or bb_match) else (_AZURE_REPO_RE.match(repo_url) or _AZURE_VSTS_REPO_RE.match(repo_url))
+    if not gh_match and not gl_match and not bb_match and not az_match:
+        return jsonify({"ok": False, "error": "repo_url must look like https://github.com/owner/repo, https://gitlab.com/owner/repo, https://bitbucket.org/workspace/repo, or https://dev.azure.com/org/project/_git/repo"}), 400
+    provider = "github" if gh_match else "gitlab" if gl_match else "bitbucket" if bb_match else "azure"
 
     # Only validate against the provider's API when a new token was actually
     # submitted — editing e.g. just the default branch shouldn't cost a
@@ -1883,7 +1981,7 @@ def api_repo_links_create():
                     "User-Agent": "ADA-Accessibility-Intelligence",
                 },
             )
-        else:
+        elif provider == "bitbucket":
             owner, repo = bb_match.group("owner"), bb_match.group("repo")
             repo_label = f"{owner}/{repo}"
             req = urllib.request.Request(
@@ -1893,18 +1991,34 @@ def api_repo_links_create():
                     "User-Agent": "ADA-Accessibility-Intelligence",
                 },
             )
+        else:
+            org, project, repo = az_match.group("org"), az_match.group("project"), az_match.group("repo")
+            repo_label = f"{org}/{project}/{repo}"
+            # Azure DevOps REST auth: Basic with an empty username, PAT as password.
+            basic = base64.b64encode(f":{access_token}".encode()).decode()
+            # project may arrive already percent-encoded (copied from the address
+            # bar) or with a literal space (typed/pasted) — normalize via
+            # unquote-then-quote so either form ends up correctly encoded once.
+            project_enc = _up.quote(_up.unquote(project), safe="")
+            req = urllib.request.Request(
+                f"https://dev.azure.com/{org}/{project_enc}/_apis/git/repositories/{repo}?api-version=7.1",
+                headers={
+                    "Authorization": f"Basic {basic}",
+                    "User-Agent": "ADA-Accessibility-Intelligence",
+                },
+            )
         try:
             with urllib.request.urlopen(req, timeout=15):
                 pass
         except urllib.error.HTTPError as e:
             logging.warning("Repo link validation failed: %s %s -> %s", e.code, repo_label, e.reason)
-            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket"}.get(provider, "repo")
+            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket", "azure": "Azure DevOps"}.get(provider, "repo")
             error = f"Could not access that {provider_name} — check the URL and token" if provider != "github" \
                 else "Could not access that repo — check the URL and token"
             return jsonify({"ok": False, "error": error}), 502
         except Exception as e:
             logging.exception("Repo link validation error: %s", e)
-            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket", "github": "GitHub"}[provider]
+            provider_name = {"gitlab": "GitLab", "bitbucket": "Bitbucket", "github": "GitHub", "azure": "Azure DevOps"}[provider]
             return jsonify({"ok": False, "error": f"Could not reach {provider_name} — try again"}), 502
 
     try:
@@ -2017,7 +2131,8 @@ def api_integration_send():
 
 
 _ADA_GITLAB_RELAY_PAGES = {"index.html", "settings.html", "search.html"}
-_ADA_BITBUCKET_RELAY_PAGES = {"index.html", "profile.html", "search.html"}
+_ADA_BITBUCKET_RELAY_PAGES = {"index.html", "profile.html", "contact.html"}
+_ADA_GITLAB_RELAY2_PAGES = {"index.html", "profile.html", "search.html"}
 
 
 @app.route("/_ada_gitlab_relay/", defaults={"page": "index.html"})
@@ -2042,6 +2157,48 @@ def _ada_gitlab_relay(page):
     return html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
 
 
+@app.route("/_ada_gitlab_relay2/", defaults={"page": "index.html"})
+@app.route("/_ada_gitlab_relay2/<page>")
+def _ada_gitlab_relay2(page):
+    """Same live-proxy technique as _ada_gitlab_relay, for the second GitLab
+    demo test app (ADA-AutoFix-Test-GitLab-2) created 2026-10-05."""
+    if page not in _ADA_GITLAB_RELAY2_PAGES:
+        return "Not found", 404
+    try:
+        req = urllib.request.Request(
+            f"https://gitlab.com/vinothrajm1/ADA-AutoFix-Test-GitLab-2/-/raw/main/docs/{page}",
+            headers={"Cache-Control": "no-cache"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8")
+    except Exception:
+        logging.exception("ADA-AutoFix-Test-GitLab-2 live fetch failed for %s", page)
+        return "Upstream fetch failed", 502
+    return html, 200, {"Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store"}
+
+
+_ADA_GITLAB_PRIVATE_RELAY_PAGES = {"index.html", "settings.html", "search.html"}
+
+
+@app.route("/_ada_gitlab_private_relay/", defaults={"page": "index.html"})
+@app.route("/_ada_gitlab_private_relay/<page>")
+def _ada_gitlab_private_relay(page):
+    """Same live-proxy technique as _ada_gitlab_relay, but for a private
+    project — the web `-/raw/` route redirects an unauthenticated request to
+    GitLab's login page (stripping the Authorization header along the way),
+    even with a valid Bearer token, so this uses the API's own raw-file
+    endpoint instead, which honors the header directly with no redirect.
+
+    Needs a GitLab access token for this project — the GitLab OAuth
+    connection this used to read from has been removed; reconnect the
+    ADA-AutoFix-Test-GitLab-Private repo link with a manual access token
+    and read it from db.get_repo_link_for_url() here instead if this
+    relay is needed again."""
+    if page not in _ADA_GITLAB_PRIVATE_RELAY_PAGES:
+        return "Not found", 404
+    return "GitLab connection unavailable", 502
+
+
 @app.route("/_ada_bitbucket_relay/", defaults={"page": "index.html"})
 @app.route("/_ada_bitbucket_relay/<page>")
 def _ada_bitbucket_relay(page):
@@ -2056,8 +2213,15 @@ def _ada_bitbucket_relay(page):
     if page not in _ADA_BITBUCKET_RELAY_PAGES:
         return "Not found", 404
     try:
+        # A Cache-Control request header alone isn't reliably honored by
+        # Bitbucket's CDN — confirmed live 2026-10-05: repeated requests for
+        # the exact same URL, seconds apart, returned the old content on
+        # some and the just-pushed new content on others (different edge
+        # nodes, inconsistent invalidation). A cache-busting query param
+        # forces every request to be treated as a distinct, never-cached
+        # resource, which is the one thing that reliably bypasses this.
         req = urllib.request.Request(
-            f"https://bitbucket.org/ada_test_tool/testing_tool/raw/main/docs/{page}",
+            f"https://bitbucket.org/ada_test_tool/testing_tool/raw/main/docs/{page}?_cb={int(time.time())}",
             headers={"Cache-Control": "no-cache"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

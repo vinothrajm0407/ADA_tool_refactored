@@ -7,7 +7,7 @@ import AssistiveTestDropdown from './AssistiveTestDropdown';
 import AssistiveResultView, { MODULE_LABELS } from '../assistive/AssistiveResultView';
 import {
   nsComputeScore, nsScoreGradeInfo, nsScoreMessage,
-  nsBuildSeverityBreakdown, nsBuildTopIssues,
+  nsBuildSeverityBreakdown, nsBuildTopIssues, nsTotalElementCount,
   NS_SEVERITY_ROWS, NS_IMPACT_FILTER, SEV_COLORS,
   nsGroupByArea, buildDonutPaths,
   loadPrevScan, saveScanSummary,
@@ -381,7 +381,7 @@ function ViewportComparisonPanel({ scanUrl, currentViolations }) {
 
 // ─── Main scan results view ──────────────────────────────────────────────────
 
-export default function ScanResults({ violations, incomplete, passes, scanRan, scanUrl, onReset, screenshot, screenshotType, sessionId }) {
+export default function ScanResults({ violations, passes, scanRan, scanUrl, onReset, screenshot, screenshotType, sessionId }) {
   const { navigate } = useApp();
   const [filterImpact, setFilterImpact] = useState('all');
   const [pageScreenshotOpen, setPageScreenshotOpen] = useState(false);
@@ -397,8 +397,10 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
   const [highlightSection, setHighlight]  = useState(null);
   const hlTimerRef                        = useRef(null);
 
-  const violCount       = useCountUp(violations.length);
-  const incompleteCount = useCountUp(incomplete.length);
+  // Element count (one per affected node), not rule count — matches how axe
+  // DevTools' own "Total Issues" tallies (a single rule violated by 7
+  // elements reads as 7, not 1).
+  const violCount       = useCountUp(nsTotalElementCount(violations));
   const passCount       = useCountUp(passes.length);
 
   useEffect(() => {
@@ -513,14 +515,10 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
               </span>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto">
+          <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto">
             <div className={`rounded-xl px-4 py-4 text-center ${violations.length > 0 ?'bg-coral/10':'bg-gray-50'}`}>
               <p className={`font-heading font-bold text-3xl leading-none ${violations.length > 0 ?'text-coral':'text-body'}`}>{violCount}</p>
               <p className="text-[11px] text-body mt-1.5 font-medium">Violations</p>
-            </div>
-            <div className={`rounded-xl px-4 py-4 text-center ${incomplete.length > 0 ?'bg-amber/10':'bg-gray-50'}`}>
-              <p className={`font-heading font-bold text-3xl leading-none ${incomplete.length > 0 ?'text-amber':'text-body'}`}>{incompleteCount}</p>
-              <p className="text-[11px] text-body mt-1.5 font-medium">Needs Review</p>
             </div>
             <div className="rounded-xl px-4 py-4 text-center bg-gray-50">
               <p className="font-heading font-bold text-3xl leading-none text-sage">{passCount}</p>
@@ -554,13 +552,13 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {violations.length > 0 ? (
             <button
               type="button"
               onClick={() => scrollToSection('ns-violations-section', 'violations')}
               className="rounded-xl px-4 py-3 text-center bg-coral/10 hover:bg-coral/[0.18] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-1"
-              aria-label={`${violations.length} violations — jump to violations section`}
+              aria-label={`${nsTotalElementCount(violations)} violations — jump to violations section`}
             >
               <p className="font-heading font-bold text-2xl leading-none text-coral">{violCount}</p>
               <p className="text-[11px] text-body mt-1 font-medium">Violations</p>
@@ -569,22 +567,6 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
             <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
               <p className="font-heading font-bold text-2xl leading-none text-body">{violCount}</p>
               <p className="text-[11px] text-body mt-1 font-medium">Violations</p>
-            </div>
-          )}
-          {incomplete.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => scrollToSection('ns-needs-review-section', 'needs-review')}
-              className="rounded-xl px-4 py-3 text-center bg-amber/10 hover:bg-amber/[0.18] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-1"
-              aria-label={`${incomplete.length} items need review — jump to needs review section`}
-            >
-              <p className="font-heading font-bold text-2xl leading-none text-amber">{incompleteCount}</p>
-              <p className="text-[11px] text-body mt-1 font-medium">Needs Review</p>
-            </button>
-          ) : (
-            <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
-              <p className="font-heading font-bold text-2xl leading-none text-body">{incompleteCount}</p>
-              <p className="text-[11px] text-body mt-1 font-medium">Needs Review</p>
             </div>
           )}
           <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
@@ -819,28 +801,6 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
         </div>
       )}
 
-      {/* Needs Review */}
-      {incomplete.length > 0 && (
-        <div id="ns-needs-review-section"className={`bg-white rounded-2xl border p-6 transition-all duration-500 ${
-          highlightSection === 'needs-review'
-            ?'border-teal/40 ring-1 ring-teal/20'
-            :'border-gray-100'
-        }`}>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-heading font-semibold text-base text-ink">Needs Review</span>
-            <span className="text-xs font-semibold text-amber bg-amber/10 px-2 py-0.5 rounded-full">{incomplete.length}</span>
-          </div>
-          <p className="text-xs text-body mb-4">
-            Axe could not automatically confirm these — they require manual inspection.
-          </p>
-          <div className="space-y-2">
-            {incomplete.map((v, i) => (
-              <ViolationRow key={v.id ?? i} violation={{ ...v, impact: v.impact ?? 'moderate' }} />
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Run Assistive Test CTA */}
       {scanRan && scanUrl && (
         <div className="space-y-3">
@@ -856,7 +816,7 @@ export default function ScanResults({ violations, incomplete, passes, scanRan, s
       )}
 
       {/* All clear */}
-      {violations.length === 0 && incomplete.length === 0 && scanRan && (
+      {violations.length === 0 && scanRan && (
         <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
           <div className="w-16 h-16 rounded-2xl bg-teal/10 flex items-center justify-center mx-auto mb-5">
             <CheckCircle className="w-8 h-8 text-teal" />

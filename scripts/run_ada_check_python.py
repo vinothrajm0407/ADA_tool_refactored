@@ -78,20 +78,38 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
         )
         page = context.new_page()
+        # Chromium's HTTP disk cache persists across separate launch() calls
+        # on this machine (confirmed live 2026-10-05: a test-app URL scanned
+        # repeatedly while its content was being iterated on kept returning
+        # the *first* version scanned, even after the real page had changed
+        # and a plain curl of the same URL showed the new content) — a scan
+        # is supposed to reflect the page as it is right now, so the cache
+        # must be disabled, not just bypassed with a one-off cache-busting
+        # query param that every caller would otherwise need to remember.
+        page.context.new_cdp_session(page).send("Network.setCacheDisabled", {"cacheDisabled": True})
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightTimeoutError:
             pass
         # Allow JS-rendered content (SPAs, lazy-loaded regions) to settle before axe runs.
         page.wait_for_timeout(1000)
+        # Was wcag2a/wcag2aa only — silently excluded every WCAG 2.1-specific
+        # rule (confirmed live 2026-10-05: axe DevTools found autocomplete-valid,
+        # a wcag21aa rule, on a page where this tool found nothing for it,
+        # since that tag was never requested at all). axe DevTools' own
+        # default rule selection is WCAG 2.0 A/AA + WCAG 2.1 A/AA (+ Best
+        # Practices if enabled there too) — matching that exactly here is
+        # what "same as axe DevTools" means, not just adding the one rule
+        # that happened to get noticed.
+        wcag_tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
         if include_best_practices:
             try:
-                results = axe.run(page, options={"runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa", "best-practice"]}})
+                results = axe.run(page, options={"runOnly": {"type": "tag", "values": wcag_tags + ["best-practice"]}})
             except TypeError:
                 results = axe.run(page)
         else:
             try:
-                results = axe.run(page, options={"runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa"]}})
+                results = axe.run(page, options={"runOnly": {"type": "tag", "values": wcag_tags}})
             except TypeError:
                 results = axe.run(page)
 
@@ -100,8 +118,29 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         # page (e.g. a web font that never finishes loading) failing THIS step
         # must not throw away real, already-captured violation data — that
         # was turning a successful scan into a hard "Scan failed" for the user.
+        #
+        # timeout was 5000ms — confirmed 2026-09-28 that Playwright's internal
+        # "waiting for fonts to load" screenshot step hangs to the full
+        # timeout 100% of the time on this environment, even on a page with
+        # no custom fonts at all (a genuine Playwright/Chromium bug, not slow
+        # loading — every retry took exactly 5.0Xs, never less). With up to
+        # 10 more of these below (one per violation screenshot), that was up
+        # to ~55s of pure dead time per scan — most of the "scan takes too
+        # long" complaint. Cut to 2000ms: still generous for a screenshot
+        # that's genuinely just slow elsewhere, but recovers the bulk of the
+        # wasted time here where it never succeeds anyway.
+        # A timeout here specifically (not some other failure) means this
+        # browser/page combination can't produce a screenshot at all right
+        # now — every one of the up to MAX_VIOLATION_SCREENSHOTS attempts
+        # below would almost certainly hang the exact same way (same root
+        # cause), so skip them entirely instead of paying the timeout that
+        # many more times for something that's already shown it won't work.
+        screenshots_disabled = False
         try:
-            full_screenshot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=True, timeout=5000)
+            full_screenshot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=True, timeout=2000)
+        except PlaywrightTimeoutError:
+            full_screenshot_bytes = None
+            screenshots_disabled = True
         except Exception:
             full_screenshot_bytes = None
 
@@ -113,7 +152,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
             data = _remove_best_practice_rules(data)
         violations = data.get("violations") or []
         for i, violation in enumerate(violations):
-            if i >= MAX_VIOLATION_SCREENSHOTS:
+            if screenshots_disabled or i >= MAX_VIOLATION_SCREENSHOTS:
                 break
             nodes = violation.get("nodes") or []
             if not nodes:
@@ -144,7 +183,8 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
                     el.style.setProperty('z-index', '999999');
                 }"""
                 )
-                shot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=False, timeout=5000)
+                # Same 2000ms as the full-page screenshot above — see that comment.
+                shot_bytes = page.screenshot(type="jpeg", quality=SCREENSHOT_JPEG_QUALITY, full_page=False, timeout=2000)
                 shot_b64 = base64.b64encode(shot_bytes).decode("ascii")
                 # Backwards-compatible violation-level screenshot for existing UI paths
                 violation["screenshot"] = shot_b64
@@ -161,6 +201,10 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
                     el.style.removeProperty('z-index');
                 }"""
                 )
+            except PlaywrightTimeoutError:
+                # Same reasoning as the full-page screenshot above — if this
+                # one hung, the rest almost certainly will too.
+                screenshots_disabled = True
             except Exception:
                 pass  # skip if selector fails or element not found
         context.close()

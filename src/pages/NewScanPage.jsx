@@ -9,6 +9,7 @@ import ScanProgress from '../components/newscan/ScanProgress';
 import ScanResults from '../components/newscan/ScanResults';
 import ScanComparisonView from '../components/newscan/ScanComparisonView';
 import ADAResultsView from '../components/ADAResultsView/ADAResultsView';
+import CrawlResultsPage from './CrawlResultsPage';
 
 const TABS = [
   {
@@ -200,13 +201,14 @@ function ScanTabStrip({ tabs, activeId, onSelect, onClose, onNew, onCompare, onR
           >
             {t.phase === 'scanning' ? (
               <Loader2 size={13} className="animate-spin text-teal flex-shrink-0" />
-            ) : t.phase === 'draft' ? (
-              <span className="w-2.5 h-2.5 rounded-full border-2 border-gray-300 flex-shrink-0" />
             ) : (
               <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
                 t.phase === 'failed' ? 'bg-coral' :
-                (t.result?.axeResult?.violations?.length ?? 0) > 0 ? 'bg-amber' : 'bg-sage'
+                (t.violationsCount ?? t.result?.axeResult?.violations?.length ?? 0) > 0 ? 'bg-amber' : 'bg-sage'
               }`} />
+            )}
+            {t.kind === 'crawl' && (
+              <Network size={12} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
             )}
             {isEditing ? (
               <input
@@ -276,16 +278,22 @@ function ScanTabStrip({ tabs, activeId, onSelect, onClose, onNew, onCompare, onR
 
 export default function NewScanPage() {
   const {
-    navigate, setCrawlId,
-    scanSessions, activeScanSessionId, setActiveScanSessionId, createScanSession, createDraftScanSession,
-    updateScanSession, closeScanSession,
+    scanSessions, createScanSession, updateScanSession, closeScanSession,
+    crawlSessions, createCrawlSession, updateCrawlSession, retargetCrawlSession, closeCrawlSession,
   } = useApp();
 
+  // Which single tab (scan or crawl) is currently shown. null means "no tab
+  // selected" — the blank compose form below is shown instead. This is the
+  // one thing that decides what's on screen; it replaces the old page-wide
+  // Page-audit/Site-crawl mode switch, which hid a whole type's tabs whenever
+  // you were looking at the other type.
+  const [focusedTab, setFocusedTab] = useState(null); // { kind: 'single'|'crawl', id } | null
+  // Which form the blank compose card shows — only matters while focusedTab is null.
   const [activeTab, setActiveTab] = useState('single');
   const [showUploadView, setShowUploadView] = useState(false);
 
-  // Only the not-yet-started "new scan" form is local — once you hit Start Scan
-  // it becomes a session in AppContext and survives from then on.
+  // Blank compose form fields — local until Start Scan/Crawl turns them into
+  // a real tab in AppContext.
   const [formUrl, setFormUrl] = useState('');
   const [formIncludeBestPractices, setFormIncludeBestPractices] = useState(false);
 
@@ -293,7 +301,6 @@ export default function NewScanPage() {
   const [compareAId, setCompareAId] = useState(null);
   const [compareBId, setCompareBId] = useState(null);
 
-  // crawl state (unaffected by this change — crawls already persist via crawlId)
   const [crawlUrl, setCrawlUrl]         = useState('');
   const [maxPages, setMaxPages]         = useState(50);
   const [maxDepth, setMaxDepth]         = useState(3);
@@ -302,49 +309,46 @@ export default function NewScanPage() {
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError]     = useState('');
 
-  const activeSession = scanSessions.find(s => s.id === activeScanSessionId) ?? null;
+  // One combined, chronologically-ordered tab strip across both scan and crawl tabs.
+  const combinedTabs = [
+    ...scanSessions.map(s => ({ ...s, kind: 'single' })),
+    ...crawlSessions.map(s => ({ ...s, kind: 'crawl' })),
+  ].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+
+  const activeSession = focusedTab?.kind === 'single' ? scanSessions.find(s => s.id === focusedTab.id) ?? null : null;
+  const activeCrawlSession = focusedTab?.kind === 'crawl' ? crawlSessions.find(s => s.id === focusedTab.id) ?? null : null;
   const doneSessions  = scanSessions.filter(s => s.phase === 'done');
   const showCompare   = compareOpen && doneSessions.length >= 2;
 
-  const activeTabId = activeScanSessionId;
-  const isDraftActive = activeSession?.phase === 'draft';
+  const composeUrl = formUrl;
+  const composeBestPractices = formIncludeBestPractices;
+  const setComposeUrl = setFormUrl;
+  const setComposeBestPractices = setFormIncludeBestPractices;
 
-  // The compose form (URL + scan options) is shared by two states: the very
-  // first visit, before any tab exists at all (backed by local formUrl state),
-  // and an open "draft" tab (backed by that session itself) — letting several
-  // draft tabs stay open at once, each keeping its own typed-but-unrun URL,
-  // instead of there only ever being one shared blank form.
-  const composeUrl = isDraftActive ? activeSession.url : formUrl;
-  const composeBestPractices = isDraftActive ? activeSession.includeBestPractices : formIncludeBestPractices;
-  const setComposeUrl = useCallback((val) => {
-    if (isDraftActive) updateScanSession(activeSession.id, { url: val });
-    else setFormUrl(val);
-  }, [isDraftActive, activeSession, updateScanSession]);
-  const setComposeBestPractices = useCallback((val) => {
-    if (isDraftActive) updateScanSession(activeSession.id, { includeBestPractices: val });
-    else setFormIncludeBestPractices(val);
-  }, [isDraftActive, activeSession, updateScanSession]);
-
-  const startNewScanTab = useCallback(() => {
+  const startNewTab = useCallback(() => {
     setCompareOpen(false);
-    createDraftScanSession();
-  }, [createDraftScanSession]);
+    setFocusedTab(null);
+    setActiveTab('single');
+  }, []);
 
-  const selectTab = useCallback((id) => {
+  const selectTab = useCallback((t) => {
     setCompareOpen(false);
-    setActiveScanSessionId(id);
-  }, [setActiveScanSessionId]);
+    setFocusedTab({ kind: t.kind, id: t.id });
+  }, []);
 
-  // Closing a tab falls back to another open one, or the blank form if it
-  // was the last one left.
-  const closeTab = useCallback((id) => {
-    closeScanSession(id);
-    if (activeScanSessionId === id) {
-      const remaining = scanSessions.filter(s => s.id !== id);
-      setActiveScanSessionId(remaining.length > 0 ? remaining[remaining.length - 1].id : null);
-    }
+  // Closing a tab falls back to the next-most-recent remaining tab (of either
+  // kind), or the blank compose form if it was the last one left.
+  const closeTab = useCallback((t) => {
+    if (t.kind === 'single') closeScanSession(t.id);
+    else closeCrawlSession(t.id);
+    setFocusedTab(prev => {
+      if (!prev || prev.id !== t.id) return prev;
+      const remaining = combinedTabs.filter(x => x.id !== t.id);
+      const next = remaining[remaining.length - 1];
+      return next ? { kind: next.kind, id: next.id } : null;
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanSessions, activeScanSessionId, closeScanSession, setActiveScanSessionId]);
+  }, [combinedTabs, closeScanSession, closeCrawlSession]);
 
   const openCompare = useCallback(() => {
     const [first, second] = doneSessions.slice(-2);
@@ -383,17 +387,11 @@ export default function NewScanPage() {
   const handleStartScan = useCallback(() => {
     const url = composeUrl.trim();
     if (!url) return;
-    if (isDraftActive) {
-      // Convert this same draft tab in place — it keeps its id (and any custom
-      // rename) rather than being replaced by a freshly created tab.
-      updateScanSession(activeSession.id, { phase: 'scanning', url, includeBestPractices: composeBestPractices });
-      runScan(activeSession.id, url, composeBestPractices);
-    } else {
-      const sessionId = createScanSession(url, composeBestPractices);
-      setFormUrl('');
-      runScan(sessionId, url, composeBestPractices);
-    }
-  }, [composeUrl, composeBestPractices, isDraftActive, activeSession, updateScanSession, createScanSession, runScan]);
+    const sessionId = createScanSession(url, composeBestPractices);
+    setFormUrl('');
+    setFocusedTab({ kind: 'single', id: sessionId });
+    runScan(sessionId, url, composeBestPractices);
+  }, [composeUrl, composeBestPractices, createScanSession, runScan]);
 
   const retryScan = useCallback((session) => {
     updateScanSession(session.id, { phase: 'scanning', error: '' });
@@ -413,10 +411,12 @@ export default function NewScanPage() {
       });
       const data = await res.json();
       if (!data.ok) { setCrawlLoading(false); setCrawlError(data.error || 'Failed to start crawl.'); return; }
-      setCrawlId(data.crawl_id);
-      navigate('crawl-results');
+      createCrawlSession(data.crawl_id, url);
+      setCrawlLoading(false);
+      setCrawlUrl('');
+      setFocusedTab({ kind: 'crawl', id: data.crawl_id });
     } catch { setCrawlLoading(false); setCrawlError('Network error. Please try again.'); }
-  }, [crawlUrl, maxPages, maxDepth, fullSite, notifyEmail, setCrawlId, navigate]);
+  }, [crawlUrl, maxPages, maxDepth, fullSite, notifyEmail, createCrawlSession]);
 
   const result     = activeSession?.result ?? null;
   const violations = result?.axeResult?.violations ?? [];
@@ -428,16 +428,21 @@ export default function NewScanPage() {
     <div className="flex-1 overflow-auto bg-ivory">
       <div className="px-8 py-8 lg:px-12">
 
-        {activeTab === 'single' && scanSessions.length > 0 && !showUploadView && (
+        {combinedTabs.length > 0 && !showUploadView && (
           <div className="mb-6">
             <ScanTabStrip
-              tabs={scanSessions}
-              activeId={activeTabId}
-              onSelect={selectTab}
-              onClose={closeTab}
-              onNew={startNewScanTab}
+              tabs={combinedTabs}
+              activeId={focusedTab?.id ?? null}
+              onSelect={(id) => selectTab(combinedTabs.find(t => t.id === id))}
+              onClose={(id) => closeTab(combinedTabs.find(t => t.id === id))}
+              onNew={startNewTab}
               onCompare={openCompare}
-              onRename={(id, name) => updateScanSession(id, { name })}
+              onRename={(id, name) => {
+                const t = combinedTabs.find(x => x.id === id);
+                if (!t) return;
+                if (t.kind === 'single') updateScanSession(id, { name });
+                else updateCrawlSession(id, { name });
+              }}
               compareEnabled={doneSessions.length >= 2}
             />
           </div>
@@ -457,7 +462,7 @@ export default function NewScanPage() {
         <div className="flex-1 min-w-0 w-full">
 
         {/* Single Page Scan */}
-        {activeTab === 'single' && (
+        {(activeSession || showCompare) && (
           <>
             {showCompare && (
               <ScanComparisonView
@@ -497,7 +502,7 @@ export default function NewScanPage() {
                 passes={passes}
                 scanRan={scanRan}
                 scanUrl={activeSession.url}
-                onReset={startNewScanTab}
+                onReset={startNewTab}
                 screenshot={result?.axeResult?.screenshot}
                 screenshotType={result?.axeResult?.screenshotType}
                 sessionId={activeSession.id}
@@ -511,7 +516,20 @@ export default function NewScanPage() {
             in the tree when switching tabs (only the tail below them swaps),
             so React reuses the DOM nodes instead of unmounting the whole card
             — that unmount/remount was what caused a visible "shake" before. */}
-        {((activeTab === 'single' && !showCompare && (!activeSession || isDraftActive)) || activeTab === 'crawl') && (
+        {activeCrawlSession && (
+          <CrawlResultsPage
+            crawlId={activeCrawlSession.id}
+            onStatusChange={(j) => updateCrawlSession(activeCrawlSession.id, {
+              phase: j?.status === 'failed' ? 'failed' : (j?.status === 'running' || j?.status === 'pending' ? 'scanning' : 'done'),
+            })}
+            onRecrawl={(newId) => {
+              retargetCrawlSession(activeCrawlSession.id, newId);
+              setFocusedTab({ kind: 'crawl', id: newId });
+            }}
+          />
+        )}
+
+        {!focusedTab && !showCompare && (
           <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-5">
             <section>
               <label htmlFor="scan-url" className="text-sm font-semibold text-ink mb-1 block">
@@ -577,7 +595,7 @@ export default function NewScanPage() {
         )}
 
         </div>
-        {(activeTab === 'crawl' || (activeTab === 'single' && !activeSession && !showCompare)) && <BeforeYouStart />}
+        {!focusedTab && !showCompare && <BeforeYouStart />}
         </div>
         )}
 

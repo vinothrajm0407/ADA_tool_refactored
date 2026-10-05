@@ -516,6 +516,14 @@ def _ensure_table() -> None:
         """)
         conn.commit()
         cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'InstallationId'
+            )
+            ALTER TABLE dbo.RepoLink ADD InstallationId BIGINT NULL
+        """)
+        conn.commit()
+        cur.execute("""
             IF EXISTS (
                 SELECT 1 FROM sys.indexes
                 WHERE object_id = OBJECT_ID(N'dbo.RepoLink') AND name = N'UX_RepoLink_User_Domain'
@@ -530,6 +538,117 @@ def _ensure_table() -> None:
             )
             CREATE UNIQUE INDEX UX_RepoLink_User_Domain_Path ON dbo.RepoLink (UserId, Domain, PathPrefix)
             WHERE Status = 'active'
+        """)
+        conn.commit()
+        # ── GitHub App installations (one row per org/account a user installed
+        # the App on — a single user can install it on several orgs) ──────────
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'GithubAppInstallation')
+            CREATE TABLE dbo.GithubAppInstallation (
+                Id             INT IDENTITY(1,1) PRIMARY KEY,
+                UserId         INT           NOT NULL,
+                InstallationId BIGINT        NOT NULL,
+                AccountLogin   NVARCHAR(255) NOT NULL,
+                CreatedAt      DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
+            )
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.indexes
+                WHERE object_id = OBJECT_ID(N'dbo.GithubAppInstallation') AND name = N'UX_GithubAppInstallation'
+            )
+            CREATE UNIQUE INDEX UX_GithubAppInstallation ON dbo.GithubAppInstallation (UserId, InstallationId)
+        """)
+        conn.commit()
+        # ── GitLab OAuth connection — one per user (unlike GitHub's per-org
+        # installs, this is a single personal-account-scoped grant) ───────────
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'GitlabAppConnection')
+            CREATE TABLE dbo.GitlabAppConnection (
+                Id            INT IDENTITY(1,1) PRIMARY KEY,
+                UserId        INT           NOT NULL UNIQUE,
+                GitlabUserId  BIGINT        NOT NULL,
+                GitlabUsername NVARCHAR(255) NOT NULL,
+                AccessToken   NVARCHAR(MAX) NOT NULL,
+                RefreshToken  NVARCHAR(MAX) NOT NULL,
+                ExpiresAt     DATETIME2(3)  NOT NULL,
+                CreatedAt     DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
+            )
+        """)
+        conn.commit()
+        cur.execute("""
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.GitlabAppConnection') AND name = N'AccessToken'
+                AND max_length != -1
+            )
+            ALTER TABLE dbo.GitlabAppConnection ALTER COLUMN AccessToken NVARCHAR(MAX) NOT NULL
+        """)
+        conn.commit()
+        cur.execute("""
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.GitlabAppConnection') AND name = N'RefreshToken'
+                AND max_length != -1
+            )
+            ALTER TABLE dbo.GitlabAppConnection ALTER COLUMN RefreshToken NVARCHAR(MAX) NOT NULL
+        """)
+        conn.commit()
+        # ── Bitbucket OAuth connection — one per user, same shape as
+        # GitlabAppConnection (a per-user OAuth2 grant, not per-org) ──────────
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'BitbucketAppConnection')
+            CREATE TABLE dbo.BitbucketAppConnection (
+                Id                INT IDENTITY(1,1) PRIMARY KEY,
+                UserId            INT           NOT NULL UNIQUE,
+                BitbucketAccountId NVARCHAR(255) NOT NULL,
+                BitbucketUsername NVARCHAR(255) NOT NULL,
+                -- MAX, not a fixed length like the other token columns —
+                -- Bitbucket/Atlassian OAuth tokens are long JWTs, not short
+                -- random strings, and a Fernet-encrypted one overflows
+                -- NVARCHAR(2000) (found live: a real token got truncated
+                -- and rejected by SQL Server's schema check).
+                AccessToken       NVARCHAR(MAX) NOT NULL,
+                RefreshToken      NVARCHAR(MAX) NOT NULL,
+                ExpiresAt         DATETIME2(3)  NOT NULL,
+                CreatedAt         DATETIME2(3)  NOT NULL DEFAULT SYSUTCDATETIME()
+            )
+        """)
+        conn.commit()
+        cur.execute("""
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.BitbucketAppConnection') AND name = N'AccessToken'
+                AND max_length != -1
+            )
+            ALTER TABLE dbo.BitbucketAppConnection ALTER COLUMN AccessToken NVARCHAR(MAX) NOT NULL
+        """)
+        conn.commit()
+        cur.execute("""
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.BitbucketAppConnection') AND name = N'RefreshToken'
+                AND max_length != -1
+            )
+            ALTER TABLE dbo.BitbucketAppConnection ALTER COLUMN RefreshToken NVARCHAR(MAX) NOT NULL
+        """)
+        conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.BitbucketAppConnection') AND name = N'KnownWorkspaces'
+            )
+            -- Comma-separated workspace slugs this connection has ever
+            -- successfully listed repos for. Bitbucket's OAuth API can't
+            -- enumerate workspaces itself (see bitbucket_app_service.py) —
+            -- once a workspace is found by any means (a connected repo
+            -- link, or the user typing it in), it's remembered here
+            -- permanently, independent of whether that repo link later gets
+            -- disconnected. That repo link kept getting disconnected during
+            -- testing and silently breaking the "auto-detect" path every
+            -- time — this makes the detection durable instead of derived.
+            ALTER TABLE dbo.BitbucketAppConnection ADD KnownWorkspaces NVARCHAR(1000) NULL
         """)
         conn.commit()
         # ── Fix attempts (Auto-Fix history) ───────────────────────────────────
@@ -613,14 +732,23 @@ def create_user(first_name: str, last_name: str, email: str, password_hash: str)
     conn = _conn()
     try:
         cur = conn.cursor()
+        # This table's actual live schema predates FirstName/LastName-based
+        # accounts — it still carries a NOT NULL Username column from an
+        # older auth design that current code never reads. Nothing else
+        # depends on its value, so the email's local part is just a
+        # reasonable, always-available fallback to satisfy the constraint.
+        username = email.split("@")[0]
+        # CreatedAt (distinct from the newer CreatedAtUtc column below) is
+        # another NOT NULL holdover from that same older schema, with no
+        # default constraint of its own on this live table.
         cur.execute(
             """
-            INSERT INTO dbo.Users (FirstName, LastName, Email, PasswordHash)
+            INSERT INTO dbo.Users (Username, FirstName, LastName, Email, PasswordHash, CreatedAt)
             OUTPUT INSERTED.Id, INSERTED.FirstName, INSERTED.LastName,
                    INSERTED.Email, INSERTED.CreatedAtUtc
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, SYSUTCDATETIME())
             """,
-            first_name, last_name, email, password_hash,
+            username, first_name, last_name, email, password_hash,
         )
         row = cur.fetchone()
         conn.commit()
@@ -3255,7 +3383,8 @@ def _normalize_path_prefix(path: str) -> str:
 
 def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
                     default_branch: str, framework: str, access_token: str | None,
-                    path_prefix: str = "", provider: str = "github", link_id: int | None = None) -> int:
+                    path_prefix: str = "", provider: str = "github", link_id: int | None = None,
+                    installation_id: int | None = None) -> int:
     """Create or update a site-to-repo link. Returns RepoLink.Id.
 
     Two distinct paths, not one upsert-by-domain for both:
@@ -3284,10 +3413,11 @@ def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
             cur.execute("""
                 UPDATE dbo.RepoLink
                 SET Domain = ?, PathPrefix = ?, SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?,
-                    Framework = ?, Provider = ?, AccessToken = COALESCE(?, AccessToken), Status = 'active'
+                    Framework = ?, Provider = ?, AccessToken = COALESCE(?, AccessToken),
+                    InstallationId = COALESCE(?, InstallationId), Status = 'active'
                 WHERE Id = ? AND UserId = ?
             """, domain, path_prefix, site_url, repo_url, default_branch, framework, provider,
-                 encrypted_token, link_id, user_id)
+                 encrypted_token, installation_id, link_id, user_id)
             conn.commit()
             if cur.rowcount == 0:
                 raise ValueError(f"Repo link {link_id} not found for this user")
@@ -3296,16 +3426,20 @@ def save_repo_link(user_id: int, domain: str, site_url: str, repo_url: str,
         cur.execute("""
             UPDATE dbo.RepoLink
             SET SiteUrl = ?, RepoUrl = ?, DefaultBranch = ?, Framework = ?, Provider = ?,
-                AccessToken = COALESCE(?, AccessToken), Status = 'active'
+                AccessToken = COALESCE(?, AccessToken), InstallationId = COALESCE(?, InstallationId),
+                Status = 'active'
             WHERE UserId = ? AND Domain = ? AND PathPrefix = ?
-        """, site_url, repo_url, default_branch, framework, provider, encrypted_token, user_id, domain, path_prefix)
+        """, site_url, repo_url, default_branch, framework, provider, encrypted_token, installation_id,
+             user_id, domain, path_prefix)
         if cur.rowcount == 0:
             cur.execute("""
                 INSERT INTO dbo.RepoLink
-                    (UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken)
+                    (UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider,
+                     AccessToken, InstallationId)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, user_id, domain, path_prefix, site_url, repo_url, default_branch, framework, provider, encrypted_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, user_id, domain, path_prefix, site_url, repo_url, default_branch, framework, provider,
+                 encrypted_token, installation_id)
             row = cur.fetchone()
             conn.commit()
             return int(row[0])
@@ -3326,7 +3460,7 @@ def get_repo_links(user_id: int) -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, InstallationId, ConnectedAt
             FROM dbo.RepoLink
             WHERE UserId = ? AND Status = 'active'
             ORDER BY ConnectedAt DESC
@@ -3346,6 +3480,7 @@ def get_repo_links(user_id: int) -> list[dict]:
             "default_branch": r.DefaultBranch,
             "framework": r.Framework,
             "provider": r.Provider,
+            "installation_id": r.InstallationId,
             "connected_at": ts,
         })
     return out
@@ -3359,7 +3494,8 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider,
+                   AccessToken, InstallationId, ConnectedAt
             FROM dbo.RepoLink
             WHERE Id = ? AND UserId = ? AND Status = 'active'
         """, link_id, user_id)
@@ -3371,6 +3507,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
     ts = _ts(r.ConnectedAt)
     return {
         "id": r.Id,
+        "user_id": user_id,
         "domain": r.Domain,
         "path_prefix": r.PathPrefix,
         "site_url": r.SiteUrl,
@@ -3379,6 +3516,7 @@ def get_repo_link(link_id: int, user_id: int) -> dict | None:
         "framework": r.Framework,
         "provider": r.Provider,
         "access_token": _decrypt_token(r.AccessToken),
+        "installation_id": r.InstallationId,
         "connected_at": ts,
     }
 
@@ -3399,7 +3537,8 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider, AccessToken, ConnectedAt
+            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider,
+                   AccessToken, InstallationId, ConnectedAt
             FROM dbo.RepoLink
             WHERE Domain = ? AND UserId = ? AND Status = 'active'
         """, domain, user_id)
@@ -3416,6 +3555,7 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
     ts = _ts(best.ConnectedAt)
     return {
         "id": best.Id,
+        "user_id": user_id,
         "domain": best.Domain,
         "path_prefix": best.PathPrefix,
         "site_url": best.SiteUrl,
@@ -3424,6 +3564,7 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
         "framework": best.Framework,
         "provider": best.Provider,
         "access_token": _decrypt_token(best.AccessToken),
+        "installation_id": best.InstallationId,
         "connected_at": ts,
     }
 

@@ -14,12 +14,19 @@ function slug(str) {
     .slice(0, 60);
 }
 
-export function buildAssistiveViolation({ testType, url, message, detail, severity, wcag, selector, html }) {
+export function buildAssistiveViolation({ testType, url, message, detail, severity, wcag, selector, html, ruleId }) {
   return {
     // Auto-Fix uses this id verbatim inside a git branch name
     // (`ada/fix/{id}-{hash}` — see auto_fix_service.py) — git branch names
     // reject ':', so this must stay hyphen/slash-safe, unlike a free-form id.
-    id: `assistive-${testType}-${slug(message)}`,
+    // `ruleId`, when given, is the real underlying axe rule this assistive
+    // check wraps (e.g. color-contrast is a real axe check under the hood) —
+    // passing it through as the actual id (instead of the generic
+    // "assistive-<testType>-<slug>" id) is what lets it qualify for
+    // RULES_WITH_FALLBACK's free, deterministic fixes instead of always
+    // costing a Gemini call. Most assistive checks are bespoke heuristics
+    // with no axe equivalent, so this stays optional.
+    id: ruleId || `assistive-${testType}-${slug(message)}`,
     description: message,
     help: message,
     detail,

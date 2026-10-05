@@ -47,6 +47,11 @@ function ViolationRow({ item, testType, url }) {
     severity: 'error',
     selector: item.target,
     html: item.html,
+    // This check IS axe's real color-contrast rule under the hood (see
+    // run_color_contrast_assisted_test) — tagging it with the real id lets
+    // Auto-Fix use the same free, deterministic contrast-ratio fix a normal
+    // scan gets, instead of always spending a Gemini call on it.
+    ruleId: 'color-contrast',
   });
 
   return (
@@ -109,7 +114,18 @@ function ViolationRow({ item, testType, url }) {
           </span>
           {!passes && (
             <div className="mt-2 flex justify-end">
-              <AssistiveAutoFixControl pageUrl={url} rule={violationRule} node={{ html: item.html || '' }} />
+              <AssistiveAutoFixControl
+                pageUrl={url}
+                rule={violationRule}
+                node={{
+                  html: item.html || '',
+                  // Backend's _parse_contrast_data reads fgColor/bgColor/
+                  // expectedContrastRatio from here, same shape axe itself
+                  // produces — without it, the deterministic contrast fix
+                  // has no color values to compute a corrected one from.
+                  any: hasColors ? [{ data: { fgColor: fg, bgColor: bg, expectedContrastRatio: `${required}:1` } }] : [],
+                }}
+              />
             </div>
           )}
         </div>

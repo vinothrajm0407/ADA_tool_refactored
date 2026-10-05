@@ -148,7 +148,14 @@ def crawl_site_task(
 
                 try:
                     try:
-                        pw_page.goto(url, wait_until="networkidle", timeout=60000)
+                        # domcontentloaded + a short settle, not networkidle —
+                        # networkidle waits for 500ms of zero network activity,
+                        # which real sites with analytics beacons, ad trackers,
+                        # or polling never actually reach, so it was routinely
+                        # burning most of the 60s timeout on every single page.
+                        # Matches the single-page scan path's own approach.
+                        pw_page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        pw_page.wait_for_timeout(1000)
                     except PWTimeout:
                         pass  # proceed with what loaded
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ArrowUpRight, Check, Eye, EyeOff, Lock, Mail, Moon, ShieldCheck, Sparkles, Sun, TrendingUp } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Check, Eye, EyeOff, Lock, Mail, Moon, ShieldCheck, Sparkles, Sun } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 const features = [
@@ -74,11 +74,6 @@ export default function LoginPage({ dark, toggleDark }) {
           </ul>
         </div>
 
-        <div className="score-card" aria-label="Accessibility score trend">
-          <div className="score-card-top"><div><span className="metric-label">Accessibility score</span><strong>92</strong></div><div className="trend-copy"><span>Trend</span><b><TrendingUp size={13} /> Improving</b></div></div>
-          <div className="chart-wrap"><svg viewBox="0 0 300 90" role="img" aria-label="Score increased from 63 to 92"><path className="chart-grid" d="M0 72H300M0 48H300M0 24H300" /><path className="chart-area" d="M0 70 L60 57 L120 48 L180 34 L240 22 L300 11 L300 90 L0 90Z" /><path className="chart-line" d="M0 70 L60 57 L120 48 L180 34 L240 22 L300 11" /><circle cx="300" cy="11" r="5" className="chart-dot" /><rect x="273" y="0" width="27" height="18" rx="5" className="chart-badge" /><text x="286.5" y="12.5" textAnchor="middle">92</text></svg></div>
-          <div className="score-footer"><span>Site-wide score across 6 development sprints</span><ArrowUpRight size={15} /></div>
-        </div>
         <p className="story-footer">© 2026 United Techno <span>•</span> Built for teams who care about every user.</p>
       </section>
 

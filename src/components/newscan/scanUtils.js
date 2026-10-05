@@ -49,6 +49,15 @@ export function nsScoreMessage(score) {
   return 'Critical accessibility failures present. Immediate remediation required.';
 }
 
+// Total affected elements across all violation rules — matches how axe
+// DevTools' "Total Issues" counts (one per element, not one per rule); a
+// page can have 1 rule violated by 7 elements just as easily as 7 rules
+// violated once each, and DevTools' count reflects the former, not the
+// number of distinct rules.
+export function nsTotalElementCount(violations) {
+  return violations.reduce((sum, v) => sum + (v.nodes?.length ?? 1), 0);
+}
+
 export function nsBuildSeverityBreakdown(violations) {
   const c = { critical: 0, serious: 0, moderate: 0, minor: 0 };
   for (const v of violations) {

@@ -209,8 +209,14 @@ function TopViolatingTable({ pages, onRowClick }) {
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
-export default function CrawlResultsPage() {
-  const { crawlId, setCrawlId, navigate, setPendingScanHistoryTab } = useApp();
+// `crawlId`/`onStatusChange`/`onRecrawl` are only passed when rendered inline
+// as a tab's content (see NewScanPage's CrawlTabStrip) — omitting them keeps
+// this working exactly as before as the standalone /crawl-results page (deep
+// links from Slack/Teams, "View" from Scan History's Crawls tab), driven by
+// the single global crawlId in context instead of a per-tab one.
+export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange, onRecrawl } = {}) {
+  const { crawlId: contextCrawlId, setCrawlId, navigate, setPendingScanHistoryTab } = useApp();
+  const crawlId = crawlIdProp ?? contextCrawlId;
 
   function goToCrawlHistory() {
     setPendingScanHistoryTab('crawls');
@@ -271,6 +277,7 @@ export default function CrawlResultsPage() {
       setLoading(false);
       const isActive = j && (j.status === 'running' || j.status === 'pending');
       setPolling(isActive);
+      onStatusChange?.(j);
     }
     load();
     return () => { cancelled = true; };
@@ -288,6 +295,7 @@ export default function CrawlResultsPage() {
       setPages(p);
       const isActive = j && (j.status === 'running' || j.status === 'pending');
       if (!isActive) setPolling(false);
+      onStatusChange?.(j);
     }, 2500);
     return () => clearInterval(pollRef.current);
   }, [polling, fetchJob, fetchPages]);
@@ -352,7 +360,10 @@ export default function CrawlResultsPage() {
       });
       const data = await res.json();
       if (data.ok) {
-        setCrawlId(data.crawl_id);
+        // In tab mode, re-target this same tab at the fresh crawl instead of
+        // the single global crawlId (which isn't what this tab is tracking).
+        if (onRecrawl) onRecrawl(data.crawl_id);
+        else setCrawlId(data.crawl_id);
         setSelectedRow(null);
         setDrawerViolations(null);
         setPages([]);
@@ -519,7 +530,7 @@ export default function CrawlResultsPage() {
             )}
             {isComplete && (
               <button
-                onClick={() => navigate('executive-summary')}
+                onClick={() => { setCrawlId(crawlId); navigate('executive-summary'); }}
                 className="btn-secondary flex items-center gap-2 text-sm"
                 title="Open printable executive summary"
               >

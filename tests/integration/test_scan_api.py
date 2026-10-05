@@ -69,18 +69,35 @@ class TestScanCreate:
         assert resp.status_code == 202
 
     def test_rate_limit_second_request_429(self, client, authed_headers):
+        # Localhost is exempt from this throttle (see _check_scan_rate_limit) —
+        # use a non-loopback IP so this actually exercises the rate limit,
+        # not the exemption.
         with patch("app.create_scan_job", side_effect=_mock_create_scan):
-            client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
-            resp = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
+            client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers,
+                        environ_base={"REMOTE_ADDR": "10.0.0.9"})
+            resp = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers,
+                                environ_base={"REMOTE_ADDR": "10.0.0.9"})
         assert resp.status_code == 429
         data = resp.get_json()
         assert "retry" in data["error"].lower() or "wait" in data["error"].lower()
 
     def test_rate_limit_includes_retry_after_header(self, client, authed_headers):
         with patch("app.create_scan_job", side_effect=_mock_create_scan):
-            client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
-            resp = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
+            client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers,
+                        environ_base={"REMOTE_ADDR": "10.0.0.9"})
+            resp = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers,
+                                environ_base={"REMOTE_ADDR": "10.0.0.9"})
         assert "Retry-After" in resp.headers
+
+    def test_localhost_exempt_from_rate_limit(self, client, authed_headers):
+        # Loopback requests (the normal case for local dev/demo use, where
+        # every scan comes from the same machine regardless of who's testing
+        # what) are never throttled — only real, distinct external IPs are.
+        with patch("app.create_scan_job", side_effect=_mock_create_scan):
+            resp1 = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
+            resp2 = client.post("/api/scan", json={"url": "https://example.com"}, headers=authed_headers)
+        assert resp1.status_code == 202
+        assert resp2.status_code == 202
 
     def test_queue_error_500(self, client, authed_headers):
         with patch("app.create_scan_job", side_effect=RuntimeError("Redis down")):

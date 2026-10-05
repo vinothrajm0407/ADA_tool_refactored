@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitBranch, CheckCircle2, Trash2, Plus, X, RefreshCw, Settings2,
-  Link2, Lock, ShieldCheck, FolderGit2,
+  Link2, Lock, ShieldCheck, FolderGit2, Rocket,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
 import PageHeader from '../components/ui/PageHeader';
@@ -51,15 +51,17 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
-// The backend validates github.com and gitlab.com repo URLs (see
-// _GITHUB_REPO_RE / _GITLAB_REPO_RE in app.py) — this just derives a
-// display label from the same host the backend already checked.
+// The backend validates github.com, gitlab.com, bitbucket.org and Azure
+// DevOps repo URLs (see _GITHUB_REPO_RE / _GITLAB_REPO_RE / _BITBUCKET_REPO_RE
+// / _AZURE_REPO_RE in app.py) — this just derives a display label from the
+// same host the backend already checked.
 function repoProviderLabel(repoUrl) {
   try {
     const host = new URL(repoUrl).hostname.replace(/^www\./, '');
     if (host === 'github.com') return 'GitHub';
     if (host === 'gitlab.com') return 'GitLab';
     if (host === 'bitbucket.org') return 'Bitbucket';
+    if (host === 'dev.azure.com' || host.endsWith('.visualstudio.com')) return 'Azure DevOps';
     return host;
   } catch { return 'Repository'; }
 }
@@ -80,8 +82,97 @@ function repoProviderIconMeta(repoUrl) {
     if (host === 'github.com')    return { bg: 'bg-gray-50 border border-gray-100', Icon: GitHubLogo };
     if (host === 'gitlab.com')    return { bg: 'bg-gray-50 border border-gray-100', Icon: GitLabLogo };
     if (host === 'bitbucket.org') return { bg: 'bg-gray-50 border border-gray-100', Icon: BitbucketLogo };
+    if (host === 'dev.azure.com' || host.endsWith('.visualstudio.com'))
+      // Lucide's Rocket glyph sits smaller within its own viewBox than the
+      // hand-drawn logos above (which fill it edge-to-edge) — bump size and
+      // stroke weight so it reads at the same visual scale on the tile.
+      return { bg: 'bg-[#0078D4]', Icon: Rocket, size: 34, strokeWidth: 2.25 };
     return { bg: 'bg-ink', Icon: FolderGit2 };
   } catch { return { bg: 'bg-ink', Icon: FolderGit2 }; }
+}
+
+// Where to create an access token, and which scopes it needs, per provider —
+// shown live under the Access Token field so no one has to go dig this up
+// again (see chat: GitHub tokens/personal access tokens, GitLab's project
+// access tokens, Bitbucket's newer "API tokens with scopes" under the
+// Atlassian account rather than the old App passwords page).
+const TOKEN_GUIDES = {
+  'github.com': {
+    label: 'GitHub', url: 'https://github.com/settings/tokens/new?scopes=repo&description=ADA+Tool',
+    scopes: 'repo scope covers private read/write.',
+    steps: [
+      'Go to github.com → click your avatar (top right) → Settings.',
+      'Scroll down to Developer settings → Personal access tokens → Tokens (classic).',
+      'Click Generate new token (classic).',
+      'Give it a name (e.g. "ADA Tool"), set an expiry.',
+      'Check the repo scope — this covers both public and private repo read/write.',
+      'Click Generate token, then copy it immediately — GitHub only shows it once.',
+    ],
+  },
+  'gitlab.com': {
+    label: 'GitLab', url: 'https://gitlab.com/-/user_settings/personal_access_tokens',
+    // read_repository/write_repository only cover git clone/push — this app
+    // also calls GitLab's REST API directly (to verify the repo on connect,
+    // and to open/merge MRs for Auto-Fix), which needs the broader `api`
+    // scope. GitLab's docs confirm `api` also covers git-over-HTTP, so it's
+    // the one scope that covers everything this app needs.
+    scopes: 'Check api — read_repository/write_repository alone are not enough, since this app also calls the GitLab REST API to verify the repo and open merge requests.',
+    steps: [
+      'Go to gitlab.com → click your avatar → Edit profile → Access Tokens.',
+      'Click Add new token.',
+      'Give it a name and expiry date.',
+      'Check api (covers repo verification, git push, and opening merge requests — read_repository alone is not enough).',
+      'Click Create personal access token, then copy it — shown only once.',
+    ],
+  },
+  'bitbucket.org': {
+    label: 'Bitbucket', url: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    scopes: 'Create an API token with scopes → app: Bitbucket → read:repository:bitbucket (+ write:repository:bitbucket, read/write:pullrequest:bitbucket for Auto-Fix).',
+    steps: [
+      'Go to id.atlassian.com/manage-profile/security/api-tokens.',
+      'Click Create API token with scopes.',
+      'Name it (e.g. "ADA Tool"), set an expiry, click Next.',
+      'Select app: Bitbucket, click Next.',
+      'Search "repository" and check read:repository:bitbucket (+ write:repository:bitbucket for Auto-Fix pushes).',
+      'Search "pullrequest" and check read:pullrequest:bitbucket (+ write:pullrequest:bitbucket so Auto-Fix can open a PR).',
+      'Click Next, then Create, and copy the token — shown only once.',
+    ],
+  },
+  'dev.azure.com': {
+    label: 'Azure DevOps', url: 'https://dev.azure.com/_usersSettings/tokens',
+    scopes: 'Create a PAT with Code (Read & Write) — and Code (Status) if you also want Auto-Fix to open pull requests.',
+    steps: [
+      'Click the link above — it goes straight to your org\'s token page (org filled in automatically once your Repo URL below names one).',
+      'Click + New Token.',
+      'Give it a name and expiry, and pick the organization it applies to.',
+      'Under Scopes, select Code and check Read & Write.',
+      'Click Create, then copy the token — shown only once.',
+    ],
+  },
+};
+
+// Same regex shape as _AZURE_REPO_RE in app.py — extracts the org so the
+// token-creation link can go straight to https://dev.azure.com/{org}/_usersSettings/tokens
+// instead of the generic dev.azure.com landing page, which doesn't have an
+// org selected yet.
+const _AZURE_REPO_RE = /^https?:\/\/(?:[\w.-]+@)?dev\.azure\.com\/([\w.-]+)\/[^/]+\/_git\/[\w.-]+?\/?$/;
+const _AZURE_VSTS_REPO_RE = /^https?:\/\/([\w.-]+)\.visualstudio\.com\/[^/]+\/_git\/[\w.-]+?\/?$/;
+
+function _azureOrgFrom(repoUrl) {
+  return _AZURE_REPO_RE.exec(repoUrl)?.[1] || _AZURE_VSTS_REPO_RE.exec(repoUrl)?.[1] || null;
+}
+
+// dev.azure.com is the one fixed host; {org}.visualstudio.com is the legacy
+// shape where the org itself is the subdomain, so it can't be a literal key.
+function tokenGuideFor(repoUrl) {
+  try {
+    const host = new URL(repoUrl).hostname.replace(/^www\./, '');
+    const isAzure = host === 'dev.azure.com' || host.endsWith('.visualstudio.com');
+    if (!isAzure) return TOKEN_GUIDES[host] || null;
+    const org = _azureOrgFrom(repoUrl);
+    const guide = TOKEN_GUIDES['dev.azure.com'];
+    return org ? { ...guide, url: `https://dev.azure.com/${org}/_usersSettings/tokens` } : guide;
+  } catch { return null; }
 }
 
 // ── Connect Repo Modal ────────────────────────────────────────────────────────
@@ -174,13 +265,20 @@ function ConnectRepoModal({ onClose, onConnected, initial, triggerRef }) {
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="repo-github-url"className="block text-sm font-medium text-ink">Repo URL</label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="repo-github-url"className="block text-sm font-medium text-ink">Repo URL</label>
+              {tokenGuideFor(repoUrl) && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-teal">
+                  <CheckCircle2 size={11} /> Detected: {tokenGuideFor(repoUrl).label}
+                </span>
+              )}
+            </div>
             <input
               id="repo-github-url"
               type="url"
               value={repoUrl}
               onChange={e => setRepoUrl(e.target.value)}
-              placeholder="https://github.com/owner/repo, gitlab.com/owner/repo, or bitbucket.org/workspace/repo"
+              placeholder="https://github.com/owner/repo, gitlab.com/owner/repo, bitbucket.org/workspace/repo, or dev.azure.com/org/project/_git/repo"
               className="input-base"
             />
           </div>
@@ -203,7 +301,7 @@ function ConnectRepoModal({ onClose, onConnected, initial, triggerRef }) {
                 type="password"
                 value={accessToken}
                 onChange={e => setAccessToken(e.target.value)}
-                placeholder={isEdit ? 'Leave blank to keep the current token' : 'ghp_..., glpat-..., or a Bitbucket access token'}
+                placeholder={isEdit ? 'Leave blank to keep the current token' : 'ghp_..., glpat-..., a Bitbucket token, or an Azure DevOps PAT'}
                 autoComplete="off"
                 className="input-base"
               />
@@ -212,8 +310,33 @@ function ConnectRepoModal({ onClose, onConnected, initial, triggerRef }) {
           <p className="text-xs text-body">
             {isEdit
               ? "Leave blank to keep the current token, or enter a new one to replace it."
-              : "A GitHub, GitLab, or Bitbucket personal/repository access token with repo read access. We'll verify it can reach the repo before saving."}
+              : "A GitHub, GitLab, Bitbucket, or Azure DevOps personal/repository access token with repo read access. We'll verify it can reach the repo before saving."}
           </p>
+          {(() => {
+            const guide = tokenGuideFor(repoUrl);
+            const guides = guide ? [guide] : Object.values(TOKEN_GUIDES);
+            return (
+              <div className="bg-teal/5 border border-teal/15 rounded-lg divide-y divide-teal/10">
+                {guides.map(g => (
+                  <details key={g.label} className="group px-3 py-2">
+                    <summary className="text-xs font-semibold text-ink cursor-pointer list-none flex items-center justify-between gap-2">
+                      <span>
+                        Need a {g.label} token?{' '}
+                        <a href={g.url} target="_blank" rel="noopener noreferrer"
+                           onClick={e => e.stopPropagation()}
+                           className="text-teal font-semibold hover:underline">Create one →</a>
+                      </span>
+                      <span className="text-teal text-[10px] group-open:rotate-180 transition-transform">▾</span>
+                    </summary>
+                    <ol className="mt-2 space-y-1 text-xs text-body list-decimal list-inside">
+                      {g.steps.map((step, i) => <li key={i}>{step}</li>)}
+                    </ol>
+                    <p className="mt-2 text-[11px] text-body italic">{g.scopes}</p>
+                  </details>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100">
           <button onClick={() => { onClose(); triggerRef?.current?.focus(); }} className="btn-secondary text-sm">Cancel</button>
@@ -234,12 +357,12 @@ function ConnectRepoModal({ onClose, onConnected, initial, triggerRef }) {
 
 // ── Repo link card ─────────────────────────────────────────────────────────────
 function RepoLinkCard({ link, onEdit, onDisconnect, disconnecting, editButtonRef }) {
-  const { bg, Icon } = repoProviderIconMeta(link.repo_url);
+  const { bg, Icon, size = 30, strokeWidth } = repoProviderIconMeta(link.repo_url);
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-4 bg-white rounded-2xl border border-gray-100 flex-wrap">
       <div className="flex items-center gap-3 min-w-0">
         <div className={`w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 ${bg}`}>
-          <Icon size={30} className="text-white" />
+          <Icon size={size} strokeWidth={strokeWidth} className="text-white" />
         </div>
         <div className="min-w-0">
           <p className="font-heading font-semibold text-sm text-ink truncate m-0">{repoDisplayName(link.repo_url)}</p>
@@ -326,16 +449,18 @@ export default function RepoLinkingPage() {
 
         <PageHeader
           title="Connected Repos"
-          description="Link a scanned site to its GitHub, GitLab, or Bitbucket repo so Auto Fix knows where the real source code lives."
+          description="Link a scanned site to its GitHub, GitLab, Bitbucket, or Azure DevOps repo so Auto Fix knows where the real source code lives."
           className="mb-6"
           actions={
-            <button
-              ref={connectButtonRef}
-              onClick={() => { setLastTrigger(connectButtonRef); setShowModal(true); }}
-              className="btn-primary text-sm flex items-center gap-2 flex-shrink-0"
-            >
-              <Plus size={14} /> Connect repository
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                ref={connectButtonRef}
+                onClick={() => { setLastTrigger(connectButtonRef); setShowModal(true); }}
+                className="btn-primary text-sm flex items-center gap-2"
+              >
+                <Plus size={14} /> Connect repository
+              </button>
+            </div>
           }
         />
 

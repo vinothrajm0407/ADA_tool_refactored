@@ -15,7 +15,7 @@ from backend.services.auto_fix_service import (
     is_auto_merge_eligible, _parse_target_chain, _ai_disambiguate, _pick_match_by_line,
     _widen_until_unique, _scan_tag_end, _find_tag_occurrences, _locate_patch_target,
     _find_enclosing_tag, _apply_attribute, _infer_accessible_name, RULES_WITH_FALLBACK,
-    ALREADY_FIXED,
+    ALREADY_FIXED, _locate_page_entry, _page_path_hint,
 )
 
 
@@ -129,6 +129,92 @@ class TestLocateSource:
         result = locate_source(tmp_path, '<button class="menu-btn">x</button>')
         assert result is not None
         assert result[0] == "Header.jsx"
+
+
+class TestPagePathHint:
+    """Covers the fix found 2026-09-28: this used to always guess
+    `docs/{name}` regardless of the repo's real layout, which only ever
+    happened to be correct for this project's own test fixtures. Now it
+    actually searches the repo for a file with that name, wherever it is."""
+
+    def test_finds_file_at_repo_root(self, tmp_path):
+        (tmp_path / "profile.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/profile.html") == "profile.html"
+
+    def test_finds_file_under_a_public_folder(self, tmp_path):
+        (tmp_path / "public").mkdir()
+        (tmp_path / "public" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/profile.html") == "public/profile.html"
+
+    def test_finds_file_under_docs_folder_too(self, tmp_path):
+        # docs/ still works fine — it's just no longer the only folder tried.
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/profile.html") == "docs/profile.html"
+
+    def test_root_url_maps_to_index(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/") == "index.html"
+
+    def test_ambiguous_across_multiple_folders_returns_none(self, tmp_path):
+        # Same filename genuinely exists in two places — narrowing to either
+        # one would risk patching the wrong page, so decline rather than guess.
+        (tmp_path / "public").mkdir()
+        (tmp_path / "static").mkdir()
+        (tmp_path / "public" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        (tmp_path / "static" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/profile.html") is None
+
+    def test_ignores_matches_inside_excluded_dirs(self, tmp_path):
+        (tmp_path / "node_modules" / "some-lib").mkdir(parents=True)
+        (tmp_path / "node_modules" / "some-lib" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/profile.html") is None
+
+    def test_no_matching_file_returns_none(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, "https://example.com/nonexistent.html") is None
+
+    def test_no_page_url_returns_none(self, tmp_path):
+        (tmp_path / "index.html").write_text("<html></html>", encoding="utf-8")
+        assert _page_path_hint(tmp_path, None) is None
+
+
+class TestLocatePageEntry:
+    """Covers the bug found 2026-09-28: page-wide violations (empty node
+    html — a missing H1, missing <main>, unlabelled nav landmarks) only ever
+    checked React-SPA root-component paths, so a static multi-page site
+    (docs/index.html, docs/profile.html, ...) always failed to locate any
+    file at all, regardless of whether AI generation was even reachable."""
+
+    def test_uses_scanned_page_url_on_a_static_multipage_site(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "index.html").write_text("<html></html>", encoding="utf-8")
+        (tmp_path / "docs" / "profile.html").write_text("<html></html>", encoding="utf-8")
+        result = _locate_page_entry(tmp_path, "https://example.github.io/app/profile.html")
+        assert result == "docs/profile.html"
+
+    def test_root_url_maps_to_index(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "index.html").write_text("<html></html>", encoding="utf-8")
+        result = _locate_page_entry(tmp_path, "https://example.github.io/app/")
+        assert result == "docs/index.html"
+
+    def test_falls_back_to_react_spa_candidates_when_no_page_url(self, tmp_path):
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "App.jsx").write_text("export default function App() {}", encoding="utf-8")
+        assert _locate_page_entry(tmp_path, None) == "src/App.jsx"
+
+    def test_falls_back_to_react_spa_candidates_when_hinted_file_missing(self, tmp_path):
+        # page_url resolves to docs/profile.html, but this repo has no
+        # docs/ folder at all (a real SPA) — must not error, just fall
+        # through to the React-SPA candidates.
+        (tmp_path / "src" / "app").mkdir(parents=True)
+        (tmp_path / "src" / "app" / "page.tsx").write_text("export default function Page() {}", encoding="utf-8")
+        result = _locate_page_entry(tmp_path, "https://example.com/profile.html")
+        assert result == "src/app/page.tsx"
+
+    def test_returns_none_when_nothing_matches(self, tmp_path):
+        assert _locate_page_entry(tmp_path, "https://example.com/profile.html") is None
 
 
 class TestValidatePatch:
@@ -245,14 +331,63 @@ class TestFallbackPatchLabel:
         assert patch["before"] == '<input type="text" placeholder="Message" />'
         assert patch["after"] == '<input type="text" placeholder="Message" aria-label="Message" />'
 
-    def test_no_placeholder_returns_none(self):
+    def test_bare_input_ambiguous_without_line_no_returns_none(self):
+        # No identifying attribute on the violation itself, and no line_no
+        # to disambiguate between the file's two inputs — correctly declines
+        # rather than guessing.
         node = {"html": "<input>"}
         assert _fallback_patch(self.RULE, node, self.FILE) is None
 
-    def test_already_has_aria_label_returns_none(self):
+    def test_already_has_aria_label_returns_already_fixed(self):
         node = {"html": '<input type="email" placeholder="Work email">'}
         file_content = '<input type="email" placeholder="Work email" aria-label="Already set" />'
-        assert _fallback_patch(self.RULE, node, file_content) is None
+        assert _fallback_patch(self.RULE, node, file_content) is ALREADY_FIXED
+
+    # The actual bug this rule's fallback had: axe's own accessible-name
+    # algorithm treats `placeholder` as a valid name, so a real "label"
+    # violation is a genuinely nameless input — one with none of
+    # placeholder/aria-label/associated <label>. The old fixer required a
+    # placeholder to derive its text and returned None for every one of
+    # these, a complete dead code path. These prove it now works.
+
+    def test_nameless_input_derives_label_from_name_attribute(self):
+        file_content = 'return (\n  <input type="email" name="work_email" />\n)'
+        node = {"html": '<input type="email" name="work_email">'}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch is not None
+        assert patch["after"] == '<input type="email" name="work_email" aria-label="Work Email" />'
+        assert validate_patch(file_content, patch["before"], patch["after"]) is True
+
+    def test_nameless_input_derives_label_from_id_when_no_name(self):
+        file_content = 'return (\n  <input type="search" id="site-search" />\n)'
+        node = {"html": '<input type="search" id="site-search">'}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch["after"] == '<input type="search" id="site-search" aria-label="Site Search" />'
+
+    def test_nameless_input_derives_label_from_type_as_last_resort(self):
+        file_content = 'return (\n  <input type="tel" />\n)'
+        node = {"html": '<input type="tel">'}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch["after"] == '<input type="tel" aria-label="Phone number" />'
+
+    def test_completely_bare_input_falls_to_type_default(self):
+        # No type= at all defaults to type="text" per the HTML spec.
+        file_content = 'return (\n  <input />\n)'
+        node = {"html": "<input>"}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch["after"] == '<input aria-label="Text" />'
+
+    def test_unrecognized_type_falls_to_generic_default(self):
+        file_content = 'return (\n  <input type="datetime-local" />\n)'
+        node = {"html": '<input type="datetime-local">'}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch["after"] == '<input type="datetime-local" aria-label="Text input" />'
+
+    def test_textarea_supported_too(self):
+        file_content = 'return (\n  <textarea name="feedback"></textarea>\n)'
+        node = {"html": '<textarea name="feedback">'}
+        patch = _fallback_patch(self.RULE, node, file_content, line_no=2)
+        assert patch["after"] == '<textarea name="feedback" aria-label="Feedback">'
 
 
 class TestParseGithubRepo:
@@ -483,18 +618,17 @@ class TestFallbackPatchColorContrast:
 
 
 class TestIsAutoMergeEligible:
-    def test_fallback_rule_eligible_when_no_api_key(self):
-        with mock_patch("backend.services.auto_fix_service.Config.GEMINI_API_KEY", ""):
-            assert is_auto_merge_eligible("button-name") is True
+    """Policy changed 2026-09-29: nothing auto-merges anymore, deterministic
+    or not — a real repo's own test suite/CI can still legitimately fail
+    against an otherwise-correct deterministic patch (see the Azure DevOps
+    color-contrast case: a snapshot test hard-coding the old color), so
+    every fix now always opens a PR for a human."""
 
-    def test_fallback_rule_still_eligible_once_api_key_configured(self):
-        # Fallback rules always route to the deterministic fallback, key or not.
-        with mock_patch("backend.services.auto_fix_service.Config.GEMINI_API_KEY", "gm-real-key"):
-            assert is_auto_merge_eligible("button-name") is True
+    def test_fallback_rule_no_longer_eligible(self):
+        assert is_auto_merge_eligible("button-name") is False
 
     def test_non_fallback_rule_never_eligible(self):
-        with mock_patch("backend.services.auto_fix_service.Config.GEMINI_API_KEY", ""):
-            assert is_auto_merge_eligible("aria-required-children") is False
+        assert is_auto_merge_eligible("aria-required-children") is False
 
 
 class TestParseTargetChain:
