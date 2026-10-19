@@ -693,6 +693,14 @@ def _ensure_table() -> None:
             ALTER TABLE dbo.Fix ADD NodeSignature NVARCHAR(64) NULL
         """)
         conn.commit()
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'PatchSignature'
+            )
+            ALTER TABLE dbo.Fix ADD PatchSignature NVARCHAR(64) NULL
+        """)
+        conn.commit()
         # ── API keys (machine-to-machine auth, e.g. CI pipelines — a scoped
         # credential that isn't a human's login, unlike a JWT from /auth/login) ──
         cur.execute("""
@@ -3610,7 +3618,8 @@ def delete_repo_link(link_id: int, user_id: int) -> bool:
 
 def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
              branch_url: str | None, error_message: str | None, pr_url: str | None = None,
-             merged: bool = False, node_signature: str | None = None) -> int:
+             merged: bool = False, node_signature: str | None = None,
+             patch_signature: str | None = None) -> int:
     """Record one Auto-Fix attempt. Returns Fix.Id."""
     if not is_enabled() or _INIT_ERROR:
         raise RuntimeError("Database not available")
@@ -3618,10 +3627,10 @@ def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, NodeSignature, Status, BranchUrl, ErrorMessage, PrUrl, Merged)
+            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, NodeSignature, Status, BranchUrl, ErrorMessage, PrUrl, Merged, PatchSignature)
             OUTPUT INSERTED.Id
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, user_id, page_url, rule_id, node_signature, status, branch_url, error_message, pr_url, 1 if merged else 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, user_id, page_url, rule_id, node_signature, status, branch_url, error_message, pr_url, 1 if merged else 0, patch_signature)
         row = cur.fetchone()
         conn.commit()
         return int(row[0])
@@ -3689,6 +3698,29 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
     if not row:
         return None
     return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl}
+
+
+def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str) -> dict | None:
+    """Most recent unmerged fix for this page whose actual patch (file + before
+    + after text) is identical — different elements can share one root cause
+    (e.g. five links styled by one CSS class), which get_open_fix's per-element
+    signature can't see."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT TOP (1) PrUrl, BranchUrl
+            FROM dbo.Fix
+            WHERE UserId = ? AND PageUrl = ? AND PatchSignature = ?
+                AND Status = 'verified' AND Merged = 0 AND PrUrl IS NOT NULL
+            ORDER BY CreatedAt DESC
+        """, user_id, page_url, patch_signature)
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl} if row else None
 
 
 # ── API keys (machine auth, e.g. CI pipelines) ────────────────────────────────

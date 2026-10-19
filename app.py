@@ -1320,13 +1320,26 @@ def api_auto_fix():
                            "detail": "A PR for this violation is already open and awaiting review"}],
             })
 
-    result = run_auto_fix(link, page_url, rule, node)
+    def find_duplicate(patch_signature):
+        # Same patch (file + before + after) already has an open PR — e.g. five
+        # different links all styled by one CSS class. Verified against the
+        # provider, not just the DB row: a PR closed since then must not block.
+        existing = db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature)
+        if not existing:
+            return None
+        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", existing["pr_url"] or "")
+        if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
+            return existing
+        return None
 
-    db.save_fix(
-        g.current_user_id, page_url, rule.get("id", ""), result.get("status", "failed"),
-        result.get("branch_url"), result.get("error"), result.get("pr_url"),
-        result.get("merged", False), node_signature,
-    )
+    result = run_auto_fix(link, page_url, rule, node, find_duplicate=find_duplicate)
+
+    if not result.get("duplicate"):
+        db.save_fix(
+            g.current_user_id, page_url, rule.get("id", ""), result.get("status", "failed"),
+            result.get("branch_url"), result.get("error"), result.get("pr_url"),
+            result.get("merged", False), node_signature, result.get("patch_signature"),
+        )
     return jsonify({"ok": True, **result})
 
 

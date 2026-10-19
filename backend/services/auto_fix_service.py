@@ -7,6 +7,7 @@ pushes a branch with the verified fix.
 Scope (MVP): one rule (button-name), one node, synchronous.
 """
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -2592,9 +2593,12 @@ def _why_unlocated(repo_dir: Path, rule_id: str | None, page_url: str | None) ->
     return generic
 
 
-def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
-    """Runs the full pipeline. `link` is a RepoLink dict from db.get_repo_link_for_url."""
+def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict, find_duplicate=None) -> dict:
+    """Runs the full pipeline. `link` is a RepoLink dict from db.get_repo_link_for_url.
+    `find_duplicate(patch_signature)` returns an existing open fix ({pr_url, branch_url}) when an
+    identical patch already has an open PR — checked before build/push so no duplicate PR is opened."""
     steps: list[dict] = []
+    patch_signature = None
 
     def step(name: str, ok: bool, detail: str = ""):
         steps.append({"name": name, "ok": ok, "detail": detail})
@@ -2673,6 +2677,12 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
                 step("Validate patch", False, "Patch did not validate against the source file")
                 return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
             step("Validate patch", True)
+            patch_signature = hashlib.sha256("\n".join((file_path, patch["before"], patch["after"])).encode()).hexdigest()[:32]
+            existing = find_duplicate(patch_signature) if find_duplicate else None
+            if existing:
+                step("Existing fix", True, "An open PR already makes this exact change — not opening a duplicate")
+                return {"status": "verified", "duplicate": True, "merged": False, "steps": steps,
+                        "pr_url": existing["pr_url"], "branch_url": existing["branch_url"]}
             patched_content = file_content.replace(patch["before"], patch["after"], 1)
             full_path.write_text(patched_content, encoding="utf-8")
 
@@ -2727,7 +2737,7 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict) -> dict:
         )
         step("Open PR", bool(pr), (pr["url"] if pr else "Branch pushed, but opening the PR failed — open it manually"))
 
-        result = {"status": "verified", "steps": steps, "branch_url": branch_url}
+        result = {"status": "verified", "steps": steps, "branch_url": branch_url, "patch_signature": patch_signature}
         if pr:
             result["pr_url"] = pr["url"]
             if not is_page_wide and is_auto_merge_eligible(rule_id):
