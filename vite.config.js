@@ -11,6 +11,18 @@ export default defineConfig({
         target: 'http://localhost:5000',
         changeOrigin: true,
       },
+      // Backend-only test-fixture relay routes (no frontend route matches
+      // these paths) — without this, Vite's dev server falls back to
+      // serving the SPA shell for them instead of proxying to Flask, which
+      // silently replaced the Bitbucket/GitLab test fixture page with our
+      // own app's HTML whenever reached through the ngrok-tunneled frontend
+      // instead of hitting the backend port directly (confirmed live
+      // 2026-10-06: scanning this path through the tunnel found our own
+      // app's violations, not the test fixture's).
+      '^/_ada_.*_relay.*': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
     },
   },
   test: {

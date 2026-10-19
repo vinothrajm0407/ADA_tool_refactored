@@ -10,6 +10,7 @@ import ScanResults from '../components/newscan/ScanResults';
 import ScanComparisonView from '../components/newscan/ScanComparisonView';
 import ADAResultsView from '../components/ADAResultsView/ADAResultsView';
 import CrawlResultsPage from './CrawlResultsPage';
+import { nsFriendlyScanError } from '../components/newscan/scanUtils';
 
 const TABS = [
   {
@@ -366,7 +367,7 @@ export default function NewScanPage() {
         if (!data.ok) { clearInterval(iv); updateScanSession(sessionId, { phase: 'failed', error: 'Could not retrieve scan status.' }); return; }
         const s = data.job?.status;
         if (s === 'completed') { clearInterval(iv); updateScanSession(sessionId, { phase: 'done', result: data.job?.result ?? null }); }
-        else if (s === 'failed') { clearInterval(iv); updateScanSession(sessionId, { phase: 'failed', error: 'Scan failed. Please check the URL and try again.' }); }
+        else if (s === 'failed') { clearInterval(iv); updateScanSession(sessionId, { phase: 'failed', error: nsFriendlyScanError(data.job?.failure_reason) }); }
       } catch { clearInterval(iv); updateScanSession(sessionId, { phase: 'failed', error: 'Network error while polling scan status.' }); }
     }, 2500);
   }, [updateScanSession]);
@@ -485,9 +486,9 @@ export default function NewScanPage() {
               <div className="bg-white rounded-xl border border-gray-100 p-6">
                 <SingleScanForm
                   scanUrl={activeSession.url}
-                  onUrlChange={() => {}}
+                  onUrlChange={(val) => updateScanSession(activeSession.id, { url: val })}
                   includeBestPractices={activeSession.includeBestPractices}
-                  onBestPracticesChange={() => {}}
+                  onBestPracticesChange={(val) => updateScanSession(activeSession.id, { includeBestPractices: val })}
                   scanPhase="failed"
                   scanError={activeSession.error}
                   onStartScan={() => retryScan(activeSession)}

@@ -18,8 +18,14 @@ from datetime import datetime, timezone
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_JSON = PROJECT_ROOT / "output" / "ada_result.json"
 
-# Viewport for consistent screenshots; JPEG quality to keep payload size reasonable
-SCREENSHOT_VIEWPORT = {"width": 1280, "height": 800}
+# Viewport for consistent screenshots; JPEG quality to keep payload size reasonable.
+# Was 1280x800 — confirmed live 2026-10-08 that a narrower viewport shows fewer
+# items per row on responsive grid layouts (product listings, card grids) than
+# a typical desktop screen does, so a scan here caught fewer instances of the
+# same repeated-component bug than axe DevTools running in a normal-width
+# browser window. 1920x1080 (common desktop resolution) closes most of that gap
+# without giving up a fixed, reproducible scan size.
+SCREENSHOT_VIEWPORT = {"width": 1920, "height": 1080}
 SCREENSHOT_JPEG_QUALITY = 85
 # Each per-violation screenshot costs ~400 ms (Playwright render + JPEG encode).
 # Capping at 10 eliminates the long tail on pages with many violations.
@@ -92,7 +98,26 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         except PlaywrightTimeoutError:
             pass
         # Allow JS-rendered content (SPAs, lazy-loaded regions) to settle before axe runs.
-        page.wait_for_timeout(1000)
+        # Was 1000ms — confirmed live 2026-10-07 that heavy, carousel-filled sites
+        # (e.g. a commerce homepage with a Swiper carousel per product category)
+        # were still actively mounting sections at the 1s mark, so the exact same
+        # URL scanned seconds apart swung from 0 violations (almost nothing mounted
+        # yet) to 40 (most of it mounted) — axe DevTools doesn't have this problem
+        # because it scans a tab a person already has sitting open and settled, not
+        # a fresh page load. 3000ms gets our fresh-load scan much closer to that
+        # same "already settled" state without reintroducing the old 5s-per-shot
+        # screenshot slowness this was never about.
+        #
+        # Tried (2026-10-09): polling the DOM's size until it stops growing,
+        # instead of a fixed wait, hoping to adapt to each page's real load
+        # time. Made this specific page WORSE (0, 0, 6 across three runs,
+        # vs. the fixed wait's 6-38) — some third-party scripts (ad/analytics
+        # beacons) keep mutating the DOM continuously and never let it go
+        # quiet, so the poll just timed out early with less loaded than the
+        # plain fixed wait caught. Reverted — a fixed wait is a known,
+        # predictable quantity; "wait for quiet" isn't reliable on a page
+        # that's never actually quiet.
+        page.wait_for_timeout(3000)
         # Was wcag2a/wcag2aa only — silently excluded every WCAG 2.1-specific
         # rule (confirmed live 2026-10-05: axe DevTools found autocomplete-valid,
         # a wcag21aa rule, on a page where this tool found nothing for it,
@@ -101,6 +126,8 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         # Practices if enabled there too) — matching that exactly here is
         # what "same as axe DevTools" means, not just adding the one rule
         # that happened to get noticed.
+        # wcag22aa deliberately excluded: axe DevTools defaults to WCAG 2.1 AA, and
+        # including it added extra target-size findings QA couldn't reconcile (85 vs 82).
         wcag_tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]
         if include_best_practices:
             try:

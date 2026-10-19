@@ -1,3 +1,29 @@
+// ─── Scan Failure Messages ────────────────────────────────────────────────────
+
+// Translates the raw Playwright/network error string (backend's job.failure_reason)
+// into something a non-technical user can actually act on. Without this, every
+// failure showed the same generic "check the URL and try again" even when the
+// URL was perfectly valid and the real cause (e.g. a site's anti-bot protection
+// blocking headless browsers) has nothing to do with the URL at all — confirmed
+// live 2026-10-12 against myntra.com, same ERR_HTTP2_PROTOCOL_ERROR signature as
+// two other bot-protected sites found earlier (metallica.com, henryschein.com).
+export function nsFriendlyScanError(rawReason) {
+  const reason = (rawReason || '').toLowerCase();
+  if (reason.includes('err_http2_protocol_error') || reason.includes('err_connection_closed')) {
+    return "This site appears to block automated scanning tools (bot/anti-automation protection). The URL itself is fine — no scanner, including ours, can get past this kind of block.";
+  }
+  if (reason.includes('err_name_not_resolved') || reason.includes('err_connection_refused')) {
+    return "Could not reach this address — double-check the URL is spelled correctly and the site is online.";
+  }
+  if (reason.includes('err_cert_') || reason.includes('ssl')) {
+    return "This site's SSL certificate couldn't be verified, so the scan couldn't proceed securely.";
+  }
+  if (reason.includes('timeout')) {
+    return "The page took too long to respond. It may be slow, overloaded, or temporarily down — try again in a moment.";
+  }
+  return 'Scan failed. Please check the URL and try again.';
+}
+
 // ─── Accessibility Score Utilities ───────────────────────────────────────────
 
 export const WCAG_AA_CRITERIA_NS = new Set([

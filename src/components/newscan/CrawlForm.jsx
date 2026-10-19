@@ -67,21 +67,29 @@ export default function CrawlForm({
           <div className="grid grid-cols-2 gap-4 mb-2">
             <Field label="Max Pages">
               <GlowInput
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={maxPages}
-                onChange={e => onMaxPagesChange(Math.max(1, Math.min(500, Number(e.target.value))))}
-                min={1}
-                max={500}
+                onChange={e => {
+                  const digits = e.target.value.replace(/\D/g, '');
+                  onMaxPagesChange(digits === '' ? '' : Number(digits));
+                }}
+                onBlur={() => onMaxPagesChange(Math.max(1, Math.min(500, Number(maxPages) || 1)))}
                 disabled={crawlLoading}
               />
             </Field>
             <Field label="Max Depth">
               <GlowInput
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={maxDepth}
-                onChange={e => onMaxDepthChange(Math.max(1, Math.min(10, Number(e.target.value))))}
-                min={1}
-                max={10}
+                onChange={e => {
+                  const digits = e.target.value.replace(/\D/g, '');
+                  onMaxDepthChange(digits === '' ? '' : Number(digits));
+                }}
+                onBlur={() => onMaxDepthChange(Math.max(1, Math.min(10, Number(maxDepth) || 1)))}
                 disabled={crawlLoading}
               />
             </Field>

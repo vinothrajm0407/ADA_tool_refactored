@@ -114,7 +114,12 @@ def crawl_site_task(
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                # Matches the single-page scan path's viewport (see
+                # scripts/run_ada_check_python.py) — a narrower viewport
+                # shows fewer items per row on responsive grid layouts,
+                # under-catching repeated-component bugs vs. a normal
+                # desktop-width browser window.
+                viewport={"width": 1920, "height": 1080},
                 ignore_https_errors=True,
             )
             pw_page = context.new_page()
@@ -154,8 +159,12 @@ def crawl_site_task(
                         # or polling never actually reach, so it was routinely
                         # burning most of the 60s timeout on every single page.
                         # Matches the single-page scan path's own approach.
+                        # A "poll until the DOM stops growing" variant was
+                        # tried and reverted here too (see that file's comment)
+                        # — unreliable on pages with continuous third-party
+                        # script churn that never actually goes quiet.
                         pw_page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                        pw_page.wait_for_timeout(1000)
+                        pw_page.wait_for_timeout(3000)
                     except PWTimeout:
                         pass  # proceed with what loaded
 
@@ -167,11 +176,17 @@ def crawl_site_task(
                                 visited.add(n)
                                 queue.append((link, url, depth + 1))
 
-                    # Run axe accessibility scan
+                    # Run axe accessibility scan — same tag set as the single-page
+                    # scan path (scripts/run_ada_check_python.py): WCAG 2.0 A/AA,
+                    # 2.1 A/AA, and 2.2 AA. Missing the 2.1 tags here once made a
+                    # crawled page under-report violations compared to scanning
+                    # that exact same URL from Run Audit (confirmed live
+                    # 2026-10-05: root page showed 4 violations via crawl, 7 via
+                    # single-page scan) — keep this list in sync with that path.
                     try:
                         results = axe.run(
                             pw_page,
-                            options={"runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa"]}},
+                            options={"runOnly": {"type": "tag", "values": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]}},
                         )
                     except TypeError:
                         results = axe.run(pw_page)
