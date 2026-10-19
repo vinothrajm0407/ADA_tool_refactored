@@ -1265,3 +1265,38 @@ class TestSvgImgAltFallback:
         file_content = '<svg aria-label="Existing"></svg>'
         node = {"html": '<svg aria-label="Existing"></svg>'}
         assert _fallback_patch({"id": "svg-img-alt"}, node, file_content) is ALREADY_FIXED
+
+
+def test_insertion_patch_rejects_truncated_gemini_output():
+    import io
+    from backend.services.auto_fix_service import generate_insertion_patch
+    original = "<html>\n<body>\n<p>one</p>\n<p>two</p>\n</body>\n</html>\n"
+
+    def reply(text, finish="STOP"):
+        body = json.dumps({"candidates": [{"content": {"parts": [{"text": text}]}, "finishReason": finish}]}).encode()
+        return io.BytesIO(body)
+
+    class _R(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    with mock_patch("backend.services.auto_fix_service.Config.GEMINI_API_KEY", "k"):
+        for text, finish in [(original[:30], "STOP"), (original + "<h1>x</h1>", "MAX_TOKENS")]:
+            with mock_patch("urllib.request.urlopen", return_value=_R(reply(text, finish).getvalue())):
+                assert generate_insertion_patch({"id": "page-has-heading-one"}, original) is None
+        good = original.replace("<body>", "<body>\n<h1>x</h1>")
+        with mock_patch("urllib.request.urlopen", return_value=_R(reply(good).getvalue())):
+            assert generate_insertion_patch({"id": "page-has-heading-one"}, original) == good.strip()
+
+
+def test_assistive_fixes_are_labelled_in_pr_title_and_body():
+    from backend.services.auto_fix_service import _fix_label, _pr_body, _pr_body_insertion
+    tagged = {"id": "color-contrast", "sourceScanId": "assistive"}   # real axe id, tagged by source
+    by_prefix = {"id": "assistive-forms-input-missing-label"}
+    plain = {"id": "color-contrast"}
+    assert "Assistive" in _fix_label(tagged) and "Assistive" in _fix_label(by_prefix)
+    assert _fix_label(plain) == "ADA Auto-Fix"
+    patch = {"before": "a", "after": "b"}
+    assert "Assistive Testing" in _pr_body(tagged, {}, patch, "f.html", 1)
+    assert "Assistive Testing" in _pr_body_insertion(by_prefix, "f.html", "a", "b")
+    assert "Assistive" not in _pr_body(plain, {}, patch, "f.html", 1)
