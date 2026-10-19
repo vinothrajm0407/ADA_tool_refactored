@@ -2779,7 +2779,7 @@ Generated and verified by ADA Auto-Fix: each patch was applied in the same isola
 """
 
 
-def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict]) -> dict:
+def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict], find_duplicate=None) -> dict:
     """Same pipeline as run_auto_fix, but for every element flagged by one
     rule on one page in a single pass — one clone, one build, one re-scan,
     one PR, instead of N of each. Two things make this different from just
@@ -2814,6 +2814,7 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict])
         rule_id = rule.get("id", "fix")
         node_results: list[dict] = []
         applied: list[dict] = []
+        duplicate_of = None
 
         for node in nodes:
             node_html = (node or {}).get("html", "").strip()
@@ -2847,11 +2848,23 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict])
                 node_results.append({"status": "failed", "error": "Patch did not validate against the source file"})
                 continue
 
+            # Different elements can share one root cause (e.g. several links styled by
+            # one CSS class) — an open PR with this exact patch already covers it.
+            patch_signature = hashlib.sha256("\n".join((file_path, patch["before"], patch["after"])).encode()).hexdigest()[:32]
+            existing = find_duplicate(patch_signature) if find_duplicate else None
+            if existing:
+                duplicate_of = existing
+                node_results.append({"status": "already_fixed", "duplicate": True, "file_path": file_path, "line_no": line_no})
+                continue
+
             full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
-            node_results.append({"status": "patched", "file_path": file_path, "line_no": line_no})
+            node_results.append({"status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
             applied.append({"file_path": file_path, "line_no": line_no, "patch": patch})
 
-        step("Locate & patch", bool(applied), f"{len(applied)}/{len(nodes)} elements patched")
+        step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(nodes)} elements patched")
+        if not applied and duplicate_of:
+            return {"status": "verified", "duplicate": True, "merged": False, "steps": steps, "results": node_results,
+                    "pr_url": duplicate_of["pr_url"], "branch_url": duplicate_of["branch_url"]}
         if not applied:
             return {"status": "failed", "steps": steps, "error": "No elements could be patched", "results": node_results}
 

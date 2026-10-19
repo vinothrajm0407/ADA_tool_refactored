@@ -1266,6 +1266,25 @@ def api_health_tree():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _patch_dedup(link, page_url):
+    """find_duplicate callback for the Auto-Fix pipelines: an identical patch
+    (file + before + after) that already has an open PR — e.g. five links all
+    styled by one CSS class. Verified against the provider, not just the DB
+    row, so a PR closed since then doesn't block a new one."""
+    from backend.services.auto_fix_service import is_pull_request_open
+
+    def find_duplicate(patch_signature):
+        existing = db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature)
+        if not existing:
+            return None
+        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", existing["pr_url"] or "")
+        if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
+            return existing
+        return None
+
+    return find_duplicate
+
+
 @app.route("/api/auto-fix", methods=["POST"])
 @require_auth
 def api_auto_fix():
@@ -1320,19 +1339,7 @@ def api_auto_fix():
                            "detail": "A PR for this violation is already open and awaiting review"}],
             })
 
-    def find_duplicate(patch_signature):
-        # Same patch (file + before + after) already has an open PR — e.g. five
-        # different links all styled by one CSS class. Verified against the
-        # provider, not just the DB row: a PR closed since then must not block.
-        existing = db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature)
-        if not existing:
-            return None
-        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", existing["pr_url"] or "")
-        if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
-            return existing
-        return None
-
-    result = run_auto_fix(link, page_url, rule, node, find_duplicate=find_duplicate)
+    result = run_auto_fix(link, page_url, rule, node, find_duplicate=_patch_dedup(link, page_url))
 
     if not result.get("duplicate"):
         db.save_fix(
@@ -1400,7 +1407,7 @@ def api_auto_fix_batch():
                        "detail": "A PR for this violation is already open and awaiting review"}],
         })
 
-    result = run_auto_fix_batch(link, page_url, rule, fixable_nodes)
+    result = run_auto_fix_batch(link, page_url, rule, fixable_nodes, find_duplicate=_patch_dedup(link, page_url))
     node_results = result.get("results", [])
 
     # One Fix History row per element (all sharing the same PR) — keeps the
@@ -1418,7 +1425,7 @@ def api_auto_fix_batch():
             node_result.get("error"),
             result.get("pr_url") if was_patched else None,
             result.get("merged", False) if was_patched else False,
-            node_signature,
+            node_signature, node_result.get("patch_signature"),
         )
 
     return jsonify({"ok": True, **result})

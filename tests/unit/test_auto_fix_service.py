@@ -1324,3 +1324,23 @@ def test_run_auto_fix_skips_when_identical_patch_already_has_open_pr(tmp_path):
     assert result["duplicate"] and result["pr_url"].endswith("/pull/7")
     assert len(seen) == 1 and not push.called
     assert (tmp_path / "index.html").read_text(encoding="utf-8") == "<a class='x'>hi</a>"  # nothing written
+
+
+def test_batch_fix_reuses_open_pr_for_identical_patch_and_opens_none(tmp_path):
+    from backend.services import auto_fix_service as svc
+    (tmp_path / "index.html").write_text("<a class='x'>a</a><a class='x'>b</a>", encoding="utf-8")
+    patch = {"before": ".x{color:#aaa}", "after": ".x{color:#777}"}   # two elements, one shared CSS root cause
+    link = {"repo_url": "https://github.com/o/r", "default_branch": "main", "access_token": "t", "provider": "github"}
+    dup = {"pr_url": "https://github.com/o/r/pull/9", "branch_url": "b"}
+    nodes = [{"html": "<a class='x'>a</a>"}, {"html": "<a class='x'>b</a>"}]
+
+    with mock_patch.object(svc, "_resolve_provider_and_token", return_value=("github", "t", None)), \
+         mock_patch.object(svc, "_clone_repo", return_value=tmp_path), \
+         mock_patch.object(svc, "_rmtree_force"), \
+         mock_patch.object(svc, "locate_source", return_value=("index.html", 1)), \
+         mock_patch.object(svc, "generate_patch", return_value=patch), \
+         mock_patch.object(svc, "validate_patch", return_value=True), \
+         mock_patch.object(svc, "push_branch") as push:
+        result = svc.run_auto_fix_batch(link, "https://s/", {"id": "color-contrast"}, nodes, find_duplicate=lambda sig: dup)
+    assert result["duplicate"] and result["pr_url"].endswith("/pull/9") and not push.called
+    assert [r["status"] for r in result["results"]] == ["already_fixed", "already_fixed"]
