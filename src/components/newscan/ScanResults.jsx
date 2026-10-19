@@ -1,7 +1,8 @@
 import { apiFetch } from '../../utils/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Shield, Search, History, Play, Loader2, AlertCircle, X } from 'lucide-react';
+import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Shield, Search, History, Play, Loader2, AlertCircle, X, ChevronDown, ChevronRight } from 'lucide-react';
 import ViolationRow from './ViolationList';
+import IncompleteList from './IncompleteList';
 import ScreenshotModal from './ScreenshotModal';
 import AssistiveTestDropdown from './AssistiveTestDropdown';
 import AssistiveResultView, { MODULE_LABELS } from '../assistive/AssistiveResultView';
@@ -381,7 +382,7 @@ function ViewportComparisonPanel({ scanUrl, currentViolations }) {
 
 // ─── Main scan results view ──────────────────────────────────────────────────
 
-export default function ScanResults({ violations, passes, scanRan, scanUrl, onReset, screenshot, screenshotType, sessionId }) {
+export default function ScanResults({ violations, passes, incomplete = [], scanRan, scanUrl, onReset, screenshot, screenshotType, sessionId }) {
   const { navigate } = useApp();
   const [filterImpact, setFilterImpact] = useState('all');
   const [pageScreenshotOpen, setPageScreenshotOpen] = useState(false);
@@ -402,6 +403,8 @@ export default function ScanResults({ violations, passes, scanRan, scanUrl, onRe
   // elements reads as 7, not 1).
   const violCount       = useCountUp(nsTotalElementCount(violations));
   const passCount       = useCountUp(passes.length);
+  const incompleteCount = useCountUp(incomplete.length);
+  const [showIncomplete, setShowIncomplete] = useState(false);
 
   useEffect(() => {
     const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -515,11 +518,17 @@ export default function ScanResults({ violations, passes, scanRan, scanUrl, onRe
               </span>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3 max-w-sm mx-auto">
+          <div className={`grid gap-3 max-w-sm mx-auto ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <div className={`rounded-xl px-4 py-4 text-center ${violations.length > 0 ?'bg-coral/10':'bg-gray-50'}`}>
               <p className={`font-heading font-bold text-3xl leading-none ${violations.length > 0 ?'text-coral':'text-body'}`}>{violCount}</p>
               <p className="text-[11px] text-body mt-1.5 font-medium">Violations</p>
             </div>
+            {incomplete.length > 0 && (
+              <div className="rounded-xl px-4 py-4 text-center bg-amber/10">
+                <p className="font-heading font-bold text-3xl leading-none text-amber">{incompleteCount}</p>
+                <p className="text-[11px] text-body mt-1.5 font-medium">Needs review</p>
+              </div>
+            )}
             <div className="rounded-xl px-4 py-4 text-center bg-gray-50">
               <p className="font-heading font-bold text-3xl leading-none text-sage">{passCount}</p>
               <p className="text-[11px] text-body mt-1.5 font-medium">Passed</p>
@@ -552,7 +561,7 @@ export default function ScanResults({ violations, passes, scanRan, scanUrl, onRe
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
           {violations.length > 0 ? (
             <button
               type="button"
@@ -568,6 +577,17 @@ export default function ScanResults({ violations, passes, scanRan, scanUrl, onRe
               <p className="font-heading font-bold text-2xl leading-none text-body">{violCount}</p>
               <p className="text-[11px] text-body mt-1 font-medium">Violations</p>
             </div>
+          )}
+          {incomplete.length > 0 && (
+            <button
+              type="button"
+              onClick={() => scrollToSection('ns-incomplete-section', 'incomplete')}
+              className="rounded-xl px-4 py-3 text-center bg-amber/10 hover:bg-amber/[0.18] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-1"
+              aria-label={`${incomplete.length} items need manual review — jump to that section`}
+            >
+              <p className="font-heading font-bold text-2xl leading-none text-amber">{incompleteCount}</p>
+              <p className="text-[11px] text-body mt-1 font-medium">Needs review</p>
+            </button>
           )}
           <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
             <p className="font-heading font-bold text-2xl leading-none text-sage">{passCount}</p>
@@ -812,6 +832,22 @@ export default function ScanResults({ violations, passes, scanRan, scanUrl, onRe
             <AssistiveTestDropdown scanUrl={scanUrl} sessionId={sessionId} />
           </div>
           <AssistiveResultsPanel sessionId={sessionId} />
+        </div>
+      )}
+
+      {/* Needs manual review — axe's "incomplete" results: not a confirmed
+          violation, but axe couldn't automatically tell pass from fail (e.g.
+          a contrast check it can't resolve), so a human needs to look.
+          Previously captured by the backend but never shown here at all. */}
+      {incomplete.length > 0 && (
+        <div id="ns-incomplete-section" className={`bg-white rounded-2xl border p-5 transition-colors ${highlightSection === 'incomplete' ? 'border-amber ring-2 ring-amber/30' : 'border-gray-100'}`}>
+          <button type="button" onClick={() => setShowIncomplete((p) => !p)} aria-expanded={showIncomplete}
+            className="w-full flex items-center gap-1.5 text-left bg-transparent border-none p-0 cursor-pointer font-[inherit]">
+            <span className="flex-shrink-0 text-body">{showIncomplete ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</span>
+            <span className="font-heading font-semibold text-base text-ink">Needs manual review ({incomplete.length})</span>
+          </button>
+          <p className="text-xs text-body mt-1.5 ml-5.5">Axe couldn't automatically confirm these pass or fail — a quick manual check is needed.</p>
+          {showIncomplete && <IncompleteList incomplete={incomplete} />}
         </div>
       )}
 

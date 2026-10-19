@@ -223,6 +223,15 @@ def require_auth(f):
         if not auth_header.startswith("Bearer "):
             return jsonify({"ok": False, "error": "missing_token"}), 401
         token = auth_header[7:].strip()
+        # API keys (e.g. a CI pipeline) carry a fixed "ada_" prefix and are
+        # never valid JWTs, so check that first and skip the JWT path entirely.
+        if token.startswith("ada_"):
+            user_id = db.get_user_id_by_api_key(token)
+            if not user_id:
+                return jsonify({"ok": False, "error": "invalid_token"}), 401
+            g.current_user_id = user_id
+            g.current_user_email = None
+            return f(*args, **kwargs)
         try:
             payload = jwt.decode(token, Config.JWT_SECRET, algorithms=["HS256"])
         except jwt.ExpiredSignatureError:
@@ -1237,6 +1246,26 @@ def api_violations_summary():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/health-tree", methods=["GET"])
+@require_auth
+def api_health_tree():
+    """Client-facing health report: Website -> Page -> open vs fixed issues.
+    Grouped by domain since there's no separate Website entity in the schema."""
+    if not db.is_ready():
+        return jsonify({
+            "ok": True,
+            "available": False,
+            "websites": [],
+            "message": "Health tree unavailable: " + (db.init_error() or "database not configured"),
+        })
+    try:
+        data = db.get_health_tree()
+        return jsonify({"ok": True, "available": True, **data})
+    except Exception as e:
+        logging.exception("[DB] Failed to get health tree: %s", e)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/auto-fix", methods=["POST"])
 @require_auth
 def api_auto_fix():
@@ -1322,21 +1351,55 @@ def api_auto_fix_batch():
         return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
 
     import hashlib
-    from backend.services.auto_fix_service import run_auto_fix_batch
+    from backend.services.auto_fix_service import run_auto_fix_batch, is_pull_request_open
 
-    result = run_auto_fix_batch(link, page_url, rule, nodes)
+    rule_id = rule.get("id", "")
+
+    # Skip any element that already has an open, unmerged PR for this exact
+    # rule+element — same dedup /api/auto-fix already does for a single
+    # element. This endpoint never had it, so calling it again before a PR
+    # was reviewed (e.g. a CI run firing on every push) kept opening fresh
+    # duplicate PRs for the same rule instead of reusing the open one.
+    fixable_nodes = []
+    duplicate_of = None
+    for node in nodes:
+        node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
+        existing = db.get_open_fix(g.current_user_id, page_url, rule_id, node_signature)
+        if existing:
+            pr_url_val = existing["pr_url"] or ""
+            pr_match = re.search(r"/pull/(\d+)$", pr_url_val) \
+                or re.search(r"/merge_requests/(\d+)$", pr_url_val) \
+                or re.search(r"/pull-requests/(\d+)$", pr_url_val) \
+                or re.search(r"/pullrequest/(\d+)$", pr_url_val)
+            still_open = bool(pr_match) and is_pull_request_open(
+                link["repo_url"], link["access_token"], int(pr_match.group(1)), link.get("provider") or "github"
+            )
+            if still_open:
+                duplicate_of = existing
+                continue
+        fixable_nodes.append(node)
+
+    if not fixable_nodes:
+        return jsonify({
+            "ok": True, "status": "verified", "duplicate": True, "merged": False,
+            "pr_url": duplicate_of["pr_url"], "branch_url": duplicate_of["branch_url"],
+            "steps": [{"name": "Existing fix", "ok": True,
+                       "detail": "A PR for this violation is already open and awaiting review"}],
+        })
+
+    result = run_auto_fix_batch(link, page_url, rule, fixable_nodes)
     node_results = result.get("results", [])
 
     # One Fix History row per element (all sharing the same PR) — keeps the
     # existing per-element history/dedup behavior intact even though they
     # were produced by a single batched run, not N separate ones.
-    for i, node in enumerate(nodes):
+    for i, node in enumerate(fixable_nodes):
         node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
         node_result = node_results[i] if i < len(node_results) else {}
         status = node_result.get("status", "failed")
         was_patched = status == "patched"
         db.save_fix(
-            g.current_user_id, page_url, rule.get("id", ""),
+            g.current_user_id, page_url, rule_id,
             result.get("status", "failed") if was_patched else status,
             result.get("branch_url") if was_patched else None,
             node_result.get("error"),
@@ -1616,6 +1679,34 @@ setTimeout(() => window.close(), 3000);
 <p style="font-family:sans-serif;text-align:center;margin-top:80px;color:#c0392b">
   {error}<br><small>You can close this window.</small></p>
 </body></html>"""
+
+
+@app.route("/api/api-keys", methods=["GET"])
+@require_auth
+def api_keys_list():
+    keys = db.list_api_keys(g.current_user_id)
+    return jsonify({"ok": True, "keys": keys})
+
+
+@app.route("/api/api-keys", methods=["POST"])
+@require_auth
+def api_keys_create():
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "error": "label is required"}), 400
+    key = db.create_api_key(g.current_user_id, label)
+    # The raw key is only ever returned here, at creation time.
+    return jsonify({"ok": True, "key": key})
+
+
+@app.route("/api/api-keys/<int:key_id>", methods=["DELETE"])
+@require_auth
+def api_keys_revoke(key_id):
+    ok = db.revoke_api_key(g.current_user_id, key_id)
+    if not ok:
+        return jsonify({"ok": False, "error": "Key not found"}), 404
+    return jsonify({"ok": True})
 
 
 @app.route("/api/integrations", methods=["GET"])

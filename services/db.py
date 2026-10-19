@@ -5,10 +5,12 @@ Requires: pyodbc, ODBC Driver 18 for SQL Server, env MSSQL_CONN_STR.
 If MSSQL_CONN_STR is set, the app will automatically create the database and
 ScanHistory table on startup (when running on Azure, AWS, or locally). No manual setup needed.
 """
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse as _urlparse
@@ -689,6 +691,22 @@ def _ensure_table() -> None:
                 WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'NodeSignature'
             )
             ALTER TABLE dbo.Fix ADD NodeSignature NVARCHAR(64) NULL
+        """)
+        conn.commit()
+        # ── API keys (machine-to-machine auth, e.g. CI pipelines — a scoped
+        # credential that isn't a human's login, unlike a JWT from /auth/login) ──
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'ApiKey')
+            CREATE TABLE dbo.ApiKey (
+                Id         INT IDENTITY(1,1) PRIMARY KEY,
+                UserId     INT            NOT NULL,
+                Label      NVARCHAR(200)  NOT NULL,
+                KeyHash    CHAR(64)       NOT NULL UNIQUE,
+                KeyPrefix  NVARCHAR(12)   NOT NULL,
+                CreatedAt  DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME(),
+                LastUsedAt DATETIME2(3)   NULL,
+                RevokedAt  DATETIME2(3)   NULL
+            )
         """)
         conn.commit()
     finally:
@@ -3671,3 +3689,158 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
     if not row:
         return None
     return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl}
+
+
+# ── API keys (machine auth, e.g. CI pipelines) ────────────────────────────────
+
+def create_api_key(user_id: int, label: str) -> dict:
+    """Generate a new API key for a user. Returns the raw key ONCE — only its
+    hash is stored, so this is the only time the caller can see the full value."""
+    raw_key = "ada_" + secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_prefix = raw_key[:12]
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO dbo.ApiKey (UserId, Label, KeyHash, KeyPrefix)
+            OUTPUT INSERTED.Id, INSERTED.CreatedAt
+            VALUES (?, ?, ?, ?)
+        """, user_id, label, key_hash, key_prefix)
+        row = cur.fetchone()
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": row.Id, "label": label, "key": raw_key, "key_prefix": key_prefix, "created_at": row.CreatedAt}
+
+
+def get_user_id_by_api_key(raw_key: str) -> int | None:
+    """Validate an API key and return its owning user_id, or None if unknown/revoked.
+    Also stamps LastUsedAt so keys can be audited for staleness later."""
+    if not raw_key or not raw_key.startswith("ada_"):
+        return None
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT Id, UserId FROM dbo.ApiKey WHERE KeyHash = ? AND RevokedAt IS NULL
+        """, key_hash)
+        row = cur.fetchone()
+        if not row:
+            return None
+        cur.execute("UPDATE dbo.ApiKey SET LastUsedAt = SYSUTCDATETIME() WHERE Id = ?", row.Id)
+        conn.commit()
+        return row.UserId
+    finally:
+        conn.close()
+
+
+def list_api_keys(user_id: int) -> list[dict]:
+    """Active (non-revoked) API keys for a user — prefix only, never the full key."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT Id, Label, KeyPrefix, CreatedAt, LastUsedAt
+            FROM dbo.ApiKey WHERE UserId = ? AND RevokedAt IS NULL
+            ORDER BY CreatedAt DESC
+        """, user_id)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [{
+        "id": r.Id, "label": r.Label, "key_prefix": r.KeyPrefix,
+        "created_at": r.CreatedAt, "last_used_at": r.LastUsedAt,
+    } for r in rows]
+
+
+def revoke_api_key(user_id: int, key_id: int) -> bool:
+    """Revoke a key so it stops authenticating immediately. Returns False if
+    the key doesn't exist or doesn't belong to this user (no cross-account revoke)."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE dbo.ApiKey SET RevokedAt = SYSUTCDATETIME()
+            WHERE Id = ? AND UserId = ? AND RevokedAt IS NULL
+        """, key_id, user_id)
+        changed = cur.rowcount > 0
+        conn.commit()
+    finally:
+        conn.close()
+    return changed
+
+
+# ── Client health tree (Website -> Page -> open/fixed issues) ────────────────
+# No standalone Website/Client table exists in this schema — grouping is
+# derived from each scanned page's own URL domain, and "fixed" comes from
+# merged Fix rows for that exact page.
+
+def get_health_tree(limit: int = 5000) -> dict:
+    """
+    Aggregate scan + fix data into a Website -> Page tree for a client-facing
+    health report: each page's latest violation count, and how many of its
+    issues have a merged Auto-Fix PR, grouped by domain.
+    """
+    if not is_enabled() or _INIT_ERROR:
+        return {"websites": []}
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT TOP (?) Id, Url, TimestampUtc, Violations, PassRate
+                FROM dbo.ScanHistory
+                WHERE Url IS NOT NULL AND Url <> ''
+                ORDER BY TimestampUtc DESC
+            """, limit)
+            scan_rows = cur.fetchall()
+            cur.execute("""
+                SELECT PageUrl, RuleId, NodeSignature
+                FROM dbo.Fix
+                WHERE Merged = 1
+            """)
+            fix_rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    # Rows are newest-first, so the first time a URL is seen is its latest scan.
+    latest_by_url: dict[str, dict] = {}
+    for r in scan_rows:
+        if r.Url in latest_by_url:
+            continue
+        latest_by_url[r.Url] = {
+            "last_scan_id": r.Id,
+            "last_scanned": _ts(r.TimestampUtc),
+            "open_issues": r.Violations or 0,
+            "pass_rate": r.PassRate,
+        }
+
+    fixed_by_url: dict[str, set] = {}
+    for r in fix_rows:
+        fixed_by_url.setdefault(r.PageUrl, set()).add((r.RuleId, r.NodeSignature))
+
+    sites: dict[str, list] = {}
+    for url, info in latest_by_url.items():
+        domain = _urlparse(url).netloc or url
+        sites.setdefault(domain, []).append({
+            "url": url,
+            "last_scan_id": info["last_scan_id"],
+            "last_scanned": info["last_scanned"],
+            "open_issues": info["open_issues"],
+            "fixed_issues": len(fixed_by_url.get(url, ())),
+            "pass_rate": info["pass_rate"],
+        })
+
+    websites = []
+    for domain, pages in sites.items():
+        pages.sort(key=lambda p: p["last_scanned"] or "", reverse=True)
+        websites.append({
+            "domain": domain,
+            "page_count": len(pages),
+            "open_issues": sum(p["open_issues"] for p in pages),
+            "fixed_issues": sum(p["fixed_issues"] for p in pages),
+            "pages": pages,
+        })
+    websites.sort(key=lambda w: w["open_issues"], reverse=True)
+    return {"websites": websites}

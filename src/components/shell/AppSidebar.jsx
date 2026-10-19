@@ -1,6 +1,7 @@
 import {
   LayoutDashboard, Settings, X,
   ScanLine, History, CalendarClock, BellRing, ClipboardList, LogOut, BookOpen, Plug, GitBranch, GitPullRequest,
+  Network,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import BrandLogo from '../ui/BrandLogo';
@@ -17,6 +18,7 @@ const NAV_SECTIONS = [
     items: [
       { id: 'new-scan',      label: 'Run Audit',     icon: ScanLine  },
       { id: 'scan-history',  label: 'Scan History',  icon: History   },
+      { id: 'client-health', label: 'Client Health', icon: Network   },
     ],
   },
   {

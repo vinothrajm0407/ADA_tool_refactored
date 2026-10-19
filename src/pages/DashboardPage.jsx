@@ -39,10 +39,11 @@ export default function DashboardPage() {
   const [loading, setLoading]           = useState(true);
   const [trendAvail, setTrendAvail]     = useState(true);
   const [severityBreakdown, setSeverityBreakdown] = useState(null);
+  const [wcagBreakdown, setWcagBreakdown] = useState(null);
+  const [topIssueTypes, setTopIssueTypes] = useState([]);
   const [intelLoading, setIntelLoading] = useState(true);
   const [fixesApplied, setFixesApplied] = useState(0);
   const [trendDays, setTrendDays] = useState(30);
-  const [trendMetric, setTrendMetric] = useState('total_violations');
   const [trendLoading, setTrendLoading] = useState(true);
 
   useEffect(() => {
@@ -96,6 +97,8 @@ export default function DashboardPage() {
         const json = await res.json().catch(() => ({ ok: false }));
         if (json.ok && json.available) {
           setSeverityBreakdown(json.severity_breakdown ?? null);
+          setWcagBreakdown(json.wcag_breakdown ?? null);
+          setTopIssueTypes(Array.isArray(json.top_issue_types) ? json.top_issue_types.slice(0, 6) : []);
         }
       } catch {
         // leave at defaults
@@ -228,32 +231,21 @@ export default function DashboardPage() {
         </div>
 
         {/* ── ISSUE TREND + RECENT AUDITS ── */}
-        <div className="grid lg:grid-cols-2 gap-4">
+        <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-4">
 
           {/* Issue trend */}
           <div className="card p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm text-ink">Issue trend</h3>
-              <div className="flex gap-2">
-                <select
-                  className="text-xs border border-gray-200 rounded-md px-2 py-1 text-body"
-                  value={trendMetric}
-                  onChange={(e) => setTrendMetric(e.target.value)}
-                >
-                  {Object.entries(TREND_METRICS).map(([key, { label }]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </select>
-                <select
-                  className="text-xs border border-gray-200 rounded-md px-2 py-1 text-body"
-                  value={trendDays}
-                  onChange={(e) => setTrendDays(Number(e.target.value))}
-                >
-                  {TREND_RANGES.map(({ days, label }) => (
-                    <option key={days} value={days}>{label}</option>
-                  ))}
-                </select>
-              </div>
+              <select
+                className="text-xs border border-gray-200 rounded-md px-2 py-1 text-body"
+                value={trendDays}
+                onChange={(e) => setTrendDays(Number(e.target.value))}
+              >
+                {TREND_RANGES.map(({ days, label }) => (
+                  <option key={days} value={days}>{label}</option>
+                ))}
+              </select>
             </div>
             {trendLoading ? (
               <div className="h-[180px] bg-gray-50 rounded-xl animate-pulse" />
@@ -265,24 +257,70 @@ export default function DashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                   <XAxis dataKey="date" tickFormatter={(d) => d.slice(5)} tick={{ fontSize: 10 }} stroke="#e5e7eb" />
                   <YAxis tick={{ fontSize: 10 }} stroke="#e5e7eb" />
-                  <Tooltip formatter={(val) => [val, TREND_METRICS[trendMetric].label]} labelFormatter={(d) => d} />
-                  <Line
-                    type="monotone"
-                    dataKey={trendMetric}
-                    name={TREND_METRICS[trendMetric].label}
-                    stroke={TREND_METRICS[trendMetric].color}
-                    strokeWidth={2}
-                    dot={{ r: 3 }}
-                  />
+                  <Tooltip />
+                  {Object.entries(TREND_METRICS).filter(([key]) => key !== 'total_violations').map(([key, { label, color }]) => (
+                    <Line
+                      key={key}
+                      type="monotone"
+                      dataKey={key}
+                      name={label}
+                      stroke={color}
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             )}
-            <div className="flex gap-4 mt-2">
-              <span className="flex items-center gap-1 text-[11px] text-body">
-                <span className="w-3 h-0.5 rounded-full inline-block" style={{ backgroundColor: TREND_METRICS[trendMetric].color }} />
-                {TREND_METRICS[trendMetric].label}
-              </span>
+            <div className="flex gap-4 mt-2 flex-wrap">
+              {Object.entries(TREND_METRICS).filter(([key]) => key !== 'total_violations').map(([key, { label, color }]) => (
+                <span key={key} className="flex items-center gap-1 text-[11px] text-body">
+                  <span className="w-3 h-0.5 rounded-full inline-block" style={{ backgroundColor: color }} />
+                  {label}
+                </span>
+              ))}
             </div>
+          </div>
+
+          {/* WCAG & module breakdown */}
+          <div className="card p-5">
+            <h3 className="font-semibold text-sm text-ink mb-4">Breakdown by WCAG level &amp; module</h3>
+            {intelLoading ? (
+              <div className="h-[180px] bg-gray-50 rounded-xl animate-pulse" />
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">By WCAG tag</p>
+                  {(!wcagBreakdown || wcagBreakdown.length === 0) ? (
+                    <p className="text-xs text-body">No data yet</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {wcagBreakdown.slice(0, 6).map(({ tag, count }) => (
+                        <li key={tag} className="flex items-center justify-between text-xs">
+                          <span className="text-body truncate">{tag}</span>
+                          <span className="font-semibold text-ink">{count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Top issue types</p>
+                  {topIssueTypes.length === 0 ? (
+                    <p className="text-xs text-body">No data yet</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {topIssueTypes.map(({ rule_id, count }) => (
+                        <li key={rule_id} className="flex items-center justify-between text-xs">
+                          <span className="text-body truncate" title={rule_id}>{rule_id}</span>
+                          <span className="font-semibold text-ink">{count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Recent audits */}

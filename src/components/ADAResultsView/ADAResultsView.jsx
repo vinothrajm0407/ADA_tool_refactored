@@ -7,6 +7,7 @@ import {
   getRuleEffort, getRuleImpactedUsers, getRuleCodePair, getRuleValidationSteps,
 } from '../../config/axeFixGuidance'
 import { formatDateTime } from '../../utils/format'
+import IncompleteList from '../newscan/IncompleteList'
 
 const IMPACT_ORDER = ['critical', 'serious', 'moderate', 'minor']
 
@@ -461,6 +462,7 @@ export default function ADAResultsView({ initialResult = null, processResult = n
   const [filterImpact, setFilterImpact] = useState([])
   const [search, setSearch] = useState('')
   const [showPasses, setShowPasses] = useState(false)
+  const [showIncomplete, setShowIncomplete] = useState(false)
   const [expandedRule, setExpandedRule] = useState(null)
   const [screenshotError, setScreenshotError] = useState(false)
   const [screenshotModal, setScreenshotModal] = useState(null)
@@ -988,6 +990,21 @@ export default function ADAResultsView({ initialResult = null, processResult = n
                 </ul>
               )}
             </section>
+
+            {/* Needs review (collapsible) — axe's "incomplete" results: not a
+                confirmed violation, but axe couldn't automatically tell pass
+                from fail (e.g. a contrast check it can't resolve), so a human
+                needs to look. Previously only shown as a bare count above. */}
+            {incomplete.length > 0 && (
+              <section className="bg-white rounded-xl p-4" aria-label="Needs manual review">
+                <button type="button" onClick={() => setShowIncomplete((p) => !p)} aria-expanded={showIncomplete}
+                  className="w-full py-2.5 border-none bg-transparent text-[15px] font-semibold text-ink cursor-pointer text-left hover:text-teal transition-colors font-[inherit] flex items-center gap-1.5">
+                  <span className="flex-shrink-0">{showIncomplete ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</span>
+                  Needs manual review ({incomplete.length})
+                </button>
+                {showIncomplete && <IncompleteList incomplete={incomplete} />}
+              </section>
+            )}
 
             {/* Passes (collapsible) */}
             <section className="bg-white rounded-xl p-4"aria-label="Passed rules">

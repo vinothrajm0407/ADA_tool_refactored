@@ -47,7 +47,7 @@ RULES_WITH_FALLBACK = {
     "document-title", "page-has-heading-one",
     "aria-command-name", "aria-hidden-focus", "aria-roles", "aria-required-parent",
     "aria-required-attr", "aria-valid-attr-value", "aria-allowed-attr",
-    "frame-title", "meta-viewport", "select-name",
+    "frame-title", "meta-viewport", "select-name", "autocomplete-valid",
 }
 
 # Falsy (so existing `if not patch:` callers keep working unchanged) but
@@ -180,11 +180,12 @@ def _page_path_hint(repo_dir: Path, page_url: str | None) -> str | None:
     assuming any one fixed folder layout (previously hardcoded to `docs/`,
     which only happened to match this project's own test fixtures — a real
     client repo can serve its static pages from anywhere: repo root,
-    `public/`, `dist/`, `docs/`, ...). Returns None, not a guessed path that
-    likely doesn't exist, when the name is found in more than one place
-    (genuinely ambiguous — narrowing to a wrong file would be worse than not
-    narrowing at all) or nowhere (e.g. clean URLs with no matching physical
-    file, a client-routed SPA page)."""
+    `public/`, `dist/`, `docs/`, ...). When the name is found in more than one
+    place, uses the URL's own directory segments to break the tie (e.g. a
+    same-repo mirror copy under its own subfolder); returns None, not a
+    guessed path that likely doesn't exist, only if that still leaves a
+    genuine tie, or the name is found nowhere (e.g. clean URLs with no
+    matching physical file, a client-routed SPA page)."""
     if not page_url:
         return None
     try:
@@ -200,6 +201,34 @@ def _page_path_hint(repo_dir: Path, page_url: str | None) -> str | None:
     ]
     if len(matches) == 1:
         return matches[0].relative_to(repo_dir).as_posix()
+    if len(matches) < 2:
+        return None
+
+    # More than one file shares that name (e.g. a same-repo mirror copy kept
+    # alongside the real pages, as docs/gitlab-mirror/index.html sits next to
+    # docs/index.html) — use the URL's own directory segments to tell them
+    # apart, same way a browser would route them, instead of giving up.
+    # Score each candidate by how many of its trailing directory segments
+    # match the URL's trailing directory segments (e.g. ".../gitlab-mirror/"
+    # -> prefer the candidate ending in ".../gitlab-mirror/index.html"); on a
+    # tie, prefer the shallowest path (fewest directories) as the more likely
+    # "real" page rather than a nested mirror/copy of it. Still returns None,
+    # not a guess, if candidates remain tied after both tie-breakers.
+    url_dirs = [s.lower() for s in path.split("/") if s]
+
+    def score(p: Path) -> tuple[int, int]:
+        rel_parts = [s.lower() for s in p.relative_to(repo_dir).parts[:-1]]
+        overlap = 0
+        for a, b in zip(reversed(url_dirs), reversed(rel_parts)):
+            if a != b:
+                break
+            overlap += 1
+        return (overlap, -len(rel_parts))
+
+    scored = sorted(matches, key=score, reverse=True)
+    best, second = score(scored[0]), score(scored[1])
+    if best > second:
+        return scored[0].relative_to(repo_dir).as_posix()
     return None
 
 
@@ -1187,6 +1216,20 @@ def _apply_attribute(tag_info: dict, attr: str, value: str) -> dict:
     return {"before": tag_info["full"], "after": after}
 
 
+def _replace_or_add_attribute(tag_info: dict, attr: str, value: str) -> dict:
+    """Like _apply_attribute, but overwrites an existing attr="..." value in
+    place instead of appending a duplicate — needed for rules like
+    autocomplete-valid where the attribute already exists with an invalid
+    value, rather than being missing entirely."""
+    pattern = re.compile(re.escape(attr) + r'="[^"]*"')
+    if pattern.search(tag_info["attrs"]):
+        new_attrs = pattern.sub(f'{attr}="{value}"', tag_info["attrs"], count=1)
+        tail = " />" if tag_info["self_closing"] else ">"
+        after = f'<{tag_info["tag"]}{new_attrs}{tail}'
+        return {"before": tag_info["full"], "after": after}
+    return _apply_attribute(tag_info, attr, value)
+
+
 _INPUT_TYPE_LABELS = {
     "email": "Email", "tel": "Phone number", "search": "Search", "password": "Password",
     "url": "Website", "number": "Number", "date": "Date", "time": "Time", "month": "Month",
@@ -1218,6 +1261,61 @@ def _infer_input_label(html: str) -> tuple[str, str]:
     if type_label:
         return type_label, "input type"
     return "Text input", "last-resort default"
+
+
+# Keyword -> valid HTML autocomplete token, checked against a field's own
+# name/id/placeholder (the strongest real-world signal, same approach as
+# _infer_input_label). First match wins; order doesn't matter since the
+# keyword sets don't overlap.
+_AUTOCOMPLETE_KEYWORD_MAP = [
+    (("fname", "firstname", "first-name", "givenname"), "given-name"),
+    (("lname", "lastname", "last-name", "surname", "familyname"), "family-name"),
+    (("fullname", "yourname", "full-name"), "name"),
+    (("email",), "email"),
+    (("phone", "mobile", "tel"), "tel"),
+    (("zip", "postal", "postcode"), "postal-code"),
+    (("address1", "street1", "addressline1"), "address-line1"),
+    (("address2", "street2", "addressline2"), "address-line2"),
+    (("city", "town"), "address-level2"),
+    (("state", "province", "region"), "address-level1"),
+    (("country",), "country-name"),
+    (("org", "company"), "organization"),
+    (("username", "userid", "login"), "username"),
+    (("newpass",), "new-password"),
+    (("password", "pwd", "pass"), "current-password"),
+    (("ccnum", "cardnumber"), "cc-number"),
+    (("ccname", "cardname", "nameoncard"), "cc-name"),
+    (("ccexp", "expiry", "expdate"), "cc-exp"),
+    (("cvv", "cvc", "csc"), "cc-csc"),
+    (("website", "url"), "url"),
+]
+
+# Only used when name/id/placeholder give no match at all — a weaker signal
+# (many "tel" inputs aren't actually a phone-number autocomplete field), so
+# kept to the handful of types where the mapping is genuinely unambiguous.
+_TYPE_AUTOCOMPLETE_FALLBACK = {"email": "email", "tel": "tel", "url": "url", "password": "current-password"}
+
+
+def _infer_autocomplete_token(html: str) -> str | None:
+    """Best deterministic guess at the correct autocomplete token for a field
+    flagged by axe's autocomplete-valid rule — that rule fires when the
+    attribute is *present* but its value isn't one of the HTML spec's
+    recognized tokens (e.g. autocomplete="fname" instead of the real token
+    "given-name"), so this infers the right token the same way
+    _infer_input_label infers a label, just mapped to spec tokens instead of
+    human-readable text. Returns None — no guess — when neither the field's
+    own name/id/placeholder nor its type gives a confident match."""
+    haystack = " ".join(
+        m.group(1).lower()
+        for m in re.finditer(r'(?:name|id|placeholder)="([^"]+)"', html)
+    )
+    for keywords, token in _AUTOCOMPLETE_KEYWORD_MAP:
+        if any(kw in haystack for kw in keywords):
+            return token
+    type_match = re.search(r'\btype="([^"]+)"', html)
+    if type_match:
+        return _TYPE_AUTOCOMPLETE_FALLBACK.get(type_match.group(1).lower())
+    return None
 
 
 _MEANINGLESS_WORDS = {"icon", "btn", "button", "link", "svg", "img", "image", "el", "element"}
@@ -1449,6 +1547,25 @@ def _fallback_patch(rule: dict, node: dict, file_content: str, line_no: int | No
         logger.info("[FallbackFix] Selected candidate: %s:%d", target["tag"], target["line"])
         logger.info("[FallbackFix] Fix strategy: add aria-label (label from %s)", source)
         patch = _apply_attribute(target, "aria-label", label)
+        return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
+
+    if rule_id == "autocomplete-valid":
+        target = _locate_patch_target(file_content, line_no, ("input", "select", "textarea"))
+        if not target:
+            logger.info("[FallbackFix] Rule: autocomplete-valid")
+            logger.info("[FallbackFix] No supported fix strategy for this markup")
+            logger.info("[FallbackFix] Reason: no <input>/<select>/<textarea> found at or enclosing the located line")
+            return None
+        token = _infer_autocomplete_token(html)
+        if not token:
+            logger.info("[FallbackFix] Rule: autocomplete-valid")
+            logger.info("[FallbackFix] No supported fix strategy for this markup")
+            logger.info("[FallbackFix] Reason: could not infer a valid autocomplete token from this field's name/id/type")
+            return None
+        logger.info("[FallbackFix] Rule: autocomplete-valid")
+        logger.info("[FallbackFix] Selected candidate: %s:%d", target["tag"], target["line"])
+        logger.info("[FallbackFix] Fix strategy: set autocomplete=\"%s\"", token)
+        patch = _replace_or_add_attribute(target, "autocomplete", token)
         return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
 
     if rule_id == "html-has-lang":

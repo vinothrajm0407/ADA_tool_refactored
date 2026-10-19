@@ -23,6 +23,7 @@ import WcagReferencePage from './pages/WcagReferencePage'
 import IntegrationsPage from './pages/IntegrationsPage'
 import RepoLinkingPage from './pages/RepoLinkingPage'
 import FixHistoryPage from './pages/FixHistoryPage'
+import ClientHealthPage from './pages/ClientHealthPage'
 
 const PUBLIC_PAGES = new Set(['landing', 'login', 'signup', 'verify-email', 'forgot-password', 'reset-password']);
 
@@ -107,6 +108,7 @@ function AppInner() {
                   onClearResult={() => setScanHistoryId(null)}
                 />
               )}
+            {activePage === 'client-health' && <ClientHealthPage />}
             {activePage === 'crawl-results' && <CrawlResultsPage />}
             {activePage === 'crawl-schedules' && <CrawlSchedulesPage />}
             {activePage === 'alerts' && <AlertsPage />}
