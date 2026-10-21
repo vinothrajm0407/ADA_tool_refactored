@@ -112,7 +112,7 @@ export default function AppSidebar() {
         {/* ── NAV ── */}
         <nav aria-label="Primary" className="flex-1 px-3 space-y-1 overflow-y-auto">
           {NAV_SECTIONS.map((section) => (
-            <div key={section.label || '__top'} className="mb-1">
+            <div key={section.label || section.items[0].id} className="mb-1">
               {section.label && (
                 <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-body">
                   {section.label}
