@@ -10,6 +10,7 @@ const pageTitles = {
   dashboard:            'Dashboard',
   'new-scan':           'Run Audit',
   'scan-history':       'Scan History',
+  'client-health':      'Client Health',
   'crawl-results':      'Crawl Results',
   'crawl-schedules':    'Crawl Schedules',
   'executive-summary':  'Executive Summary',

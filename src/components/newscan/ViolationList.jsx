@@ -569,7 +569,7 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
   };
 
   return (
-    <div className="border border-gray-100 rounded-xl overflow-hidden">
+    <div className="border border-solid border-gray-200 rounded-xl overflow-hidden bg-white hover:border-teal/40 hover:shadow-soft transition-all">
 
       {/* Header (always visible) — two sibling buttons, not nested: the left
           one toggles expand, the right one (when collapsed) is the compact

@@ -1,6 +1,6 @@
 import { apiFetch } from '../../utils/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Shield, Search, History, Play, Loader2, AlertCircle, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Search, History, Play, Loader2, AlertCircle, X, ChevronDown, ChevronRight } from 'lucide-react';
 import ViolationRow from './ViolationList';
 import IncompleteList from './IncompleteList';
 import ScreenshotModal from './ScreenshotModal';
@@ -10,12 +10,13 @@ import {
   nsComputeScore, nsScoreGradeInfo, nsScoreMessage,
   nsBuildSeverityBreakdown, nsBuildTopIssues, nsTotalElementCount,
   NS_SEVERITY_ROWS, NS_IMPACT_FILTER, SEV_COLORS,
-  nsGroupByArea, buildDonutPaths,
+  nsGroupByArea,
   loadPrevScan, saveScanSummary,
   p4riskLevel, p4wcagLabel, p4wcagLevel,
   p4loadVpResults, p4saveVpResults, P4_VIEWPORTS,
 } from './scanUtils';
 import { useApp } from '../../context/AppContext';
+import ScoreRing from '../ui/ScoreRing';
 
 // Inline results for tests started from AssistiveTestDropdown — one collapsible
 // card per module that's running/finished/errored, right on the scan results view.
@@ -62,6 +63,21 @@ function AssistiveResultsPanel({ sessionId }) {
   );
 }
 
+const HERO_BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-semibold border border-solid border-white/20 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60';
+
+function StatTile({ value, label, tone, onClick, ...rest }) {
+  const inner = (
+    <>
+      <p className={`font-heading font-bold text-3xl leading-none m-0 tabular-nums ${tone}`}>{value}</p>
+      <p className="text-xs text-body mt-1.5 mb-0 font-medium">{label}</p>
+    </>
+  );
+  const cls = 'rounded-xl bg-white px-4 py-4 text-center shadow-sm';
+  return onClick
+    ? <button type="button" onClick={onClick} {...rest} className={`${cls} border-0 hover:shadow-md transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70`}>{inner}</button>
+    : <div className={cls}>{inner}</div>;
+}
+
 // ─── Count-up animation hook ─────────────────────────────────────────────────
 
 function useCountUp(target, duration = 550) {
@@ -82,46 +98,6 @@ function useCountUp(target, duration = 550) {
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [target, duration]);
   return count;
-}
-
-// ─── Severity donut chart ────────────────────────────────────────────────────
-
-function SeverityDonut({ sevBreak }) {
-  const { paths, total } = buildDonutPaths(sevBreak);
-  if (total === 0) return (
-    <p className="text-sm text-sage font-semibold text-center py-4">No violations found</p>
-  );
-  return (
-    <div className="flex items-center gap-5 mt-1">
-      <svg viewBox="0 0 100 100" className="w-28 h-28 flex-shrink-0" role="img" aria-label="Severity distribution donut chart">
-        {paths.map(p => <path key={p.key} d={p.d} fill={p.fill} />)}
-        <text x="50"y="46"textAnchor="middle"fontSize="15"fontWeight="700"fill="currentColor"className="text-ink">{total}</text>
-        <text x="50"y="59"textAnchor="middle"fontSize="8"fill="currentColor"className="text-body">issues</text>
-      </svg>
-      <div className="flex-1 space-y-2.5">
-        {NS_SEVERITY_ROWS.map(({ key, label, sublabel }) => {
-          const count = sevBreak[key] || 0;
-          if (!count) return null;
-          const pct = Math.round((count / total) * 100);
-          return (
-            <div key={key} className="space-y-0.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: SEV_COLORS[key] }} />
-                  <span className="text-xs text-ink font-medium">{label}</span>
-                  <span className="text-[10px] text-body">{sublabel}</span>
-                </div>
-                <span className="text-xs font-bold text-ink">{count}</span>
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden ml-3.5">
-                <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: SEV_COLORS[key] }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 // ─── Scan comparison card ────────────────────────────────────────────────────
@@ -227,52 +203,6 @@ function IssueNavigator({ sevBreak, totalViolations, onNavigate }) {
         })}
       </div>
     </nav>
-  );
-}
-
-// ─── Accessibility readiness card ────────────────────────────────────────────
-
-function AccessibilityReadinessCard({ score, sevBreak, violations, passes }) {
-  const risk = p4riskLevel(score, sevBreak);
-  const wcag = p4wcagLabel(violations);
-  const criticalCount = sevBreak.critical || 0;
-  const totalChecks = violations.length + passes.length;
-  const passRate = totalChecks > 0 ? Math.round((passes.length / totalChecks) * 100) : 100;
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Shield className="w-4 h-4 text-teal flex-shrink-0" />
-          <span className="font-heading font-semibold text-base leading-none text-ink">Accessibility Readiness</span>
-        </div>
-        <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${risk.badgeCls}`}>
-          {risk.level} Risk
-        </span>
-      </div>
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-1">Score</p>
-          <p className="text-xl font-heading font-bold text-ink">{score}<span className="text-xs font-normal text-body">/100</span></p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-1">WCAG</p>
-          <p className="text-sm font-heading font-bold text-ink leading-tight mt-1">{wcag}</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-1">Critical</p>
-          <p className={`text-xl font-heading font-bold ${criticalCount > 0 ? 'text-coral' : 'text-sage'}`}>{criticalCount}</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-3 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-1">Pass Rate</p>
-          <p className="text-xl font-heading font-bold text-ink">{passRate}<span className="text-xs font-normal text-body">%</span></p>
-        </div>
-      </div>
-      <div className="bg-teal/5 border border-teal/15 rounded-xl px-4 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-teal mb-1">Recommended Priority</p>
-        <p className="text-sm text-ink font-medium">{risk.action}</p>
-      </div>
-    </div>
   );
 }
 
@@ -393,8 +323,6 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
   const [wcagFilter, setWcagFilter]     = useState('all');
   const savedRef = useRef(false);
   const [appeared, setAppeared]           = useState(false);
-  const [revealDone, setRevealDone]       = useState(false);
-  const [revealVisible, setRevealVisible] = useState(true);
   const [highlightSection, setHighlight]  = useState(null);
   const hlTimerRef                        = useRef(null);
 
@@ -413,17 +341,12 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
     return () => clearTimeout(t);
   }, []);
 
-  useEffect(() => {
-    const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReduced) { setRevealDone(true); setRevealVisible(false); return; }
-    const t1 = setTimeout(() => setRevealVisible(false), 5000);
-    const t2 = setTimeout(() => setRevealDone(true), 5600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, []);
-
   const score     = nsComputeScore(violations);
   const gradeInfo = nsScoreGradeInfo(score);
   const sevBreak  = nsBuildSeverityBreakdown(violations);
+  const risk      = p4riskLevel(score, sevBreak);
+  const wcagLabel = p4wcagLabel(violations);
+  const sevTotal  = NS_SEVERITY_ROWS.reduce((n, { key }) => n + (sevBreak[key] || 0), 0);
   const topIssues = nsBuildTopIssues(violations);
   const maxCount  = topIssues.length > 0 ? topIssues[0].count : 1;
 
@@ -464,9 +387,14 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
       })
     : filteredViolations;
 
-  const finalViolations = wcagFilter === 'all'
+  // Worst first, then by how many elements are affected — so the top of the list is what to fix first.
+  const SEV_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+  const finalViolations = [...(wcagFilter === 'all'
     ? searchFiltered
-    : searchFiltered.filter(v => p4wcagLevel(v) === wcagFilter);
+    : searchFiltered.filter(v => p4wcagLevel(v) === wcagFilter))]
+    .sort((a, b) =>
+      (SEV_ORDER[(a.impact || 'minor').toLowerCase()] ?? 3) - (SEV_ORDER[(b.impact || 'minor').toLowerCase()] ?? 3)
+      || (b.nodes?.length ?? 0) - (a.nodes?.length ?? 0));
 
   const impactCount = (imp) => violations.filter(v => (v.impact || 'minor').toLowerCase() === imp).length;
 
@@ -504,153 +432,102 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
   return (
     <div className={`space-y-4 transition-all duration-300 ${appeared ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}>
 
-      {/* Scan completion reveal — visible for ~1s then fades out */}
-      {!revealDone && (
-        <div className={`bg-white rounded-2xl border border-teal/25 px-6 py-6 transition-opacity duration-500 ${revealVisible ?'opacity-100':'opacity-0'}`}>
-          <div className="flex items-center justify-center gap-2.5 mb-5">
-            <div className="w-8 h-8 rounded-full bg-teal/10 flex items-center justify-center flex-shrink-0">
-              <CheckCircle className="w-4.5 h-4.5 text-teal" />
-            </div>
-            <span className="font-heading font-semibold text-base text-ink">Scan Complete</span>
-            {scanRan && (
-              <span className="text-xs text-body">
-                &nbsp;· Accessibility Score&nbsp;<span className="font-heading font-bold text-ink">{score}</span>
-              </span>
-            )}
-          </div>
-          <div className={`grid gap-3 max-w-sm mx-auto ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-            <div className={`rounded-xl px-4 py-4 text-center ${violations.length > 0 ?'bg-coral/10':'bg-gray-50'}`}>
-              <p className={`font-heading font-bold text-3xl leading-none ${violations.length > 0 ?'text-coral':'text-body'}`}>{violCount}</p>
-              <p className="text-[11px] text-body mt-1.5 font-medium">Violations</p>
-            </div>
-            {incomplete.length > 0 && (
-              <div className="rounded-xl px-4 py-4 text-center bg-amber/10">
-                <p className="font-heading font-bold text-3xl leading-none text-amber">{incompleteCount}</p>
-                <p className="text-[11px] text-body mt-1.5 font-medium">Needs review</p>
-              </div>
-            )}
-            <div className="rounded-xl px-4 py-4 text-center bg-gray-50">
-              <p className="font-heading font-bold text-3xl leading-none text-sage">{passCount}</p>
-              <p className="text-[11px] text-body mt-1.5 font-medium">Passed</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Main content — fades in + drifts up as reveal card fades out */}
-      <div className={`space-y-4 transition-all duration-500 ${revealVisible ? 'opacity-0 translate-y-5' : 'opacity-100 translate-y-0'}`}>
+      <div className="space-y-4">
 
-      {/* Scan complete header */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-6">
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <CheckCircle className="w-4 h-4 text-sage" />
-              <span className="text-sm font-semibold text-sage">Scan complete</span>
+      {/* Report hero: where the scan stands at a glance */}
+      <section aria-label="Scan summary" className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-900 via-teal-800 to-teal text-white p-6 lg:p-8 shadow-glow">
+        <div aria-hidden="true" className="absolute -top-24 -right-16 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+        <div className="relative">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/15 rounded-full px-3 py-1">
+                <CheckCircle className="w-3.5 h-3.5" /> Scan complete
+              </span>
+              <a href={scanUrl} target="_blank" rel="noreferrer" className="block mt-3 text-base lg:text-lg font-heading font-semibold text-white hover:underline break-all max-w-2xl">
+                {scanUrl}
+              </a>
             </div>
-            <p className="text-xs font-mono text-body break-all max-w-sm">{scanUrl}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {hasPageScreenshot && (
+                <button type="button" onClick={() => setPageScreenshotOpen(true)} className={HERO_BTN}>
+                  <Monitor className="w-3.5 h-3.5" /> View screenshot
+                </button>
+              )}
+              <button type="button" onClick={onReset} className={HERO_BTN}>
+                <RotateCcw className="w-3.5 h-3.5" /> Scan another
+              </button>
+              <button type="button" onClick={() => navigate('scan-history')} className={HERO_BTN}>
+                <History className="w-3.5 h-3.5" /> View history
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={onReset} className="btn-secondary text-sm flex items-center gap-2">
-              <RotateCcw className="w-3.5 h-3.5" />
-              Scan another
-            </button>
-            <button onClick={() => navigate('scan-history')} className="btn-secondary text-sm flex items-center gap-2">
-              <History className="w-3.5 h-3.5" />
-              View history
-            </button>
-          </div>
-        </div>
-        <div className={`grid gap-3 ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          {violations.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => scrollToSection('ns-violations-section', 'violations')}
-              className="rounded-xl px-4 py-3 text-center bg-coral/10 hover:bg-coral/[0.18] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-1"
-              aria-label={`${nsTotalElementCount(violations)} violations — jump to violations section`}
-            >
-              <p className="font-heading font-bold text-2xl leading-none text-coral">{violCount}</p>
-              <p className="text-[11px] text-body mt-1 font-medium">Violations</p>
-            </button>
+
+          {scanRan ? (
+            <div className="mt-7 grid lg:grid-cols-[auto_1fr] gap-8 items-center">
+              <div className="flex items-center gap-5">
+                <ScoreRing value={score} />
+                <div className="min-w-0 max-w-[220px]">
+                  <p className="font-heading text-xl font-bold m-0">Grade {gradeInfo.grade}</p>
+                  <p className="text-sm text-white/80 mt-1 mb-2 leading-snug">{nsScoreMessage(score)}</p>
+                  <span className="inline-block text-[11px] font-semibold bg-white/15 rounded-full px-2.5 py-1">{risk.level} risk · {wcagLabel}</span>
+                </div>
+              </div>
+
+              <div>
+                <div className={`grid gap-3 ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  <StatTile
+                    value={violCount} label="Violations" tone="text-coral-700"
+                    onClick={violations.length > 0 ? () => scrollToSection('ns-violations-section', 'violations') : undefined}
+                    aria-label={`${nsTotalElementCount(violations)} violations`}
+                  />
+                  {incomplete.length > 0 && (
+                    <StatTile
+                      value={incompleteCount} label="Needs review" tone="text-amber-800"
+                      onClick={() => scrollToSection('ns-incomplete-section', 'incomplete')}
+                      aria-label={`${incomplete.length} items need manual review`}
+                    />
+                  )}
+                  <StatTile value={passCount} label="Passed" tone="text-sage-700" />
+                </div>
+
+                {sevTotal > 0 && (
+                  <div className="mt-4">
+                    <div className="flex h-2.5 rounded-full overflow-hidden bg-white/15" role="img"
+                      aria-label={NS_SEVERITY_ROWS.map(({ key, label }) => `${label} ${sevBreak[key] || 0}`).join(', ')}>
+                      {NS_SEVERITY_ROWS.map(({ key }) => (sevBreak[key] || 0) > 0 && (
+                        <div key={key} style={{ width: `${((sevBreak[key] || 0) / sevTotal) * 100}%`, background: SEV_COLORS[key] }} />
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5 text-xs text-white/90">
+                      {NS_SEVERITY_ROWS.map(({ key, label }) => (sevBreak[key] || 0) > 0 && (
+                        <span key={key} className="inline-flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full" style={{ background: SEV_COLORS[key] }} />
+                          {label} <strong className="font-semibold">{sevBreak[key]}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
-            <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
-              <p className="font-heading font-bold text-2xl leading-none text-body">{violCount}</p>
-              <p className="text-[11px] text-body mt-1 font-medium">Violations</p>
+            <div className="flex items-start gap-2.5 bg-white/95 text-amber-800 px-4 py-3 rounded-xl mt-6">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed m-0">
+                Axe returned no data — the page may have blocked the scanner (bot protection, CSP, or login required).
+              </p>
             </div>
           )}
-          {incomplete.length > 0 && (
-            <button
-              type="button"
-              onClick={() => scrollToSection('ns-incomplete-section', 'incomplete')}
-              className="rounded-xl px-4 py-3 text-center bg-amber/10 hover:bg-amber/[0.18] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal focus-visible:ring-offset-1"
-              aria-label={`${incomplete.length} items need manual review — jump to that section`}
-            >
-              <p className="font-heading font-bold text-2xl leading-none text-amber">{incompleteCount}</p>
-              <p className="text-[11px] text-body mt-1 font-medium">Needs review</p>
-            </button>
-          )}
-          <div className="rounded-xl px-4 py-3 text-center bg-gray-50">
-            <p className="font-heading font-bold text-2xl leading-none text-sage">{passCount}</p>
-            <p className="text-[11px] text-body mt-1 font-medium">Passed</p>
-          </div>
-        </div>
-        {!scanRan && (
-          <div className="flex items-start gap-2.5 bg-amber/10 px-4 py-3 rounded-xl mt-4">
-            <AlertTriangle className="w-4 h-4 text-amber flex-shrink-0 mt-0.5" />
-            <p className="text-xs text-amber leading-relaxed">
-              Axe returned no data — the page may have blocked the scanner (bot protection, CSP, or login required).
-            </p>
-          </div>
-        )}
-      </div>
 
-      {/* Page screenshot */}
-      {hasPageScreenshot && (
-        <div className="bg-white rounded-2xl border border-gray-100 p-6">
-          <p className="font-heading font-semibold text-base text-ink mb-1">Page screenshot</p>
-          <p className="text-xs text-body mb-3">View the page as it was when the accessibility check ran.</p>
-          <button
-            type="button"
-            onClick={() => setPageScreenshotOpen(true)}
-            className="btn-secondary text-sm"
-          >
-            View page screenshot
-          </button>
-        </div>
-      )}
-
-      {/* Score + Severity Distribution */}
-      {scanRan && (
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-body mb-4">
-              Accessibility Score
-            </p>
-            <div className="flex items-center gap-4">
-              <div className={`w-20 h-20 rounded-full border-4 flex flex-col items-center justify-center flex-shrink-0 ${gradeInfo.dialCls}`}>
-                <span className="font-heading font-bold text-2xl leading-none">{score}</span>
-                <span className="text-[10px] opacity-60 mt-0.5">/ 100</span>
-              </div>
-              <div className="min-w-0">
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full mb-2 inline-block ${gradeInfo.badgeCls}`}>
-                  Grade {gradeInfo.grade}
-                </span>
-                <p className="text-sm text-body leading-snug">{nsScoreMessage(score)}</p>
-              </div>
+          {scanRan && (
+            <div className="mt-6 bg-white/10 rounded-xl px-4 py-3 text-sm">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-white/70 mr-2">Start here</span>
+              {risk.action}
             </div>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-body mb-1">
-              Severity Distribution
-            </p>
-            <SeverityDonut sevBreak={sevBreak} />
-          </div>
+          )}
         </div>
-      )}
-
-      {scanRan && (
-        <AccessibilityReadinessCard score={score} sevBreak={sevBreak} violations={violations} passes={passes} />
-      )}
+      </section>
 
       {scanRan && (
         <ScanComparison

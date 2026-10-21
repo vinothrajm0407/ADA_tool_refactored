@@ -1,6 +1,6 @@
 import { apiFetch } from '../utils/api';
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Globe, Network, FileCode, Plus, X, Loader2, GitCompare, CheckCircle2, Check, Info, BarChart3, Pencil } from 'lucide-react';
+import { Globe, Network, FileCode, Plus, X, Loader2, GitCompare, Check, BarChart3, Pencil, ArrowRight, ShieldCheck, Clock, Wrench, Lock, Upload, AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import './NewScanPage.css';
 import SingleScanForm from '../components/newscan/SingleScanForm';
@@ -27,15 +27,17 @@ const TABS = [
   },
 ];
 
-const BEFORE_YOU_START = [
-  { icon: Globe, title: 'Enter your website', body: 'Provide the full URL of the website you want to scan, including https://.' },
-  { icon: CheckCircle2, title: 'Choose scan options', body: 'Select the types of accessibility checks that match your goals.' },
-  { icon: BarChart3, title: 'Review your results', body: "We'll scan your site and show a clear summary of issues, along with guidance to help you fix them." },
+const HOW_IT_WORKS = [
+  { icon: Globe, title: 'Enter your website', body: 'Paste the full URL, including https://.' },
+  { icon: SlidersHorizontal, title: 'Pick the audit type', body: 'One page for a quick check, or crawl the whole site.' },
+  { icon: BarChart3, title: 'Review and fix', body: 'Get a clear list of issues, with guidance and Auto-Fix to resolve them.' },
 ];
+
+const STANDARDS = ['WCAG 2.0 A/AA', 'WCAG 2.1 A/AA', 'ARIA', 'Color contrast', 'Forms & labels', 'Keyboard access'];
 
 function ScanOptionCards({ activeId, onSelect }) {
   return (
-    <div role="tablist" aria-label="Scan options" className="grid sm:grid-cols-3 gap-3">
+    <div role="tablist" aria-label="Audit type" className="grid sm:grid-cols-3 gap-3">
       {TABS.map(({ id, label, description, icon: Icon, disabled }) => {
         const isActive = activeId === id;
         return (
@@ -48,29 +50,26 @@ function ScanOptionCards({ activeId, onSelect }) {
             disabled={disabled}
             onClick={() => !disabled && onSelect(id)}
             className={[
-              'relative text-left rounded-xl p-4 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-teal/40',
+              'relative text-left rounded-xl p-4 border border-solid transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-teal/40',
               disabled
-                ?'border-2 border-gray-200 bg-white cursor-not-allowed opacity-60'
+                ? 'border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
                 : isActive
-                  ?'border-2 border-teal bg-teal/5'
-                  :'border-2 border-gray-200 bg-white hover:border-teal/40',
+                  ? 'border-teal bg-teal/5 ring-1 ring-teal shadow-soft'
+                  : 'border-gray-200 bg-white hover:border-teal/50 hover:shadow-soft',
             ].join(' ')}
           >
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center mb-3 bg-teal/10 text-teal">
-              <Icon size={18} />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 ${isActive ? 'bg-teal text-white' : 'bg-teal/10 text-teal'}`}>
+              <Icon size={19} />
             </div>
-            <p className="font-heading font-semibold text-sm text-ink mb-1">{label}</p>
-            <p className="text-xs text-body leading-relaxed">{description}</p>
+            <p className="font-heading font-semibold text-sm text-ink mt-0 mb-1">{label}</p>
+            <p className="text-xs text-body mt-0 mb-0 leading-relaxed">{description}</p>
             {disabled ? (
-              <span className="absolute bottom-3 right-3 text-[10px] font-semibold text-body bg-gray-100 px-2 py-0.5 rounded-full">
+              <span className="absolute top-3 right-3 text-[10px] font-semibold text-body bg-gray-200/70 px-2 py-0.5 rounded-full">
                 Coming soon
               </span>
             ) : isActive ? (
-              <span
-                aria-hidden="true"
-                className="absolute bottom-3 right-3 w-4 h-4 bg-teal rounded flex items-center justify-center"
-              >
-                <Check size={10} className="text-white" strokeWidth={3} />
+              <span aria-hidden="true" className="absolute top-3 right-3 w-5 h-5 bg-teal rounded-full flex items-center justify-center">
+                <Check size={12} className="text-white" strokeWidth={3} />
               </span>
             ) : null}
           </button>
@@ -80,56 +79,39 @@ function ScanOptionCards({ activeId, onSelect }) {
   );
 }
 
-// ─── Scan options section (mirrors the mockup: heading + description above
-// the option cards, "coming soon" note below) — rendered inside whichever
-// form card is currently active, between the URL field and its mode-specific
-// settings, so it reads as one continuous card rather than a separate block. ──
-function ScanOptionsSection({ activeId, onSelect }) {
-  return (
-    <div>
-      <label className="text-sm font-semibold text-ink mb-1 block">
-        Scan options <span className="text-coral">*</span>
-      </label>
-      <p className="text-xs text-body mb-3">Select the types of checks to include in your audit.</p>
-      <ScanOptionCards activeId={activeId} onSelect={onSelect} />
-      <p className="text-xs text-body mt-2 flex items-center gap-1">
-        <Info size={12} className="text-gray-400 flex-shrink-0" />
-        HTML validation will be available in a future release.
-      </p>
-    </div>
-  );
-}
-
-function BeforeYouStart() {
+function Sidebar() {
   return (
     <aside className="w-full lg:w-80 flex-shrink-0 space-y-4">
-      <div className="card p-5">
-        <h2 className="font-heading font-semibold text-sm text-ink mb-4">Before you start</h2>
-        <ol className="space-y-4">
-          {BEFORE_YOU_START.map((step, i) => {
+      <div className="card p-6">
+        <h2 className="font-heading font-semibold text-sm text-ink mt-0 mb-5">How it works</h2>
+        <ol className="relative space-y-6">
+          <span aria-hidden="true" className="absolute left-[15px] top-4 bottom-4 w-px bg-gray-200" />
+          {HOW_IT_WORKS.map((step, i) => {
             const Icon = step.icon;
             return (
-              <li key={step.title} className="flex gap-3">
-                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-teal/10 text-teal text-xs font-bold flex items-center justify-center">
-                  {i + 1}
+              <li key={step.title} className="relative flex gap-4">
+                <span className="relative z-10 flex-shrink-0 w-8 h-8 rounded-full bg-teal text-white flex items-center justify-center shadow-sm">
+                  <Icon size={14} />
                 </span>
-                <div className="flex gap-2 min-w-0">
-                  <span className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center">
-                    <Icon size={15} className="text-body" />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-ink">{step.title}</p>
-                    <p className="text-xs text-body mt-0.5 leading-relaxed">{step.body}</p>
-                  </div>
+                <div className="min-w-0 pt-0.5">
+                  <p className="text-sm font-semibold text-ink m-0">{i + 1}. {step.title}</p>
+                  <p className="text-xs text-body mt-0.5 mb-0 leading-relaxed">{step.body}</p>
                 </div>
               </li>
             );
           })}
         </ol>
       </div>
-      <div className="alert-info">
-        <span className="font-semibold flex-shrink-0">Tip:</span>
-        <span>Start with a Full page scan to get a complete overview, then dive deeper into specific checks.</span>
+      <div className="card p-6">
+        <h2 className="font-heading font-semibold text-sm text-ink mt-0 mb-3">What we check</h2>
+        <div className="flex flex-wrap gap-2">
+          {STANDARDS.map(s => (
+            <span key={s} className="text-xs font-medium text-teal-800 bg-teal/10 rounded-full px-3 py-1">{s}</span>
+          ))}
+        </div>
+        <p className="text-xs text-body mt-4 mb-0 leading-relaxed">
+          Powered by axe-core, the same engine as axe DevTools, so results match what your team sees in the browser.
+        </p>
       </div>
     </aside>
   );
@@ -449,17 +431,84 @@ export default function NewScanPage() {
           </div>
         )}
 
-        <div className="mb-8">
-          <h1 className="font-heading font-bold text-3xl text-ink mb-2 leading-[1.2]">Start a new accessibility audit</h1>
-          <p className="text-base text-body leading-[1.5] max-w-2xl">
-            Enter a website URL and choose the type of accessibility check you want to run. We'll scan your site and give you clear, actionable results.
-          </p>
-        </div>
+        {(focusedTab || showCompare || showUploadView) && (
+          <div className="mb-8">
+            <h1 className="font-heading font-bold text-3xl text-ink mb-2 leading-[1.2]">Accessibility audit</h1>
+            <p className="text-base text-body leading-[1.5] max-w-2xl">
+              Review your results below, or start a new audit from the tab bar.
+            </p>
+          </div>
+        )}
+
+        {!focusedTab && !showCompare && !showUploadView && (
+          <section aria-label="Start an audit" className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-900 via-teal-800 to-teal text-white p-8 lg:p-10 mb-6 shadow-glow max-w-6xl">
+            <div aria-hidden="true" className="absolute -top-24 -right-16 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+            <div aria-hidden="true" className="absolute -bottom-28 -left-10 w-72 h-72 rounded-full bg-teal-300/20 blur-3xl" />
+            <div className="relative">
+              <h1 className="font-heading font-bold text-3xl lg:text-4xl leading-[1.15] max-w-2xl !text-white m-0">
+                Find and fix accessibility issues in minutes
+              </h1>
+              <p className="text-base text-white/80 mt-3 mb-0 max-w-2xl leading-relaxed">
+                Enter a website address. We&apos;ll check it against WCAG and show you exactly what to fix.
+              </p>
+
+              <div className="mt-7 flex items-center gap-2 bg-white rounded-2xl p-2 shadow-lg ring-1 ring-black/5 focus-within:ring-2 focus-within:ring-teal-300 max-w-3xl">
+                <Globe size={20} className="ml-3 text-teal flex-shrink-0" aria-hidden="true" />
+                <input
+                  id="scan-url"
+                  type="url"
+                  aria-label={activeTab === 'crawl' ? 'Root URL' : 'Website URL'}
+                  value={activeTab === 'crawl' ? crawlUrl : composeUrl}
+                  onChange={e => {
+                    if (activeTab === 'crawl') { setCrawlUrl(e.target.value); setCrawlError(''); }
+                    else setComposeUrl(e.target.value);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key !== 'Enter') return;
+                    if (activeTab === 'crawl') { if (!crawlLoading && crawlUrl.trim()) handleStartCrawl(); }
+                    else if (composeUrl.trim()) handleStartScan();
+                  }}
+                  placeholder="https://example.com"
+                  disabled={activeTab === 'crawl' && crawlLoading}
+                  className="flex-1 min-w-0 bg-transparent border-0 outline-none px-2 py-3 text-base text-ink placeholder-gray-400 disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={activeTab === 'crawl' ? handleStartCrawl : handleStartScan}
+                  disabled={activeTab === 'crawl' ? (crawlLoading || !crawlUrl.trim()) : !composeUrl.trim()}
+                  className="btn-primary !px-6 !py-3 !rounded-xl text-sm flex-shrink-0"
+                >
+                  {activeTab === 'crawl' && crawlLoading
+                    ? <><span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Starting…</>
+                    : <>{activeTab === 'crawl' ? 'Start crawl' : 'Run audit'} <ArrowRight size={15} /></>}
+                </button>
+              </div>
+
+              {activeTab === 'crawl' && crawlError && (
+                <p role="alert" className="mt-3 inline-flex items-center gap-2 bg-white/95 text-coral-700 text-sm font-medium px-3 py-2 rounded-lg">
+                  <AlertTriangle size={14} className="flex-shrink-0" /> {crawlError}
+                </p>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-white/80">
+                <span className="inline-flex items-center gap-1.5"><ShieldCheck size={14} /> WCAG 2.0 &amp; 2.1</span>
+                <span className="inline-flex items-center gap-1.5"><Clock size={14} /> Usually 1–2 minutes</span>
+                <span className="inline-flex items-center gap-1.5"><Wrench size={14} /> Auto-Fix ready</span>
+                <span className="inline-flex items-center gap-1.5"><Lock size={14} /> Your data is never shared</span>
+                {activeTab === 'single' && (
+                  <button type="button" onClick={() => setShowUploadView(true)} className="inline-flex items-center gap-1.5 underline underline-offset-2 hover:text-white ml-auto">
+                    <Upload size={13} /> Upload JSON results
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {showUploadView ? (
           <ADAResultsView onClearResult={() => setShowUploadView(false)} />
         ) : (
-        <div className="flex flex-col lg:flex-row gap-6 items-start max-w-5xl">
+        <div className={`flex flex-col lg:flex-row gap-6 items-start ${!focusedTab && !showCompare ? 'max-w-6xl' : 'max-w-5xl'}`}>
         <div className="flex-1 min-w-0 w-full">
 
         {/* Single Page Scan */}
@@ -531,72 +580,52 @@ export default function NewScanPage() {
         )}
 
         {!focusedTab && !showCompare && (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-5">
+          <div className="card p-6 space-y-6">
             <section>
-              <label htmlFor="scan-url" className="text-sm font-semibold text-ink mb-1 block">
-                {activeTab === 'crawl' ? 'Root URL' : 'Website URL'} <span className="text-coral">*</span>
-              </label>
-              <input
-                id="scan-url"
-                type="url"
-                value={activeTab === 'crawl' ? crawlUrl : composeUrl}
-                onChange={e => {
-                  if (activeTab === 'crawl') { setCrawlUrl(e.target.value); setCrawlError(''); }
-                  else setComposeUrl(e.target.value);
-                }}
-                onKeyDown={e => {
-                  if (e.key !== 'Enter') return;
-                  if (activeTab === 'crawl') { if (!crawlLoading && crawlUrl.trim()) handleStartCrawl(); }
-                  else if (composeUrl.trim()) handleStartScan();
-                }}
-                placeholder="https://example.com"
-                disabled={activeTab === 'crawl' && crawlLoading}
-                className="w-full border-2 border-teal rounded-lg px-4 py-2.5 text-sm text-ink placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-teal/20 focus:ring-offset-1 transition-shadow disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-              <p className="text-xs text-body mt-1.5">Enter the full URL including https://</p>
+              <h2 className="font-heading font-semibold text-base text-ink m-0">Choose your audit type</h2>
+              <p className="text-xs text-body mt-1 mb-4">Pick how much of your site to check.</p>
+              <ScanOptionCards activeId={activeTab} onSelect={setActiveTab} />
             </section>
 
-            <div className="border-t border-gray-100" />
-
-            <ScanOptionsSection activeId={activeTab} onSelect={setActiveTab} />
-
-            <div className="border-t border-gray-100" />
-
-            {activeTab === 'single' ? (
-              <SingleScanForm
-                scanUrl={composeUrl}
-                onUrlChange={setComposeUrl}
-                includeBestPractices={composeBestPractices}
-                onBestPracticesChange={setComposeBestPractices}
-                scanPhase="idle"
-                scanError=""
-                onStartScan={handleStartScan}
-                onUploadClick={() => setShowUploadView(true)}
-                hideUrlField
-              />
-            ) : (
-              <CrawlForm
-                crawlUrl={crawlUrl}
-                onUrlChange={setCrawlUrl}
-                maxPages={maxPages}
-                onMaxPagesChange={setMaxPages}
-                maxDepth={maxDepth}
-                onMaxDepthChange={setMaxDepth}
-                fullSite={fullSite}
-                onFullSiteChange={setFullSite}
-                notifyEmail={notifyEmail}
-                onNotifyEmailChange={setNotifyEmail}
-                crawlLoading={crawlLoading}
-                crawlError={crawlError}
-                onStartCrawl={handleStartCrawl}
-                hideUrlField
-              />
-            )}
+            <section>
+              <h2 className="font-heading font-semibold text-base text-ink mt-0 mb-3">Options</h2>
+              {activeTab === 'single' ? (
+                <SingleScanForm
+                  scanUrl={composeUrl}
+                  onUrlChange={setComposeUrl}
+                  includeBestPractices={composeBestPractices}
+                  onBestPracticesChange={setComposeBestPractices}
+                  scanPhase="idle"
+                  scanError=""
+                  onStartScan={handleStartScan}
+                  hideUrlField
+                  hideActions
+                />
+              ) : (
+                <CrawlForm
+                  crawlUrl={crawlUrl}
+                  onUrlChange={setCrawlUrl}
+                  maxPages={maxPages}
+                  onMaxPagesChange={setMaxPages}
+                  maxDepth={maxDepth}
+                  onMaxDepthChange={setMaxDepth}
+                  fullSite={fullSite}
+                  onFullSiteChange={setFullSite}
+                  notifyEmail={notifyEmail}
+                  onNotifyEmailChange={setNotifyEmail}
+                  crawlLoading={crawlLoading}
+                  crawlError={crawlError}
+                  onStartCrawl={handleStartCrawl}
+                  hideUrlField
+                  hideActions
+                />
+              )}
+            </section>
           </div>
         )}
 
         </div>
-        {!focusedTab && !showCompare && <BeforeYouStart />}
+        {!focusedTab && !showCompare && <Sidebar />}
         </div>
         )}
 

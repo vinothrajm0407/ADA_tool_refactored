@@ -8,7 +8,6 @@ import { StatusBadge } from '../ui/StatusBadge'
 import { useApp } from '../../context/AppContext'
 import { CrawlHistoryContent } from './CrawlHistoryContent'
 import { ReportActions } from './ReportActions'
-import ScanInsights from './ScanInsights'
 
 const DEFAULT_PAGE_SIZE = 5
 const ROWS_PER_PAGE_OPTIONS = [5, 10, 25, 50, 100]
@@ -16,7 +15,7 @@ const ROWS_PER_PAGE_OPTIONS = [5, 10, 25, 50, 100]
 // One shared size/spacing/border so every filter control in the toolbar
 // (search, status, date range, sort) reads as the same control, not a mix
 // of differently-sized pieces.
-const FILTER_CTRL_CLS = 'h-10 px-3 rounded-lg border border-gray-300 bg-white text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 transition-colors'
+const FILTER_CTRL_CLS = 'h-10 px-3 rounded-lg border border-solid border-gray-300 bg-white text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 transition-colors'
 
 // Shows just the host ("web.whatsapp.com") instead of the full URL with
 // scheme and path — matches the compact "app name" the design calls for,
@@ -422,84 +421,69 @@ function AllScansTab({ onScanClick }) {
           {message}
         </p>
       )}
-      {loading && <p className="mt-4 text-[0.95rem] text-body">Loading scan history…</p>}
+      {loading && (
+        <div className="mt-4 space-y-3" role="status" aria-label="Loading scan history">
+          {[0, 1, 2, 3].map(i => <div key={i} className="h-14 bg-gray-100 rounded-xl animate-pulse" />)}
+        </div>
+      )}
       {error && (
         <p className="alert-danger mt-4" role="alert">
           {error}
         </p>
       )}
       {!loading && !error && allItems.length === 0 && available && (
-        <p className="mt-4 text-[0.95rem] text-body">
-          No scans yet. Run a URL from the New Scan page and results will appear here.
-        </p>
-      )}
-
-      {showControls && (
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mt-4 mb-2">
-          <div className="flex flex-col sm:flex-row gap-3 flex-1">
-            <div className={`flex-1 min-w-[200px] flex items-center gap-2 ${FILTER_CTRL_CLS}`}>
-              <Search size={15} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
-              <label className="sr-only" htmlFor="history-search">Search scan history by website or ID</label>
-              <input
-                id="history-search"
-                type="search"
-                placeholder="Search websites…"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full border-0 p-0 bg-transparent text-sm text-ink placeholder-gray-400 focus:outline-none"
-              />
-            </div>
-            <label className="sr-only" htmlFor="history-status-filter">Filter by status</label>
-            <select
-              id="history-status-filter"
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className={`${FILTER_CTRL_CLS} sm:w-36 cursor-pointer`}
-            >
-              {STATUS_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <label className="sr-only" htmlFor="history-scan-type-filter">Filter by scan type</label>
-            <select
-              id="history-scan-type-filter"
-              value={scanTypeFilter}
-              onChange={e => setScanTypeFilter(e.target.value)}
-              className={`${FILTER_CTRL_CLS} sm:w-36 cursor-pointer`}
-            >
-              {SCAN_TYPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <DateRangeFilter
-              idPrefix="history-date"
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              onChangeFrom={setDateFrom}
-              onChangeTo={setDateTo}
-            />
-            <label className="sr-only" htmlFor="history-sort">Sort scan history</label>
-            <select
-              id="history-sort"
-              value={sortKey}
-              onChange={e => setSortKey(e.target.value)}
-              className={`${FILTER_CTRL_CLS} sm:w-44 cursor-pointer`}
-            >
-              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+        <div className="card mt-4 p-10 text-center">
+          <div className="w-12 h-12 rounded-xl bg-teal/10 flex items-center justify-center mx-auto mb-4">
+            <FileText size={22} className="text-teal" />
           </div>
-          <button
-            type="button"
-            onClick={() => navigate('new-scan')}
-            className="btn-primary whitespace-nowrap flex-shrink-0"
-          >
-            Run new audit
-            <ArrowRight size={15} />
+          <h2 className="font-heading font-semibold text-lg text-ink m-0">No audits yet</h2>
+          <p className="text-sm text-body mt-1 mb-5">Run your first audit and the results will be saved here.</p>
+          <button type="button" onClick={() => navigate('new-scan')} className="btn-primary">
+            Run an audit <ArrowRight size={15} />
           </button>
         </div>
       )}
 
-      {showControls && filteredAndSorted.length > 0 && (
-        <ScanInsights
-          adaItems={filteredAndSorted.filter(i => i.kind === 'ada').map(i => i.raw)}
-          assistiveItems={filteredAndSorted.filter(i => i.kind === 'assistive').map(i => i.raw)}
-        />
+      {showControls && (
+        <div className="card p-4 mt-4 space-y-3">
+          <div className={`flex items-center gap-2 ${FILTER_CTRL_CLS}`}>
+            <Search size={15} className="text-gray-400 flex-shrink-0" aria-hidden="true" />
+            <label className="sr-only" htmlFor="history-search">Search scan history by website or ID</label>
+            <input
+              id="history-search"
+              type="search"
+              placeholder="Search by website or scan ID…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full border-0 p-0 bg-transparent text-sm text-ink placeholder-gray-400 focus:outline-none"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="history-status-filter">Filter by status</label>
+            <select id="history-status-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={`${FILTER_CTRL_CLS} cursor-pointer`}>
+              {STATUS_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <label className="sr-only" htmlFor="history-scan-type-filter">Filter by scan type</label>
+            <select id="history-scan-type-filter" value={scanTypeFilter} onChange={e => setScanTypeFilter(e.target.value)} className={`${FILTER_CTRL_CLS} cursor-pointer`}>
+              {SCAN_TYPE_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <DateRangeFilter idPrefix="history-date" dateFrom={dateFrom} dateTo={dateTo} onChangeFrom={setDateFrom} onChangeTo={setDateTo} />
+            <label className="sr-only" htmlFor="history-sort">Sort scan history</label>
+            <select id="history-sort" value={sortKey} onChange={e => setSortKey(e.target.value)} className={`${FILTER_CTRL_CLS} cursor-pointer`}>
+              {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {(searchQuery || statusFilter || scanTypeFilter || dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => { setSearchQuery(''); setStatusFilter(''); setScanTypeFilter(''); setDateFrom(''); setDateTo('') }}
+                className="text-xs font-semibold text-teal hover:underline px-2"
+              >
+                Clear filters
+              </button>
+            )}
+            <span className="ml-auto text-xs text-body">{filteredAndSorted.length} {filteredAndSorted.length === 1 ? 'result' : 'results'}</span>
+          </div>
+        </div>
       )}
 
       {showControls && filteredAndSorted.length === 0 && (
@@ -512,25 +496,25 @@ function AllScansTab({ onScanClick }) {
       {showControls && filteredAndSorted.length > 0 && (
         <>
           <div className="mt-3">
-            <DataTable columns={['Website', 'Score', 'Issues', 'Scan type', 'Status', 'Date', 'Actions']} cellBorders>
+            <DataTable columns={['Website', 'Score', 'Issues', 'Type', 'Status', 'Date', '']}>
               {paginatedItems.map(item => {
                 const reportId = item.kind === 'ada' ? (item.idLabel || '').replace(/^SCAN-/, '') : item.raw.id
                 return (
                     <tr key={item.key}>
-                      <td className="max-w-[240px] border-r border-gray-100">
+                      <td className="max-w-[240px]">
                         <span className="block font-medium text-ink truncate" title={item.url}>{siteLabel(item.url)}</span>
                         <span className="block font-mono text-[11px] text-body">{item.idLabel}</span>
                       </td>
-                      <td className="whitespace-nowrap border-r border-gray-100"><PassRateBadge value={item.score} /></td>
-                      <td className="whitespace-nowrap text-ink border-r border-gray-100">{item.issues ?? '—'}</td>
-                      <td className="whitespace-nowrap border-r border-gray-100"><ScanTypeCell kind={item.kind} /></td>
-                      <td className="whitespace-nowrap border-r border-gray-100">
+                      <td className="whitespace-nowrap"><PassRateBadge value={item.score} /></td>
+                      <td className="whitespace-nowrap text-ink">{item.issues ?? '—'}</td>
+                      <td className="whitespace-nowrap"><ScanTypeCell kind={item.kind} /></td>
+                      <td className="whitespace-nowrap">
                         <div className="flex flex-col gap-0.5 items-start">
                           <StatusPill status={item.status} />
                           <SourceBadge usedFallback={item.usedFallback} />
                         </div>
                       </td>
-                      <td className="whitespace-nowrap text-body border-r border-gray-100">
+                      <td className="whitespace-nowrap text-body">
                         {formatDateTime(item.timestamp)}
                       </td>
                       <td className="whitespace-nowrap">
@@ -539,11 +523,10 @@ function AllScansTab({ onScanClick }) {
                             <button
                               type="button"
                               onClick={() => handleScanIdClick(item)}
-                              aria-label={`View scan details for ${item.url || item.idLabel}`}
-                              title="View details"
-                              className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                              aria-label={`View report for ${item.url || item.idLabel}`}
+                              className="inline-flex items-center gap-1.5 h-8 px-3 mr-1 rounded-lg bg-teal/10 text-teal-800 text-xs font-semibold hover:bg-teal/20 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
                             >
-                              <Eye size={15} />
+                              <Eye size={14} /> View report
                             </button>
                           )}
                           {item.kind === 'assistive' && (

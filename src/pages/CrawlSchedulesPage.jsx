@@ -2,8 +2,8 @@ import { apiFetch } from '../utils/api';
 import { useState, useEffect, Fragment } from 'react';
 import {
   CalendarClock, Plus, Trash2, Play, RefreshCw, Square,
-  Pencil, ChevronDown, ChevronRight, Search, AlertTriangle, Radio,
-  ToggleLeft, ToggleRight, ExternalLink,
+  Pencil, ChevronDown, Search, AlertTriangle, Radio, X,
+  ExternalLink, Clock, History, CheckCircle2,
 } from 'lucide-react';
 import GlowInput from '../components/ui/GlowInput';
 import PageHeader from '../components/ui/PageHeader';
@@ -157,39 +157,66 @@ function RunHistoryRow({ scheduleId }) {
   }, [scheduleId]);
 
   return (
-    <tr className="bg-gray-50">
-      <td colSpan={8} className="px-4 py-3">
-        {runs === null && !error && (
-          <p className="text-xs text-body">Loading run history…</p>
-        )}
-        {error && <p className="text-xs text-coral">{error}</p>}
-        {runs && runs.length === 0 && (
-          <p className="text-xs text-body">No runs recorded for this schedule yet.</p>
-        )}
-        {runs && runs.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-body mb-1">
-              Recent runs
-            </p>
+    <div className="border-t border-solid border-gray-100 bg-ivory/60 px-5 py-4">
+      {runs === null && !error && <p className="text-xs text-body m-0">Loading run history…</p>}
+      {error && <p className="text-xs text-coral-700 m-0">{error}</p>}
+      {runs && runs.length === 0 && <p className="text-xs text-body m-0">No runs yet. Use &ldquo;Run now&rdquo; to start one.</p>}
+      {runs && runs.length > 0 && (
+        <>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-body mt-0 mb-2">Recent runs</p>
+          <ul className="space-y-1 list-none p-0 m-0">
             {runs.map((run) => (
-              <button
-                type="button"
-                key={run.crawl_id}
-                className="w-full flex items-center justify-between gap-3 text-xs text-left hover:text-teal transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 rounded px-1 py-0.5"
-                onClick={() => { setCrawlId(run.crawl_id); navigate('crawl-results'); }}
-              >
-                <span className="text-body">{formatDate(run.created_at)}</span>
-                <span className="text-body">
-                  {run.total_scanned ?? 0} scanned{run.total_failed ? `, ${run.total_failed} failed` : ''}
-                </span>
-                <StatusBadge status={RUN_STATUS_BADGE[run.status] || 'Needs review'} />
-              </button>
+              <li key={run.crawl_id}>
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between gap-3 text-sm text-left rounded-lg px-3 py-2 bg-white border border-solid border-gray-100 hover:border-teal/40 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
+                  onClick={() => { setCrawlId(run.crawl_id); navigate('crawl-results'); }}
+                >
+                  <span className="text-ink">{formatDate(run.created_at)}</span>
+                  <span className="text-body text-xs">
+                    {run.total_scanned ?? 0} scanned{run.total_failed ? `, ${run.total_failed} failed` : ''}
+                  </span>
+                  <StatusBadge status={RUN_STATUS_BADGE[run.status] || 'Needs review'} />
+                </button>
+              </li>
             ))}
-          </div>
-        )}
-      </td>
-    </tr>
+          </ul>
+        </>
+      )}
+    </div>
   );
+}
+
+function Switch({ checked, onChange, disabled, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      onClick={onChange}
+      disabled={disabled}
+      className={`relative w-10 h-6 rounded-full border-0 p-0 transition-colors flex-shrink-0 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 focus-visible:ring-offset-2 ${checked ? 'bg-teal' : 'bg-gray-300'}`}
+    >
+      <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
+    </button>
+  );
+}
+
+const ICON_BTN = 'inline-flex items-center justify-center w-9 h-9 rounded-lg text-body border-0 bg-transparent cursor-pointer transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40';
+
+// "Weekly at 09:00" / "Runs daily at 09:00 UTC" — the schedule in plain words.
+function describeSchedule(item) {
+  if (item.schedule_type === 'cron') return cronToEnglish(item.cron_expression);
+  const freq = FREQ_LABELS[item.frequency] || item.frequency;
+  const t = item.time_of_day ? utcTimeToLocal(item.time_of_day) : null;
+  if (item.frequency === 'hourly') return t ? `Every hour, at minute ${t.split(':')[1]}` : 'Every hour';
+  return t ? `${freq} at ${t}` : freq;
+}
+
+function domainOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
 
 export default function CrawlSchedulesPage() {
@@ -399,20 +426,27 @@ export default function CrawlSchedulesPage() {
   const runningCount = items.filter((i) => i.status === 'running').length;
   const attentionCount = items.filter((i) => i.last_run_status === 'failed' || i.last_run_status === 'cancelled').length;
 
+  const filterCounts = {
+    all: items.length,
+    active: items.filter((i) => i.status === 'active').length,
+    paused: items.filter((i) => i.status === 'paused').length,
+    running: runningCount,
+  };
+
   return (
-    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0"role="main">
+    <main className="flex-1 overflow-auto bg-ivory p-6 min-h-0" role="main">
       <div className="max-w-[1040px] mx-auto space-y-6">
 
         <PageHeader
           title="Crawl schedules"
-          description="Keep accessibility monitoring running automatically"
+          description="Check your sites for accessibility problems automatically, on a schedule you choose."
           actions={
             <button
               onClick={() => (showForm ? resetForm() : openCreateForm())}
               className="btn-primary flex items-center gap-2 shrink-0"
             >
-              {showForm ? <Plus className="w-4 h-4" /> : <CalendarClock className="w-4 h-4" />}
-              {showForm ? 'Cancel' : 'Create schedule'}
+              {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {showForm ? 'Cancel' : 'New schedule'}
             </button>
           }
         />
@@ -421,17 +455,18 @@ export default function CrawlSchedulesPage() {
         {!loading && available && items.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
-              { title: 'Active schedules', value: activeCount, icon: CalendarClock },
-              { title: 'Currently running', value: runningCount, icon: Radio },
-              { title: 'Needs attention', value: attentionCount, icon: AlertTriangle },
-            ].map(({ title, value, icon: Icon }) => (
-              <div key={title} className="bg-white border border-gray-100 rounded-xl p-5 flex items-center gap-3">
-                <div className="w-11 h-11 rounded-xl bg-teal/10 flex items-center justify-center flex-shrink-0">
-                  <Icon className="w-5 h-5 text-teal" />
+              { title: 'Active schedules', hint: 'Running automatically', value: activeCount, icon: CalendarClock, tone: 'bg-teal/10 text-teal' },
+              { title: 'Running now', hint: 'Crawls in progress', value: runningCount, icon: Radio, tone: 'bg-brand-blue/10 text-brand-blue-700' },
+              { title: 'Needs attention', hint: 'Last run failed', value: attentionCount, icon: AlertTriangle, tone: attentionCount > 0 ? 'bg-coral/10 text-coral-700' : 'bg-sage/10 text-sage-700' },
+            ].map(({ title, hint, value, icon: Icon, tone }) => (
+              <div key={title} className="card p-5 flex items-center gap-4">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${tone}`}>
+                  <Icon className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-sm text-body">{title}</p>
-                  <p className="text-2xl font-bold font-heading text-ink mt-0.5">{value}</p>
+                  <p className="font-heading text-2xl font-bold text-ink leading-none m-0 tabular-nums">{value}</p>
+                  <p className="text-sm font-medium text-ink mt-1.5 mb-0">{title}</p>
+                  <p className="text-xs text-body mt-0.5 mb-0">{hint}</p>
                 </div>
               </div>
             ))}
@@ -440,18 +475,18 @@ export default function CrawlSchedulesPage() {
 
         {/* Create / edit form */}
         {showForm && (
-          <form
-            onSubmit={handleSubmit}
-            className="bg-white border border-teal/20 rounded-2xl p-5 space-y-4"
-          >
-            <p className="font-heading font-semibold text-sm text-ink">
-              {editingId ? 'Edit Crawl Schedule' : 'New Crawl Schedule'}
-            </p>
-            <div className="flex gap-3 flex-wrap">
-              <div className="flex-1 min-w-[200px]">
-                <label className="block text-xs font-semibold text-body mb-1">
-                  Root URL
-                </label>
+          <form onSubmit={handleSubmit} className="card p-6 space-y-5 !border-teal/30">
+            <div>
+              <h2 className="font-heading font-semibold text-base text-ink m-0">
+                {editingId ? 'Edit schedule' : 'New schedule'}
+              </h2>
+              <p className="text-xs text-body mt-1 mb-0">
+                {editingId ? 'Change when this site is checked.' : 'Pick a site and how often it should be checked.'}
+              </p>
+            </div>
+            <div className="flex gap-4 flex-wrap">
+              <div className="flex-1 min-w-[220px]">
+                <label className="block text-xs font-semibold text-ink mb-1.5">Website to crawl</label>
                 <GlowInput
                   type="url"
                   placeholder="https://example.com"
@@ -461,69 +496,64 @@ export default function CrawlSchedulesPage() {
                   required
                 />
               </div>
-              <div className="flex-1 min-w-[160px]">
-                <label className="block text-xs font-semibold text-body mb-1">
-                  Name <span className="font-normal text-gray-400">(optional)</span>
+              <div className="flex-1 min-w-[180px]">
+                <label className="block text-xs font-semibold text-ink mb-1.5">
+                  Name <span className="font-normal text-body">(optional)</span>
                 </label>
                 <GlowInput
                   type="text"
-                  placeholder="e.g. Homepage — weekly"
+                  placeholder="e.g. Marketing site — weekly"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   maxLength={120}
                 />
               </div>
             </div>
+
             <div>
-              <label className="block text-xs font-semibold text-body mb-1">
-                Schedule Type
-              </label>
-              <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 gap-1">
-                {[['simple', 'Simple Time'], ['cron', 'Cron Expression']].map(([val, label]) => (
+              <label className="block text-xs font-semibold text-ink mb-1.5">How often?</label>
+              <div role="tablist" aria-label="Schedule type" className="inline-flex rounded-lg border border-solid border-gray-200 bg-gray-50 p-1 gap-1 mb-3">
+                {[['simple', 'Simple'], ['cron', 'Advanced (cron)']].map(([val, label]) => (
                   <button
                     key={val}
                     type="button"
+                    role="tab"
+                    aria-selected={newScheduleType === val}
                     onClick={() => setNewScheduleType(val)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                      newScheduleType === val ? 'bg-white text-teal shadow-sm' : 'text-body hover:text-ink'
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold border-0 cursor-pointer transition-colors ${
+                      newScheduleType === val ? 'bg-white text-teal shadow-sm' : 'bg-transparent text-body hover:text-ink'
                     }`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-            </div>
 
-            {newScheduleType === 'simple' ? (
-              <div className="flex gap-3 flex-wrap">
-                <div>
-                  <label className="block text-xs font-semibold text-body mb-1">
-                    Frequency
-                  </label>
-                  <select
-                    className="select-base h-10 text-sm"
-                    value={newFreq}
-                    onChange={(e) => setNewFreq(e.target.value)}
-                  >
+              {newScheduleType === 'simple' ? (
+                <div className="flex gap-4 flex-wrap items-end">
+                  <div className="flex gap-2 flex-wrap">
                     {FREQ_OPTIONS.map((f) => (
-                      <option key={f} value={f}>{FREQ_LABELS[f]}</option>
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setNewFreq(f)}
+                        aria-pressed={newFreq === f}
+                        className={`px-4 py-2 rounded-lg text-sm font-semibold border border-solid cursor-pointer transition-colors ${
+                          newFreq === f ? 'bg-teal text-white border-teal' : 'bg-white text-body border-gray-200 hover:border-teal/50'
+                        }`}
+                      >
+                        {FREQ_LABELS[f]}
+                      </button>
                     ))}
-                  </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-ink mb-1.5">
+                      {newFreq === 'hourly' ? 'At minute' : 'Time of day'} <span className="font-normal text-body">(optional)</span>
+                    </label>
+                    <input type="time" className="input-base h-10 text-sm" value={newTime} onChange={(e) => setNewTime(e.target.value)} />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-body mb-1">
-                    {newFreq === 'hourly' ? 'Run at minute' : 'Time of day'} <span className="font-normal text-gray-400">(optional)</span>
-                  </label>
-                  <input
-                    type="time"
-                    className="input-base h-10 text-sm"
-                    value={newTime}
-                    onChange={(e) => setNewTime(e.target.value)}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
+              ) : (
                 <div className="flex gap-3 flex-wrap items-end">
                   {[
                     ['Minute', cronMin, setCronMin],
@@ -533,7 +563,7 @@ export default function CrawlSchedulesPage() {
                     ['Weekday', cronDow, setCronDow],
                   ].map(([label, val, setVal]) => (
                     <div key={label} className="w-20">
-                      <label className="block text-xs font-semibold text-body mb-1">{label}</label>
+                      <label className="block text-xs font-semibold text-ink mb-1.5">{label}</label>
                       <input
                         type="text"
                         className="input-base h-10 text-sm text-center font-mono"
@@ -543,41 +573,29 @@ export default function CrawlSchedulesPage() {
                     </div>
                   ))}
                 </div>
-                <p className="text-[11px] text-body">
-                  {cronToEnglish(`${cronMin} ${cronHour} ${cronDom} ${cronMonth} ${cronDow}`)} — times are UTC.
-                </p>
-              </div>
-            )}
-            {newScheduleType === 'simple' && newFreq === 'hourly' && (
-              <p className="text-[11px] text-body -mt-2">
-                {newTime ? `Runs every hour, at minute ${newTime.split(':')[1]}.` : 'Runs once every hour from whenever this schedule is created.'}
+              )}
+
+              <p className="mt-3 mb-0 inline-flex items-center gap-2 text-sm text-teal-800 bg-teal/10 rounded-lg px-3 py-2">
+                <Clock size={14} className="flex-shrink-0" />
+                {newScheduleType === 'cron'
+                  ? `${cronToEnglish(`${cronMin} ${cronHour} ${cronDom} ${cronMonth} ${cronDow}`)} (times are UTC)`
+                  : describeSchedule({ schedule_type: 'simple', frequency: newFreq, time_of_day: newTime ? localTimeToUtc(newTime) : null })}
               </p>
-            )}
-            {createError && (
-              <p className="text-xs text-coral">{createError}</p>
-            )}
+            </div>
+
+            {createError && <p role="alert" className="text-sm text-coral-700 m-0">{createError}</p>}
             <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={creating}
-                className="btn-primary flex items-center gap-2 text-sm py-2 px-4"
-              >
-                {creating ? <RefreshCw size={14} className="animate-spin" /> : <CalendarClock size={14} />}
-                {creating ? 'Saving…' : editingId ? 'Save Changes' : 'Create schedule'}
+              <button type="submit" disabled={creating} className="btn-primary flex items-center gap-2 text-sm py-2 px-4">
+                {creating ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                {creating ? 'Saving…' : editingId ? 'Save changes' : 'Create schedule'}
               </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="btn-secondary text-sm py-2 px-4"
-              >
-                Cancel
-              </button>
+              <button type="button" onClick={resetForm} className="btn-secondary text-sm py-2 px-4">Cancel</button>
             </div>
           </form>
         )}
 
         {actionError && (
-          <p className="text-sm text-coral bg-coral/10 px-4 py-3 rounded-xl border border-coral/30">
+          <p role="alert" className="text-sm text-coral-700 bg-coral/10 px-4 py-3 rounded-xl border border-solid border-coral/30 m-0">
             {actionError}
           </p>
         )}
@@ -586,26 +604,18 @@ export default function CrawlSchedulesPage() {
         {!loading && available && items.length > 0 && (
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex-1 min-w-[220px] max-w-xs">
-              <GlowInput
-                icon={Search}
-                type="text"
-                placeholder="Search by name or URL…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+              <GlowInput icon={Search} type="text" placeholder="Search by name or URL…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {STATUS_FILTERS.map((f) => (
                 <button
                   key={f}
                   onClick={() => setStatusFilter(f)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${
-                    statusFilter === f
-                      ? 'bg-teal text-white'
-                      :'bg-white border border-gray-200 text-body hover:text-ink'
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold capitalize border border-solid cursor-pointer transition-colors ${
+                    statusFilter === f ? 'bg-teal text-white border-teal' : 'bg-white border-gray-200 text-body hover:text-ink'
                   }`}
                 >
-                  {f}
+                  {f} · {filterCounts[f]}
                 </button>
               ))}
             </div>
@@ -614,220 +624,154 @@ export default function CrawlSchedulesPage() {
 
         {/* States */}
         {loading && (
-          <div className="space-y-3">
-            {[1, 2].map((i) => (
-              <div key={i} className="h-16 bg-gray-200 rounded-xl animate-pulse"/>
-            ))}
+          <div className="space-y-3" role="status" aria-label="Loading schedules">
+            {[1, 2].map((i) => <div key={i} className="h-28 bg-gray-100 rounded-2xl animate-pulse" />)}
           </div>
         )}
 
         {error && (
-          <p className="text-sm text-coral bg-coral/10 px-4 py-3 rounded-xl border border-coral/30">
-            {error}
-          </p>
+          <p role="alert" className="text-sm text-coral-700 bg-coral/10 px-4 py-3 rounded-xl border border-solid border-coral/30 m-0">{error}</p>
         )}
 
         {!loading && !error && !available && (
-          <p className="text-sm text-body bg-teal/10 px-4 py-3 rounded-xl border border-teal">
+          <p className="text-sm text-body bg-teal/10 px-4 py-3 rounded-xl border border-solid border-teal/30 m-0">
             Database not configured — schedules require MSSQL to persist.
           </p>
         )}
 
         {!loading && !error && available && items.length === 0 && !showForm && (
-          <div className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center flex flex-col items-center gap-3 mt-8">
-            <div className="w-16 h-16 rounded-2xl bg-teal/10 flex items-center justify-center">
-              <CalendarClock className="w-8 h-8 text-teal" />
+          <div className="card p-10 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-teal/10 flex items-center justify-center mx-auto mb-4">
+              <CalendarClock className="w-7 h-7 text-teal" />
             </div>
-            <p className="font-heading font-bold text-xl text-ink">No additional schedules yet</p>
-            <p className="text-sm text-body max-w-xs leading-relaxed">
-              Create a schedule to keep your sites monitored automatically.
+            <h2 className="font-heading font-semibold text-lg text-ink m-0">No schedules yet</h2>
+            <p className="text-sm text-body mt-1 mb-5 max-w-sm mx-auto">
+              Set up a schedule and we&apos;ll crawl your site for accessibility issues automatically, then alert you to changes.
             </p>
-            <button
-              onClick={openCreateForm}
-              className="btn-primary flex items-center gap-2 mt-1"
-            >
-              <CalendarClock className="w-4 h-4" />
-              Create schedule
+            <button onClick={openCreateForm} className="btn-primary">
+              <Plus className="w-4 h-4" /> Create your first schedule
             </button>
           </div>
         )}
 
         {!loading && !error && items.length > 0 && filteredItems.length === 0 && (
-          <p className="text-sm text-body text-center py-10">
-            No schedules match your search or filter.
-          </p>
+          <p className="text-sm text-body text-center py-10 m-0">No schedules match your search or filter.</p>
         )}
 
+        {/* Schedule cards */}
         {!loading && !error && filteredItems.length > 0 && (
-          <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="table-base">
-                <thead>
-                  <tr>
-                    {['Schedule', 'URL', 'Frequency', 'Next Run', 'Last Result', 'Status', 'Run Now', 'Actions'].map((h, i) => (
-                      <th key={i} scope="col" className="whitespace-nowrap">
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredItems.map((item) => {
-                    const isExpanded = expandedId === item.id;
-                    const isRunning = item.status === 'running';
-                    return (
-                      <Fragment key={item.id}>
-                        <tr
-                          className={`border-b border-gray-100 last:border-b-0 transition-colors ${
-                            item.enabled ? '' : 'opacity-60'
-                          }`}
+          <ul className="space-y-3 list-none p-0 m-0">
+            {filteredItems.map((item) => {
+              const isExpanded = expandedId === item.id;
+              const isRunning = item.status === 'running';
+              const label = item.name || domainOf(item.root_url);
+              const failed = item.last_run_status === 'failed' || item.last_run_status === 'cancelled';
+              return (
+                <li key={item.id} className={`card overflow-hidden ${item.enabled ? '' : 'opacity-75'}`}>
+                  <div className="p-5 flex flex-wrap items-start gap-x-6 gap-y-4">
+                    <div className="flex items-start gap-4 flex-1 min-w-[260px]">
+                      <span className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${isRunning ? 'bg-brand-blue/10 text-brand-blue-700' : failed ? 'bg-coral/10 text-coral-700' : 'bg-teal/10 text-teal'}`}>
+                        {isRunning ? <Radio size={20} className="animate-pulse" /> : failed ? <AlertTriangle size={20} /> : <CalendarClock size={20} />}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-heading font-semibold text-ink text-base m-0 truncate max-w-[280px]" title={label}>{label}</h3>
+                          <ScheduleStatusBadge status={item.status} />
+                        </div>
+                        <a href={item.root_url} target="_blank" rel="noreferrer" title={item.root_url}
+                          className="mt-0.5 inline-flex items-center gap-1 text-xs text-teal hover:underline max-w-full">
+                          <span className="truncate">{item.root_url}</span>
+                          <ExternalLink size={11} className="flex-shrink-0" aria-label="opens in new tab" />
+                        </a>
+                        <p className="mt-2 mb-0 text-sm text-ink inline-flex items-center gap-1.5">
+                          <Clock size={13} className="text-body flex-shrink-0" /> {describeSchedule(item)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <dl className="flex gap-8 m-0 text-sm">
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-body">Next run</dt>
+                        <dd className="m-0 mt-1">
+                          {item.enabled && item.next_run_at ? (
+                            <>
+                              <span className="block font-semibold text-ink">in {timeUntil(item.next_run_at, nowTick)}</span>
+                              <span className="block text-xs text-body">{formatDate(item.next_run_at)}</span>
+                            </>
+                          ) : <span className="text-body">Paused</span>}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-body">Last result</dt>
+                        <dd className="m-0 mt-1">
+                          {item.last_run_status ? (
+                            <>
+                              <StatusBadge status={RUN_STATUS_BADGE[item.last_run_status] || item.last_run_status} />
+                              <span className="block text-xs text-body mt-1">{formatDate(item.last_run_at)}</span>
+                            </>
+                          ) : <span className="text-body">Not run yet</span>}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="flex items-center gap-2 ml-auto">
+                      {isRunning ? (
+                        <button
+                          onClick={() => handleStop(item)}
+                          disabled={stoppingId === item.id}
+                          aria-label={`Stop the running crawl for ${label}`}
+                          className="btn-secondary !py-2 text-sm"
                         >
-                          <td className="align-middle py-3 px-4 max-w-[220px]">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <button
-                                onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                                className="p-1 rounded text-body hover:text-teal focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40 flex-shrink-0"
-                                aria-label={isExpanded ? `Hide run history for ${item.name || item.root_url}` : `Show run history for ${item.name || item.root_url}`}
-                                aria-expanded={isExpanded}
-                                title="Toggle run history"
-                              >
-                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                              </button>
-                              <CalendarClock size={13} className="text-body flex-shrink-0" />
-                              {item.name ? (
-                                <span className="block truncate text-sm font-semibold text-ink" title={item.name}>
-                                  {item.name}
-                                </span>
-                              ) : (
-                                <span className="text-sm text-body">—</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="align-middle py-3 px-4 max-w-[200px]">
-                            <span className="flex items-center gap-1 min-w-0" title={item.root_url}>
-                              <span className="truncate min-w-0 flex-1 text-teal text-xs font-medium">{item.root_url}</span>
-                              <ExternalLink size={11} className="flex-shrink-0 text-teal" />
-                            </span>
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap">
-                            {item.schedule_type === 'cron' ? (
-                              <span
-                                className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold bg-violet-50 text-violet-600 font-mono"
-                                title={cronToEnglish(item.cron_expression)}
-                              >
-                                {item.cron_expression}
-                              </span>
-                            ) : (
-                              <FrequencyBadge freq={item.frequency} />
-                            )}
-                            {item.schedule_type !== 'cron' && item.time_of_day && (
-                              <span className="block text-[10px] text-body mt-1">at {utcTimeToLocal(item.time_of_day)}</span>
-                            )}
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap text-xs">
-                            {item.enabled ? (
-                              <>
-                                <span className="block font-semibold text-ink">{timeUntil(item.next_run_at, nowTick)}</span>
-                                <span className="block text-[10px] text-body">{formatDate(item.next_run_at)}</span>
-                              </>
-                            ) : '—'}
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap">
-                            {item.last_run_status ? (
-                              <>
-                                <StatusBadge status={RUN_STATUS_BADGE[item.last_run_status] || item.last_run_status} />
-                                <span className="block text-[10px] text-body mt-1">{formatDate(item.last_run_at)}</span>
-                              </>
-                            ) : (
-                              <span className="text-xs text-body">Not run yet</span>
-                            )}
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap">
-                            <ScheduleStatusBadge status={item.status} />
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap">
-                            {isRunning ? (
-                              <button
-                                title="Stop this run"
-                                aria-label={`Stop the running crawl for ${item.name || item.root_url}`}
-                                onClick={() => handleStop(item)}
-                                disabled={stoppingId === item.id}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-amber hover:bg-amber/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber/40"
-                              >
-                                {stoppingId === item.id
-                                  ? <RefreshCw size={16} className="animate-spin" />
-                                  : <Square size={16} />}
-                              </button>
-                            ) : (
-                              <button
-                                title="Run now"
-                                aria-label={`Run ${item.name || item.root_url} now`}
-                                onClick={() => handleRunNow(item)}
-                                disabled={runningId === item.id}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-                              >
-                                {runningId === item.id
-                                  ? <RefreshCw size={16} className="animate-spin" />
-                                  : <Play size={16} />}
-                              </button>
-                            )}
-                          </td>
-                          <td className="align-middle py-3 px-4 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                title={item.enabled ? 'Pause schedule' : 'Resume schedule'}
-                                aria-label={`${item.enabled ? 'Pause' : 'Resume'} ${item.name || item.root_url}`}
-                                onClick={() => handleToggle(item)}
-                                disabled={togglingId === item.id}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-                              >
-                                {togglingId === item.id
-                                  ? <RefreshCw size={16} className="animate-spin" />
-                                  : item.enabled
-                                  ? <ToggleRight size={16} />
-                                  : <ToggleLeft size={16} />
-                                }
-                              </button>
-                              <button
-                                title="Edit schedule"
-                                aria-label={`Edit ${item.name || item.root_url}`}
-                                onClick={() => openEditForm(item)}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-teal hover:bg-teal/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-teal/40"
-                              >
-                                <Pencil size={16} />
-                              </button>
-                              <button
-                                title="Delete schedule"
-                                aria-label={`Delete ${item.name || item.root_url}`}
-                                onClick={() => handleDelete(item.id)}
-                                disabled={deletingId === item.id}
-                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-body hover:text-coral hover:bg-coral/10 transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-coral/40"
-                              >
-                                {deletingId === item.id
-                                  ? <RefreshCw size={16} className="animate-spin" />
-                                  : <Trash2 size={16} />
-                                }
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        {isExpanded && <RunHistoryRow scheduleId={item.id} />}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                          {stoppingId === item.id ? <RefreshCw size={14} className="animate-spin" /> : <Square size={14} />} Stop
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleRunNow(item)}
+                          disabled={runningId === item.id}
+                          aria-label={`Run ${label} now`}
+                          className="btn-secondary !py-2 text-sm !text-teal"
+                        >
+                          {runningId === item.id ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Run now
+                        </button>
+                      )}
+                      <Switch
+                        checked={!!item.enabled}
+                        onChange={() => handleToggle(item)}
+                        disabled={togglingId === item.id}
+                        label={`${item.enabled ? 'Pause' : 'Resume'} ${label}`}
+                      />
+                      <button title="Edit schedule" aria-label={`Edit ${label}`} onClick={() => openEditForm(item)} className={`${ICON_BTN} hover:text-teal hover:bg-teal/10`}>
+                        <Pencil size={16} />
+                      </button>
+                      <button title="Delete schedule" aria-label={`Delete ${label}`} onClick={() => handleDelete(item.id)} disabled={deletingId === item.id} className={`${ICON_BTN} hover:text-coral hover:bg-coral/10`}>
+                        {deletingId === item.id ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                    aria-expanded={isExpanded}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-body hover:text-teal bg-gray-50/70 border-0 border-t border-solid border-gray-100 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal/40"
+                  >
+                    <History size={13} /> {isExpanded ? 'Hide recent runs' : 'Show recent runs'}
+                    <ChevronDown size={14} className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isExpanded && <RunHistoryRow scheduleId={item.id} />}
+                </li>
+              );
+            })}
+          </ul>
         )}
 
-        {/* Info box */}
-        <div className="text-xs text-body bg-gray-50 rounded-xl p-4 space-y-1">
-          <p className="font-semibold text-ink">How scheduling works</p>
-          <p>The scheduler checks every minute for due schedules, firing at the optional time of day you set.</p>
-          <p>If a crawl for the same URL is already running, the scheduled trigger is skipped and the next run time advances.</p>
-          <p>"Run Now" starts an immediate crawl without changing the schedule's next automatic run.</p>
-        </div>
+        <details className="card p-4 text-sm">
+          <summary className="cursor-pointer font-semibold text-ink">How scheduling works</summary>
+          <ul className="mt-3 mb-0 space-y-1.5 text-body text-xs pl-4">
+            <li>The scheduler checks every minute for due schedules and starts them at the time you set.</li>
+            <li>If a crawl for the same site is already running, that trigger is skipped and the next run is rescheduled.</li>
+            <li>&ldquo;Run now&rdquo; starts a crawl immediately without changing the next automatic run.</li>
+          </ul>
+        </details>
 
       </div>
     </main>

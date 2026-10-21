@@ -18,7 +18,7 @@
     @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-teal text-white font-semibold font-heading text-sm hover:bg-teal-800 transition-colors duration-200 cursor-pointer border-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-teal;
   }
   .btn-secondary {
-    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-gray-50 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white;
+    @apply inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-solid border-gray-200 bg-white text-ink font-semibold font-heading text-sm hover:bg-gray-50 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white;
   }
   .btn-ghost {
     @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-body font-medium text-sm hover:bg-gray-100 transition-colors duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent;

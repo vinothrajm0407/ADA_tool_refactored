@@ -153,3 +153,46 @@
 @keyframes lf4 { 0% { left: 200%; } 100% { left: -100%; opacity: 0; } }
 
 
+
+/* ── Premium scan loader: wireframe page with a sweeping scan line ──────── */
+.scan-page {
+  position: relative;
+  width: 220px;
+  height: 150px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.scan-page .bar { height: 8px; border-radius: 4px; background: #eef1f4; }
+.scan-page .bar.dark { background: #dde3e8; height: 12px; width: 55%; }
+.scan-page .row { display: flex; gap: 8px; }
+.scan-page .block { flex: 1; height: 44px; border-radius: 8px; background: #eef1f4; }
+.scan-page .flag {
+  position: absolute; width: 10px; height: 10px; border-radius: 50%;
+  background: #dc2626; box-shadow: 0 0 0 0 rgba(220, 38, 38, .5);
+  opacity: 0; animation: scan-flag 2.4s ease-in-out infinite;
+}
+.scan-page::after {
+  content: '';
+  position: absolute; left: 0; right: 0; top: 0; height: 46px;
+  background: linear-gradient(to bottom, rgba(26,122,106,0) 0%, rgba(26,122,106,.22) 85%, rgba(26,122,106,.9) 100%);
+  animation: scan-sweep 2.4s ease-in-out infinite;
+}
+@keyframes scan-sweep {
+  0%   { transform: translateY(-50px); }
+  100% { transform: translateY(160px); }
+}
+@keyframes scan-flag {
+  0%, 35%  { opacity: 0; transform: scale(.4); }
+  50%      { opacity: 1; transform: scale(1); box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+  100%     { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-page::after, .scan-page .flag { animation: none; }
+}

@@ -33,6 +33,7 @@ export default function CrawlForm({
   crawlError,
   onStartCrawl,
   hideUrlField,
+  hideActions,
 }) {
   return (
     <>
@@ -100,10 +101,10 @@ export default function CrawlForm({
           </div>
         )}
 
-        <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white">
           <div className="flex-1 min-w-0">
-            <p id="full-site-label"className="text-sm font-semibold text-ink">Full Site Crawl</p>
-            <p className="text-sm text-body mt-1 leading-relaxed">
+            <p id="full-site-label" className="text-sm font-semibold text-ink m-0">Full Site Crawl</p>
+            <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
               No page limit — crawls the entire site (up to 10,000 pages).
             </p>
           </div>
@@ -147,6 +148,7 @@ export default function CrawlForm({
         </Field>
       </section>
 
+      {!hideActions && (<>
       <Divider />
 
       <div className="pt-5">
@@ -167,6 +169,7 @@ export default function CrawlForm({
           }
         </button>
       </div>
+      </>)}
     </>
   );
 }

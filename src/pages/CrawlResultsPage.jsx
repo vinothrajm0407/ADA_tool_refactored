@@ -13,16 +13,10 @@ import {
   ChevronLeft,
   OctagonX,
   Share2,
+  Loader2,
+  Printer,
 } from 'lucide-react';
 import SendReportModal from '../components/integrations/SendReportModal';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts';
 import { useApp } from '../context/AppContext';
 import { StatusBadge } from '../components/ui/StatusBadge';
 import MetricCard from '../components/ui/MetricCard';
@@ -32,30 +26,36 @@ import CrawlIntelPanel from '../components/crawl/CrawlIntelPanel';
 import CrawlRegressionPanel from '../components/crawl/CrawlRegressionPanel';
 import CrawlAISummaryPanel from '../components/crawl/CrawlAISummaryPanel';
 import PageTrendsPanel from '../components/crawl/PageTrendsPanel';
-import { Printer } from 'lucide-react';
+import ScoreRing from '../components/ui/ScoreRing';
 
 
-// ---------------------------------------------------------------------------
-// Crawl status indicator — animated loader (running) / static shapes (done)
-// ---------------------------------------------------------------------------
-function CrawlStatusIndicator({ isActive, isComplete }) {
-  const base = isComplete ? 'crawl-loader crawl-loader-done' : 'crawl-loader';
-  const tri  = isComplete ? 'crawl-loader crawl-loader-tri crawl-loader-done' : 'crawl-loader crawl-loader-tri';
+const HERO_BTN = 'inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-semibold border border-solid border-white/20 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60';
+
+const FILTERS = [
+  { id: 'all',    label: 'All' },
+  { id: 'issues', label: 'With issues' },
+  { id: 'passed', label: 'Passed' },
+  { id: 'failed', label: 'Failed to scan' },
+];
+
+function verdictFor(score) {
+  return score >= 80 ? { label: 'Good', text: 'Most pages pass. Keep an eye on new pages.' }
+    : score >= 60 ? { label: 'Fair', text: 'Some pages have real barriers — start with the worst ones.' }
+    : { label: 'Needs work', text: 'Many pages fail. Start with the pages listed under "Fix these first".' };
+}
+
+function StatTile({ value, label }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center">
-        <div className={base}>
-          <svg viewBox="0 0 80 80"><circle r="32" cy="40" cx="40" /></svg>
-        </div>
-        <div className={tri}>
-          <svg viewBox="0 0 86 80"><polygon points="43 8 79 72 7 72" /></svg>
-        </div>
-        <div className={base}>
-          <svg viewBox="0 0 80 80"><rect height="64" width="64" y="8" x="8" /></svg>
-        </div>
-      </div>
+    <div className="rounded-xl bg-white px-4 py-4 text-center shadow-sm">
+      <p className="font-heading font-bold text-3xl leading-none m-0 tabular-nums text-ink">{value}</p>
+      <p className="text-xs text-body mt-1.5 mb-0 font-medium">{label}</p>
     </div>
   );
+}
+
+function pathOf(url = '') {
+  try { const u = new URL(url); return { host: u.hostname, path: (u.pathname + u.search) || '/' }; }
+  catch { return { host: '', path: url }; }
 }
 
 // ---------------------------------------------------------------------------
@@ -233,8 +233,8 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [sortKey, setSortKey] = useState('url');
-  const [sortDir, setSortDir] = useState('asc');
+  const [sortKey, setSortKey] = useState('violations');
+  const [sortDir, setSortDir] = useState('desc');
   const [reCrawlLoading, setReCrawlLoading] = useState(false);
   const [stopLoading, setStopLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -398,7 +398,8 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         !searchQuery || (p.url && p.url.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchStatus =
         statusFilter === 'all' ||
-        (statusFilter === 'scanned' && p._status !== 'Failed') ||
+        (statusFilter === 'issues' && p._violations > 0) ||
+        (statusFilter === 'passed' && p._violations === 0 && p._status !== 'Failed') ||
         (statusFilter === 'failed' && p._status === 'Failed');
       return matchSearch && matchStatus;
     })
@@ -424,6 +425,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   const failingPages  = enrichedPages.filter((p) => p._violations > 0).length;
   const passingPages  = enrichedPages.filter((p) => p._violations === 0 && p._status !== 'Failed').length;
   const errorPages    = enrichedPages.filter((p) => p._status === 'Failed').length;
+  const filterCounts = { all: totalPages, issues: failingPages, passed: passingPages, failed: errorPages };
   const statusPieData = [
     passingPages > 0 && { name: 'Passing',    value: passingPages, color: '#6BA368' },
     failingPages > 0 && { name: 'Has Issues', value: failingPages, color: '#E76F51' },
@@ -436,7 +438,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     .sort((a, b) => b._violations - a._violations)
     .slice(0, 10)
     .map((p) => ({
-      name: (p.url || '').replace(/^https?:\/\/[^/]+/, '').slice(0, 35) || '/',
+      name: (p.url || '').replace(/^https?:\/\/[^/]+/, '') || '/',
       violations: p._violations,
       url: p.url,
       _score: p._score,
@@ -492,166 +494,114 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     <>
       <div className="flex-1 overflow-auto bg-ivory p-6 space-y-6">
 
-        {/* 1. HEADER */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={goToCrawlHistory}
-              className="inline-flex items-center gap-1 text-sm text-body hover:text-teal transition-colors"
-            >
-              <ChevronLeft size={15} />
-              History
-            </button>
-            <h2 className="font-heading font-bold text-2xl text-ink">
-              Crawl Results
-            </h2>
-            {job?.status && (isActive || isComplete
-              ? <CrawlStatusIndicator isActive={isActive} isComplete={isComplete} />
-              : <StatusBadge status={normaliseStatus(job.status)} />
-            )}
-          </div>
+        {/* BACK LINK */}
+        <button onClick={goToCrawlHistory} className="inline-flex items-center gap-1 text-sm text-body hover:text-teal transition-colors -mb-2">
+          <ChevronLeft size={15} /> Crawl history
+        </button>
 
-          <div className="flex items-center gap-3 flex-wrap">
-            {jobUrl && (
-              <code className="text-xs font-mono bg-white border border-gray-200 px-3 py-1.5 rounded-2xl text-body max-w-xs truncate">
-                {jobUrl}
-              </code>
-            )}
+        {/* HERO: where the crawl stands */}
+        <section aria-label="Crawl summary" className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-teal-900 via-teal-800 to-teal text-white p-6 lg:p-8 shadow-glow">
+          <div aria-hidden="true" className="absolute -top-24 -right-16 w-80 h-80 rounded-full bg-white/10 blur-3xl" />
+          <div className="relative">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-white/15 rounded-full px-3 py-1">
+                  {isActive ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Crawling…</>
+                    : isComplete ? <><CheckCircle className="w-3.5 h-3.5" /> Crawl complete</>
+                    : <><AlertTriangle className="w-3.5 h-3.5" /> Crawl {job?.status ?? 'ended'}</>}
+                </span>
+                {jobUrl && (
+                  <a href={jobUrl} target="_blank" rel="noreferrer" className="block mt-3 text-base lg:text-lg font-heading font-semibold text-white hover:underline break-all max-w-2xl">
+                    {jobUrl}
+                  </a>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {isActive && (
+                  <button onClick={handleStop} disabled={stopLoading} title="Stop this crawl — pages already scanned will be saved" className={HERO_BTN}>
+                    <OctagonX size={14} /> {stopLoading ? 'Stopping…' : 'Stop crawl'}
+                  </button>
+                )}
+                {isComplete && (
+                  <button onClick={() => { setCrawlId(crawlId); navigate('executive-summary'); }} title="Open printable executive summary" className={HERO_BTN}>
+                    <Printer size={14} /> Executive report
+                  </button>
+                )}
+                {isComplete && (
+                  <button onClick={() => setShowShareModal(true)} title="Send report to Slack or Teams" className={HERO_BTN}>
+                    <Share2 size={14} /> Share
+                  </button>
+                )}
+                {job?.root_url && !isActive && (
+                  <button onClick={handleReCrawl} disabled={reCrawlLoading} title="Start a new crawl of this site" className={HERO_BTN}>
+                    <RefreshCw size={14} className={reCrawlLoading ? 'animate-spin' : ''} /> {reCrawlLoading ? 'Starting…' : 'Re-crawl'}
+                  </button>
+                )}
+              </div>
+            </div>
+
             {isActive && (
-              <button
-                onClick={handleStop}
-                disabled={stopLoading}
-                title="Stop this crawl — pages already scanned will be saved"
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-coral/30 bg-coral/5 text-coral font-semibold font-heading text-sm hover:bg-coral/10 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <OctagonX size={14} />
-                {stopLoading ? 'Stopping…' : 'Stop Crawl'}
-              </button>
+              <div className="mt-6 bg-white/10 rounded-xl p-4">
+                <div className="flex items-center justify-between text-sm font-semibold">
+                  <span>Crawl in progress</span><span className="tabular-nums">{progressPct}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-white/20 overflow-hidden mt-2" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="h-full rounded-full bg-white transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                </div>
+                <p className="text-xs text-white/80 mt-2 mb-0">
+                  Discovered {job?.total_discovered ?? 0} · Scanned {job?.total_scanned ?? 0} · Failed {job?.total_failed ?? 0}. Results below update as pages finish.
+                </p>
+              </div>
             )}
-            {isComplete && (
-              <button
-                onClick={() => { setCrawlId(crawlId); navigate('executive-summary'); }}
-                className="btn-secondary flex items-center gap-2 text-sm"
-                title="Open printable executive summary"
-              >
-                <Printer size={14} />
-                Executive Report
-              </button>
-            )}
-            {isComplete && (
-              <button
-                onClick={() => setShowShareModal(true)}
-                className="btn-secondary flex items-center gap-2 text-sm"
-                title="Send report to Slack or Teams"
-              >
-                <Share2 size={14} />
-                Share to Channel
-              </button>
-            )}
-            {job?.root_url && !isActive && (
-              <button
-                onClick={handleReCrawl}
-                disabled={reCrawlLoading}
-                className="btn-secondary flex items-center gap-2 text-sm"
-                title="Start a new crawl of this site"
-              >
-                <RefreshCw size={14} className={reCrawlLoading ? 'animate-spin' : ''} />
-                {reCrawlLoading ? 'Starting…' : 'Re-Crawl'}
-              </button>
+
+            {totalPages > 0 && (
+              <div className="mt-7 grid lg:grid-cols-[auto_1fr] gap-8 items-center">
+                <div className="flex items-center gap-5">
+                  <ScoreRing value={avgScore} />
+                  <div className="min-w-0 max-w-[220px]">
+                    <p className="font-heading text-xl font-bold m-0">{verdictFor(avgScore).label}</p>
+                    <p className="text-sm text-white/80 mt-1 mb-0 leading-snug">{verdictFor(avgScore).text}</p>
+                    <p className="text-[11px] text-white/60 mt-2 mb-0">Average score across all pages</p>
+                  </div>
+                </div>
+                <div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <StatTile value={job?.max_pages && job.max_pages <= 500 ? `${totalPages}/${job.max_pages}` : totalPages} label="Pages scanned" />
+                    <StatTile value={totalViolations} label="Total violations" />
+                    <StatTile value={failingPages} label="Pages with issues" />
+                    <StatTile value={`${passRate}%`} label="Pages passing" />
+                  </div>
+                  <div className="mt-4">
+                    <div className="flex h-2.5 rounded-full overflow-hidden bg-white/15" role="img"
+                      aria-label={`${passingPages} passing, ${failingPages} with issues, ${errorPages} failed to scan`}>
+                      {passingPages > 0 && <div style={{ width: `${(passingPages / totalPages) * 100}%`, background: '#6ee7b7' }} />}
+                      {failingPages > 0 && <div style={{ width: `${(failingPages / totalPages) * 100}%`, background: '#fca5a5' }} />}
+                      {errorPages > 0 && <div style={{ width: `${(errorPages / totalPages) * 100}%`, background: '#d1d5db' }} />}
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5 text-xs text-white/90">
+                      <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: '#6ee7b7' }} />Passing <strong className="font-semibold">{passingPages}</strong></span>
+                      <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: '#fca5a5' }} />With issues <strong className="font-semibold">{failingPages}</strong></span>
+                      {errorPages > 0 && <span className="inline-flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: '#d1d5db' }} />Failed to scan <strong className="font-semibold">{errorPages}</strong></span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* 2. METRIC CARDS */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <MetricCard title="Total Pages"      value={job?.max_pages && job.max_pages <= 500 ? `${totalPages}/${job.max_pages}` : totalPages}          icon={Globe}         color="teal" />
-          <MetricCard title="Total Violations" value={totalViolations}     icon={AlertTriangle} color="coral" />
-          <MetricCard
-            title="Avg Score"
-            value={avgScore}
-            icon={BarChart2}
-            color={avgScore >= 80 ? 'sage' : avgScore >= 60 ? 'amber' : 'coral'}
-          />
-          <MetricCard title="Pass Rate" value={`${passRate}%`} icon={CheckCircle} color="sage" />
-        </div>
-
-        {/* 3. PROGRESS (running/pending only) */}
-        {isActive && (
-          <div className="card p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-heading font-bold text-ink">Crawl in Progress</h3>
-              <span className="text-sm text-body">{progressPct}%</span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-gray-200 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-teal transition-all duration-500"
-                style={{ width: `${progressPct}%` }}
-              />
-            </div>
-            <div className="flex gap-6 flex-wrap text-sm">
-              <div>
-                <span className="text-body">Discovered </span>
-                <span className="font-semibold text-ink">{job?.total_discovered ?? 0}</span>
-              </div>
-              <div>
-                <span className="text-body">Scanned </span>
-                <span className="font-semibold text-teal">{job?.total_scanned ?? 0}</span>
-              </div>
-              <div>
-                <span className="text-body">Failed </span>
-                <span className="font-semibold text-coral">{job?.total_failed ?? 0}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 4. CHARTS ROW */}
-        <div className="grid lg:grid-cols-2 gap-6">
+        {/* FIX THESE FIRST */}
+        {topViolationPages.length > 0 && (
           <ChartCard
-            title="Pages: Passing vs Has Issues"
-            subtitle="Pages with 0 violations vs pages with at least one violation"
-          >
-            {statusPieData.length === 0 ? (
-              <div className="flex items-center justify-center h-48 text-body text-sm">
-                No pages scanned yet
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={statusPieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {statusPieData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: 'var(--color-charcoal,#1F1F1F)', border: 'none', borderRadius: 12, color: '#F8F6F1', fontSize: 12 }}
-                    formatter={(v, name) => [`${v} page${v !== 1 ? 's' : ''}`, name]}
-                  />
-                  <Legend iconType="circle" iconSize={8} formatter={(value) => <span style={{ color: '#4B5563', fontSize: 12 }}>{value}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </ChartCard>
-
-          {/* Task 5: Top Violating Pages — clickable ranked table */}
-          <ChartCard
-            title="Top Violating Pages"
-            subtitle="Ranked by violation count — click any row to inspect"
+            title="Fix these first"
+            subtitle="Pages with the most violations. Click a page to see what's wrong."
           >
             <TopViolatingTable
               pages={topViolationPages}
               onRowClick={(p) => p._page && handleRowClick(p._page)}
             />
           </ChartCard>
-        </div>
+        )}
 
         {/* 5. ACCESSIBILITY INTELLIGENCE — Task 1 */}
         <CrawlIntelPanel crawlId={crawlId} isComplete={isComplete} />
@@ -665,25 +615,27 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         {/* 8. AI SUMMARY — Feature 2 */}
         <CrawlAISummaryPanel crawlId={crawlId} isComplete={isComplete} />
 
-        {/* 7. CONTROLS */}
+        {/* ALL PAGES */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           <div className="relative flex-1 max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-body pointer-events-none"/>
+            <label className="sr-only" htmlFor="crawl-search">Search pages by URL</label>
             <input
+              id="crawl-search"
               type="text"
               className="input-base pl-9 py-2 text-sm w-full"
-              placeholder="Search URLs…"
+              placeholder="Search pages…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
-            {['all', 'scanned', 'failed'].map((f) => (
+          <div className="flex flex-wrap gap-2">
+            {FILTERS.map(({ id, label }) => (
               <FilterPill
-                key={f}
-                label={f.charAt(0).toUpperCase() + f.slice(1)}
-                active={statusFilter === f}
-                onClick={() => setStatusFilter(f)}
+                key={id}
+                label={`${label} · ${filterCounts[id]}`}
+                active={statusFilter === id}
+                onClick={() => setStatusFilter(id)}
               />
             ))}
           </div>
@@ -723,10 +675,11 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
                       className="hover:bg-gray-50 cursor-pointer transition-colors"
                       onClick={() => handleRowClick(page)}
                     >
-                      <td className="px-4 py-3 max-w-xs">
-                        <span className="block truncate font-mono text-xs text-ink"title={page.url}>
-                          {page.url}
+                      <td className="px-4 py-3 max-w-sm">
+                        <span className="block truncate text-sm font-medium text-ink" title={page.url}>
+                          {pathOf(page.url).path}
                         </span>
+                        <span className="block truncate text-xs text-body">{pathOf(page.url).host}</span>
                       </td>
                       <td className="px-4 py-3 min-w-[120px]">
                         <ScoreMiniBar score={page._score} />

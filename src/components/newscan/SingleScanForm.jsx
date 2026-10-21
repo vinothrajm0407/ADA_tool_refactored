@@ -15,6 +15,7 @@ export default function SingleScanForm({
   onStartScan,
   onUploadClick,
   hideUrlField,
+  hideActions,
 }) {
   return (
     <>
@@ -40,10 +41,10 @@ export default function SingleScanForm({
       )}
 
       <section className="pt-2 pb-1">
-        <div className="flex items-start justify-between gap-8 py-3 border-b border-gray-100">
+        <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white">
           <div className="flex-1 min-w-0">
-            <p id="best-practices-label"className="text-sm font-semibold text-ink">Best Practices</p>
-            <p className="text-sm text-body mt-1 leading-relaxed">
+            <p id="best-practices-label" className="text-sm font-semibold text-ink m-0">Best Practices</p>
+            <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
               Includes non-WCAG rules to provide broader accessibility guidance. Issue count may increase.
             </p>
           </div>
@@ -65,6 +66,7 @@ export default function SingleScanForm({
         </div>
       )}
 
+      {!hideActions && (<>
       <Divider />
 
       <div className="pt-4">
@@ -93,6 +95,7 @@ export default function SingleScanForm({
           Your data is secure and never shared with third parties.
         </p>
       </div>
+      </>)}
     </>
   );
 }
