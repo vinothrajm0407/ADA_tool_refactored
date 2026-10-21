@@ -61,10 +61,11 @@ function CrawlStatusIndicator({ isActive, isComplete }) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function normaliseStatus(raw) {
+// "scanned" only means the scan ran — a page that still has violations hasn't passed.
+export function normaliseStatus(raw, violations = 0) {
   if (!raw) return 'Needs review';
   const s = raw.toLowerCase();
-  if (s === 'passed' || s === 'pass' || s === 'scanned' || s === 'completed') return 'Passed';
+  if (s === 'passed' || s === 'pass' || s === 'scanned' || s === 'completed') return violations > 0 ? 'Has issues' : 'Passed';
   if (s === 'failed' || s === 'fail' || s === 'error') return 'Failed';
   if (s === 'running') return 'Running';
   if (s === 'pending') return 'Running';
@@ -388,7 +389,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     ...p,
     _score: computePageScore(p),
     _violations: violationCount(p),
-    _status: normaliseStatus(p.status),
+    _status: normaliseStatus(p.status, violationCount(p)),
   }));
 
   const filteredPages = enrichedPages

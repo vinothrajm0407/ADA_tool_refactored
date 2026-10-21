@@ -5,6 +5,7 @@ import React from 'react';
 // (used for icons/dots elsewhere) is roughly 2-3:1 and too light for text.
 const STATUS_CLASSES = {
   Passed:'bg-sage/15 text-sage-700',
+  'Has issues':'bg-terracotta/15 text-terracotta-700',
   'Needs review':'bg-amber/15 text-amber-700',
   Failed:'bg-coral/15 text-coral-700',
   Running:'bg-teal/15 text-teal-700',
