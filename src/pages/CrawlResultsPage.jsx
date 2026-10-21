@@ -306,11 +306,10 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     setDrawerViolations(null);
     setDrawerLoading(true);
 
-    const scanHistId = page.scan_history_id;
-    if (scanHistId) {
-      const numId = scanHistId.replace(/^SCAN-/i, '');
+    // Crawled pages keep their own stored result (scan_history_id is empty for them).
+    if (page.id != null && crawlId) {
       try {
-        const res = await apiFetch(`/api/history/${numId}`);
+        const res = await apiFetch(`/api/crawl/${crawlId}/pages/${page.id}/result`);
         const data = await res.json();
         const violations = data.ok && data.result?.axeResult?.violations;
         setDrawerViolations(Array.isArray(violations) ? violations : []);

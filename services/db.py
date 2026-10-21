@@ -1821,6 +1821,31 @@ def get_crawl_pages(crawl_id: str) -> list[dict]:
         conn.close()
 
 
+def get_crawl_page_result(crawl_id: str, page_id: int) -> dict | None:
+    """Stored scan result (process_url shape) for one crawled page. Crawls keep
+    it on CrawlPage.ResultPayload; older rows linked a ScanHistory row instead."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ResultPayload, ScanHistoryId FROM dbo.CrawlPage WHERE CrawlId = ? AND Id = ?",
+                (crawl_id, page_id),
+            )
+            row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    if row.ResultPayload:
+        try:
+            return json.loads(row.ResultPayload)
+        except (TypeError, ValueError):
+            return None
+    return get_scan_result(row.ScanHistoryId) if row.ScanHistoryId else None
+
+
 def get_all_crawl_jobs(limit: int = 25) -> list[dict]:
     """
     Return recent crawl jobs ordered by CreatedAt DESC.

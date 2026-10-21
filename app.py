@@ -841,6 +841,18 @@ def api_crawl_pages(crawl_id):
     return jsonify({"ok": True, "crawl_id": crawl_id, "pages": pages, "count": len(pages)})
 
 
+@app.route("/api/crawl/<string:crawl_id>/pages/<int:page_id>/result", methods=["GET"])
+@require_auth
+def api_crawl_page_result(crawl_id, page_id):
+    """Full stored axe result for one crawled page (violations with their nodes)."""
+    if not db.is_ready():
+        return jsonify({"ok": False, "error": "Database not configured"}), 503
+    result = db.get_crawl_page_result(crawl_id, page_id)
+    if result is None:
+        return jsonify({"ok": False, "error": "No stored result for this page"}), 404
+    return jsonify({"ok": True, "result": result})
+
+
 @app.route("/api/crawls", methods=["GET"])
 @require_auth
 def api_crawls_list():

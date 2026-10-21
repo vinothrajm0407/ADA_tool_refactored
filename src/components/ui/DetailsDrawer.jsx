@@ -10,6 +10,48 @@ function wcagTagFrom(tags) {
   return t ? t.toUpperCase() : null;
 }
 
+// Repeated elements (a card grid, a row of icon buttons) usually share one
+// root cause. Group a rule's elements by their markup — the same identity
+// Auto-Fix uses for an element — and show one representative per group (the
+// first in page order) with a count, instead of every instance.
+export function groupNodes(nodes) {
+  const groups = new Map();
+  for (const n of nodes || []) {
+    const key = (n.html || '').replace(/\s+/g, ' ').trim();
+    const target = Array.isArray(n.target) ? n.target.join(' ') : (n.target || '');
+    const g = groups.get(key);
+    if (g) g.count += 1;
+    else groups.set(key, { html: key, target, count: 1 });
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count);
+}
+
+function NodeGroups({ nodes }) {
+  const groups = groupNodes(nodes);
+  if (groups.length === 0) return null;
+  const shown = groups.slice(0, 3);
+  return (
+    <ul className="list-none pl-0 mt-1.5 mb-1 space-y-1.5" aria-label="Affected elements">
+      {shown.map((g, i) => (
+        <li key={i} className="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <code className="text-[11px] text-ink truncate" title={g.target}>{g.target || 'element'}</code>
+            {g.count > 1 && (
+              <span className="shrink-0 text-[11px] font-semibold text-teal" title={`${g.count} elements with identical markup`}>
+                ×{g.count} identical
+              </span>
+            )}
+          </div>
+          {g.html && <code className="block text-[11px] text-body truncate mt-0.5" title={g.html}>{g.html}</code>}
+        </li>
+      ))}
+      {groups.length > shown.length && (
+        <li className="text-[11px] text-body">+{groups.length - shown.length} more distinct element{groups.length - shown.length === 1 ? '' : 's'}</li>
+      )}
+    </ul>
+  );
+}
+
 function mapViolationToCard(v) {
   return {
     title: v.help || v.description || v.id,
@@ -164,17 +206,19 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
               )}
 
               {!violationsLoading && hasViolationDetail && (
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-[28rem] overflow-y-auto pr-1">
                   {violations.map((v, i) => {
                     const card = mapViolationToCard(v);
                     return (
-                      <IssueCard
-                        key={v.id ? `${v.id}-${i}` : i}
-                        title={card.title}
-                        detail={card.detail}
-                        severity={card.severity}
-                        wcag={card.wcag}
-                      />
+                      <div key={v.id ? `${v.id}-${i}` : i}>
+                        <IssueCard
+                          title={card.title}
+                          detail={card.detail}
+                          severity={card.severity}
+                          wcag={card.wcag}
+                        />
+                        <NodeGroups nodes={v.nodes} />
+                      </div>
                     );
                   })}
                 </div>

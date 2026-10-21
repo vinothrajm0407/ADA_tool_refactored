@@ -37,12 +37,8 @@ def _aggregate_crawl_violations(crawl_id: str, max_pages: int = 60) -> list[dict
     try:
         pages = db.get_crawl_pages(crawl_id)[:max_pages]
         for page in pages:
-            raw_id = page.get("scan_history_id")
-            if not raw_id:
-                continue
             try:
-                scan_id = int(str(raw_id).removeprefix("SCAN-"))
-                result = db.get_scan_result(scan_id)
+                result = db.get_crawl_page_result(crawl_id, page["id"])
             except Exception:
                 continue
             for v in ((result or {}).get("axeResult") or {}).get("violations") or []:

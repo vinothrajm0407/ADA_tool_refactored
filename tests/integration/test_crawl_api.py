@@ -268,3 +268,17 @@ class TestCrawlTimeline:
     def test_missing_url_param_400(self, client, authed_headers):
         resp = client.get("/api/crawls/timeline", headers=authed_headers)
         assert resp.status_code == 400
+
+
+class TestCrawlPageResult:
+    def test_returns_stored_result(self, client, db_mock, authed_headers):
+        db_mock.get_crawl_page_result.return_value = {"axeResult": {"violations": [{"id": "image-alt", "nodes": [{}]}]}}
+        resp = client.get(f"/api/crawl/{FAKE_CRAWL_ID}/pages/201/result", headers=authed_headers)
+        assert resp.status_code == 200
+        assert resp.get_json()["result"]["axeResult"]["violations"][0]["id"] == "image-alt"
+        db_mock.get_crawl_page_result.assert_called_once_with(FAKE_CRAWL_ID, 201)
+
+    def test_404_when_nothing_stored(self, client, db_mock, authed_headers):
+        db_mock.get_crawl_page_result.return_value = None
+        resp = client.get(f"/api/crawl/{FAKE_CRAWL_ID}/pages/201/result", headers=authed_headers)
+        assert resp.status_code == 404
