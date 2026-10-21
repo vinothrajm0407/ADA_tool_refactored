@@ -81,19 +81,22 @@ export default function ScanInsights({ adaItems, assistiveItems }) {
   const [picked, setPicked] = useState('')
   const site = sites.includes(picked) ? picked : sites[0]
 
-  const series = useMemo(
-    () => adaItems
-      .filter(it => host(it.url) === site)
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-      .map(it => ({
+  // One point per day (that day's last scan), last 30 days with data — a site
+  // scanned hundreds of times would otherwise draw an unreadable band.
+  const series = useMemo(() => {
+    const byDay = new Map()
+    for (const it of adaItems.filter(i => host(i.url) === site).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))) {
+      const d = new Date(it.timestamp)
+      byDay.set(d.toDateString(), {
         id: it.id,
-        label: new Date(it.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        label: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
         score: it.passRate,
         issues: it.violations,
         breakdown: it.breakdown,
-      })),
-    [adaItems, site]
-  )
+      })
+    }
+    return [...byDay.values()].slice(-30)
+  }, [adaItems, site])
 
   const modules = useMemo(() => {
     const byType = {}
@@ -112,7 +115,7 @@ export default function ScanInsights({ adaItems, assistiveItems }) {
   const latest = series[series.length - 1]
   const prev = series.length > 1 ? series[series.length - 2] : null
   const b = latest.breakdown
-  const summary = `${site}: score ${latest.score} and ${latest.issues} issues in the latest of ${series.length} scans`
+  const summary = `${site}: score ${latest.score} and ${latest.issues} issues on the latest of ${series.length} days with scans`
 
   return (
     <section className="card p-5 mt-4" aria-label="Trends and breakdown">
