@@ -157,3 +157,24 @@ class TestFixesList:
     def test_no_auth_401(self, client):
         resp = client.get("/api/fixes")
         assert resp.status_code == 401
+
+
+def test_open_fix_walks_past_a_closed_pr_to_an_older_open_one():
+    """A newer closed PR must not hide an older still-open one (closing one
+    duplicate used to re-enable a whole new set of PRs)."""
+    import app as app_module
+    rows = [{"pr_url": "https://github.com/o/r/pull/9", "branch_url": "b9"},   # newest, closed
+            {"pr_url": "https://github.com/o/r/pull/5", "branch_url": "b5"}]   # older, open
+    asked = []
+
+    def lookup(skip):
+        asked.append(list(skip))
+        return next((r for r in rows if r["pr_url"] not in skip), None)
+
+    link = {"repo_url": "https://github.com/o/r", "access_token": "t", "provider": "github"}
+    with patch("backend.services.auto_fix_service.is_pull_request_open", side_effect=lambda *a, **k: a[2] == 5):
+        found = app_module._open_fix(lookup, link)
+    assert found["pr_url"].endswith("/pull/5")
+    assert asked == [[], ["https://github.com/o/r/pull/9"]]
+    with patch("backend.services.auto_fix_service.is_pull_request_open", return_value=False):
+        assert app_module._open_fix(lookup, link) is None

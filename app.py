@@ -1266,23 +1266,35 @@ def api_health_tree():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _open_fix(lookup, link):
+    """Newest recorded fix whose PR is still open at the provider, or None.
+
+    The DB row only knows what happened when the PR was opened — it can't tell
+    that the PR was since closed, so every candidate is checked with the
+    provider. Walks past closed ones (lookup(skip) excludes them) so a newer
+    closed PR never hides an older one that is still open. PR urls end in
+    /pull/<n> (GitHub), /merge_requests/<n> (GitLab), /pull-requests/<n>
+    (Bitbucket) or /pullrequest/<n> (Azure DevOps — singular, no hyphen).
+    """
+    from backend.services.auto_fix_service import is_pull_request_open
+    skip = []
+    for _ in range(10):
+        row = lookup(skip)
+        if not row or row["pr_url"] in skip:
+            return None
+        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", row["pr_url"] or "")
+        if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
+            return row
+        skip.append(row["pr_url"])
+    return None
+
+
 def _patch_dedup(link, page_url):
     """find_duplicate callback for the Auto-Fix pipelines: an identical patch
     (file + before + after) that already has an open PR — e.g. five links all
-    styled by one CSS class. Verified against the provider, not just the DB
-    row, so a PR closed since then doesn't block a new one."""
-    from backend.services.auto_fix_service import is_pull_request_open
-
-    def find_duplicate(patch_signature):
-        existing = db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature)
-        if not existing:
-            return None
-        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", existing["pr_url"] or "")
-        if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
-            return existing
-        return None
-
-    return find_duplicate
+    styled by one CSS class."""
+    return lambda patch_signature: _open_fix(
+        lambda skip: db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature, skip), link)
 
 
 @app.route("/api/auto-fix", methods=["POST"])
@@ -1309,35 +1321,16 @@ def api_auto_fix():
     # page (e.g. via "Fix All") isn't mistaken for re-fixing the same one.
     node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
 
-    from backend.services.auto_fix_service import run_auto_fix, is_pull_request_open
+    from backend.services.auto_fix_service import run_auto_fix
 
-    existing = db.get_open_fix(g.current_user_id, page_url, rule.get("id", ""), node_signature)
+    existing = _open_fix(lambda skip: db.get_open_fix(g.current_user_id, page_url, rule.get("id", ""), node_signature, skip), link)
     if existing:
-        # The DB row only reflects what happened when we opened that PR/MR — it
-        # has no idea if it was since closed, or the repo archived. Check the
-        # provider directly rather than trust a record that could be stale.
-        # GitHub PR urls end in /pull/<n>, GitLab MR urls in /merge_requests/<n>,
-        # Bitbucket PR urls in /pull-requests/<n>, Azure DevOps PR urls in
-        # /pullrequest/<n> (singular, no hyphen — easy to miss, and missing it
-        # meant this dedup check silently never matched Azure PRs at all, so
-        # every "Run again" opened a brand new PR instead of reusing the
-        # still-open one — found live 2026-09-29, two duplicate PRs for the
-        # same violation on data_qa_v1_frontend).
-        pr_url_val = existing["pr_url"] or ""
-        pr_match = re.search(r"/pull/(\d+)$", pr_url_val) \
-            or re.search(r"/merge_requests/(\d+)$", pr_url_val) \
-            or re.search(r"/pull-requests/(\d+)$", pr_url_val) \
-            or re.search(r"/pullrequest/(\d+)$", pr_url_val)
-        still_open = bool(pr_match) and is_pull_request_open(
-            link["repo_url"], link["access_token"], int(pr_match.group(1)), link.get("provider") or "github"
-        )
-        if still_open:
-            return jsonify({
-                "ok": True, "status": "verified", "duplicate": True, "merged": False,
-                "pr_url": existing["pr_url"], "branch_url": existing["branch_url"],
-                "steps": [{"name": "Existing fix", "ok": True,
-                           "detail": "A PR for this violation is already open and awaiting review"}],
-            })
+        return jsonify({
+            "ok": True, "status": "verified", "duplicate": True, "merged": False,
+            "pr_url": existing["pr_url"], "branch_url": existing["branch_url"],
+            "steps": [{"name": "Existing fix", "ok": True,
+                       "detail": "A PR for this violation is already open and awaiting review"}],
+        })
 
     result = run_auto_fix(link, page_url, rule, node, find_duplicate=_patch_dedup(link, page_url))
 
@@ -1371,7 +1364,7 @@ def api_auto_fix_batch():
         return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
 
     import hashlib
-    from backend.services.auto_fix_service import run_auto_fix_batch, is_pull_request_open
+    from backend.services.auto_fix_service import run_auto_fix_batch
 
     rule_id = rule.get("id", "")
 
@@ -1384,19 +1377,10 @@ def api_auto_fix_batch():
     duplicate_of = None
     for node in nodes:
         node_signature = hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
-        existing = db.get_open_fix(g.current_user_id, page_url, rule_id, node_signature)
+        existing = _open_fix(lambda skip: db.get_open_fix(g.current_user_id, page_url, rule_id, node_signature, skip), link)
         if existing:
-            pr_url_val = existing["pr_url"] or ""
-            pr_match = re.search(r"/pull/(\d+)$", pr_url_val) \
-                or re.search(r"/merge_requests/(\d+)$", pr_url_val) \
-                or re.search(r"/pull-requests/(\d+)$", pr_url_val) \
-                or re.search(r"/pullrequest/(\d+)$", pr_url_val)
-            still_open = bool(pr_match) and is_pull_request_open(
-                link["repo_url"], link["access_token"], int(pr_match.group(1)), link.get("provider") or "github"
-            )
-            if still_open:
-                duplicate_of = existing
-                continue
+            duplicate_of = existing
+            continue
         fixable_nodes.append(node)
 
     if not fixable_nodes:

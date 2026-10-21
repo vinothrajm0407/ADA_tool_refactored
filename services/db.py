@@ -157,6 +157,17 @@ def _ensure_table() -> None:
             )
         """)
         conn.commit()
+        # Small per-scan summary (impact / WCAG level / needs-review counts) kept
+        # beside the heavy ResultPayload so history trends never have to parse
+        # megabyte payloads. NULL for scans saved before this column existed.
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.ScanHistory') AND name = N'Breakdown'
+            )
+            ALTER TABLE dbo.ScanHistory ADD Breakdown NVARCHAR(500) NULL
+        """)
+        conn.commit()
         cur.execute("""
             IF NOT EXISTS (
                 SELECT 1 FROM sys.tables WHERE name = N'ScanJobs')
@@ -1161,6 +1172,7 @@ def save_scan_history(result: dict, limit: int = 500) -> int | None:
     used_fallback = bool(result.get("usedFallback"))
     include_best_practices = bool(result.get("includeBestPractices"))
     payload_json = json.dumps(result) if result else None
+    breakdown_json = json.dumps(_scan_breakdown(result)) if result else None
 
     conn = _conn()
     try:
@@ -1168,12 +1180,12 @@ def save_scan_history(result: dict, limit: int = 500) -> int | None:
             cur.execute(
                 """
                 INSERT INTO dbo.ScanHistory
-                    (Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, ResultPayload)
+                    (Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, ResultPayload, Breakdown)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (url, timestamp, passes, violations, pass_rate,
-                 1 if used_fallback else 0, 1 if include_best_practices else 0, payload_json),
+                 1 if used_fallback else 0, 1 if include_best_practices else 0, payload_json, breakdown_json),
             )
             row = cur.fetchone()
             new_id = int(row[0]) if row and row[0] is not None else None
@@ -1205,6 +1217,38 @@ def get_scan_result(scan_id: int) -> dict | None:
         conn.close()
 
 
+def _safe_json(text):
+    try:
+        return json.loads(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _wcag_level(tags) -> str:
+    """Conformance level of one axe rule from its tags (AA wins over A when both appear)."""
+    t = set(tags or [])
+    if t & {"wcag2aaa", "wcag21aaa"}:
+        return "aaa"
+    if t & {"wcag2aa", "wcag21aa", "wcag22aa"}:
+        return "aa"
+    if t & {"wcag2a", "wcag21a"}:
+        return "a"
+    return "best_practice"
+
+
+def _scan_breakdown(result: dict) -> dict:
+    """Rule counts by impact and WCAG level, plus axe's 'needs review' (incomplete)
+    count — the numbers Scan History trends chart without re-reading the payload."""
+    axe = (result or {}).get("axeResult") or {}
+    impact = {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
+    level = {"a": 0, "aa": 0, "aaa": 0, "best_practice": 0}
+    for v in axe.get("violations") or []:
+        key = (v.get("impact") or "minor").lower()
+        impact[key if key in impact else "minor"] += 1
+        level[_wcag_level(v.get("tags"))] += 1
+    return {"impact": impact, "level": level, "review": len(axe.get("incomplete") or [])}
+
+
 def get_scan_history(limit: int = 500):
     """
     Return list of scan summary dicts from dbo.ScanHistory, newest first.
@@ -1215,7 +1259,7 @@ def get_scan_history(limit: int = 500):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT TOP (?) Id, Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices
+                SELECT TOP (?) Id, Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, Breakdown
                 FROM dbo.ScanHistory
                 ORDER BY TimestampUtc DESC
                 """,
@@ -1234,6 +1278,7 @@ def get_scan_history(limit: int = 500):
                 "passRate": r.PassRate,
                 "usedFallback": bool(r.UsedFallback),
                 "includeBestPractices": bool(getattr(r, "IncludeBestPractices", 0)),
+                "breakdown": _safe_json(getattr(r, "Breakdown", None)),
             })
         return out
     finally:
@@ -3671,7 +3716,16 @@ def get_fixes(user_id: int, limit: int = 50) -> list[dict]:
     return out
 
 
-def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str | None) -> dict | None:
+def _skip_clause(skip_pr_urls) -> tuple[str, list]:
+    """SQL fragment + params excluding PRs the caller already found closed."""
+    skip = [u for u in skip_pr_urls if u]
+    if not skip:
+        return "", []
+    return " AND PrUrl NOT IN (" + ",".join("?" * len(skip)) + ")", skip
+
+
+def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str | None,
+                 skip_pr_urls=()) -> dict | None:
     """
     Most recent fix for this exact element (same page, rule, and node
     signature) that already has an open, unmerged PR — used to avoid opening
@@ -3685,13 +3739,14 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
     conn = _conn()
     try:
         cur = conn.cursor()
+        skip_sql, skip_params = _skip_clause(skip_pr_urls)
         cur.execute("""
             SELECT TOP (1) PrUrl, BranchUrl
             FROM dbo.Fix
             WHERE UserId = ? AND PageUrl = ? AND RuleId = ? AND NodeSignature = ?
-                AND Status = 'verified' AND Merged = 0 AND PrUrl IS NOT NULL
+                AND Status IN ('verified', 'partial') AND Merged = 0 AND PrUrl IS NOT NULL""" + skip_sql + """
             ORDER BY CreatedAt DESC
-        """, user_id, page_url, rule_id, node_signature)
+        """, user_id, page_url, rule_id, node_signature, *skip_params)
         row = cur.fetchone()
     finally:
         conn.close()
@@ -3700,7 +3755,7 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
     return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl}
 
 
-def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str) -> dict | None:
+def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str, skip_pr_urls=()) -> dict | None:
     """Most recent unmerged fix for this page whose actual patch (file + before
     + after text) is identical — different elements can share one root cause
     (e.g. five links styled by one CSS class), which get_open_fix's per-element
@@ -3710,13 +3765,14 @@ def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str) -> 
     conn = _conn()
     try:
         cur = conn.cursor()
+        skip_sql, skip_params = _skip_clause(skip_pr_urls)
         cur.execute("""
             SELECT TOP (1) PrUrl, BranchUrl
             FROM dbo.Fix
             WHERE UserId = ? AND PageUrl = ? AND PatchSignature = ?
-                AND Status = 'verified' AND Merged = 0 AND PrUrl IS NOT NULL
+                AND Status IN ('verified', 'partial') AND Merged = 0 AND PrUrl IS NOT NULL""" + skip_sql + """
             ORDER BY CreatedAt DESC
-        """, user_id, page_url, patch_signature)
+        """, user_id, page_url, patch_signature, *skip_params)
         row = cur.fetchone()
     finally:
         conn.close()

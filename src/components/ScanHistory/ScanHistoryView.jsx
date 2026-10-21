@@ -8,6 +8,7 @@ import { StatusBadge } from '../ui/StatusBadge'
 import { useApp } from '../../context/AppContext'
 import { CrawlHistoryContent } from './CrawlHistoryContent'
 import { ReportActions } from './ReportActions'
+import ScanInsights from './ScanInsights'
 
 const DEFAULT_PAGE_SIZE = 5
 const ROWS_PER_PAGE_OPTIONS = [5, 10, 25, 50, 100]
@@ -492,6 +493,13 @@ function AllScansTab({ onScanClick }) {
             <ArrowRight size={15} />
           </button>
         </div>
+      )}
+
+      {showControls && filteredAndSorted.length > 0 && (
+        <ScanInsights
+          adaItems={filteredAndSorted.filter(i => i.kind === 'ada').map(i => i.raw)}
+          assistiveItems={filteredAndSorted.filter(i => i.kind === 'assistive').map(i => i.raw)}
+        />
       )}
 
       {showControls && filteredAndSorted.length === 0 && (
