@@ -55,6 +55,9 @@ class Config:
     # Phase 3 — Scheduler (Feature 1)
     SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "true").lower() in ("1", "true", "yes")
     SCHEDULER_INTERVAL_SECONDS = int(os.getenv("SCHEDULER_INTERVAL_SECONDS", "60"))
+    # Tag added to the scanner browser's user agent so site owners can recognise
+    # and allowlist our scans (e.g. in Cloudflare) instead of blocking them.
+    SCANNER_UA_TOKEN = os.getenv("SCANNER_UA_TOKEN", "ADA-Accessibility-Scanner/1.0")
     # Auth
     JWT_SECRET = os.getenv("JWT_SECRET", "change-me-in-production-use-a-long-random-string")
     if IS_PRODUCTION and JWT_SECRET == "change-me-in-production-use-a-long-random-string":

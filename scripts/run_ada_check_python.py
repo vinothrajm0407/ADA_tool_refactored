@@ -70,6 +70,20 @@ def _remove_best_practice_rules(data: dict) -> dict:
     return data
 
 
+def scanner_user_agent(browser) -> str:
+    """The browser's normal headless user agent plus an identifying tag
+    (Config.SCANNER_UA_TOKEN). Sites render as usual, and site owners can see —
+    and allowlist — exactly which visits are our accessibility scans."""
+    try:
+        from config import Config
+        token = Config.SCANNER_UA_TOKEN
+    except ImportError:  # run as a standalone script
+        token = "ADA-Accessibility-Scanner/1.0"
+    platform = {"win32": "Windows NT 10.0; Win64; x64", "darwin": "Macintosh; Intel Mac OS X 10_15_7"}.get(sys.platform, "X11; Linux x86_64")
+    return (f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"HeadlessChrome/{browser.version} Safari/537.36 {token}").strip()
+
+
 _CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "security check",
                      "verify you are human", "pardon our interruption", "request unsuccessful")
 _CHALLENGE_VENDORS = (("captcha-delivery.com", "DataDome"), ("_incapsula_resource", "Imperva"),
@@ -102,6 +116,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         browser = playwright.chromium.launch(headless=True)
         context = browser.new_context(
             viewport=SCREENSHOT_VIEWPORT, ignore_https_errors=True,
+            user_agent=scanner_user_agent(browser),
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},

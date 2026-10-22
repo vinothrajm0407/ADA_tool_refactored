@@ -16,3 +16,11 @@ def test_normal_page_with_vendor_script_is_not_a_challenge():
     html = '<title>Shop</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script> cloudflare'
     assert bot_challenge_reason(200, "Shop | Tommy John", html) is None
     assert bot_challenge_reason(None, "Home", "<html></html>") is None
+
+
+def test_scanner_user_agent_keeps_browser_ua_and_adds_tag():
+    from types import SimpleNamespace
+    from scripts.run_ada_check_python import scanner_user_agent
+    ua = scanner_user_agent(SimpleNamespace(version="145.0.7632.6"))
+    assert ua.startswith("Mozilla/5.0 (") and "HeadlessChrome/145.0.7632.6" in ua
+    assert ua.endswith("ADA-Accessibility-Scanner/1.0")

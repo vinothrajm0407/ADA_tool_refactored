@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from services import db
 from services.crawler import get_root_domain, normalize_url, extract_internal_links
-from scripts.run_ada_check_python import bot_challenge_reason
+from scripts.run_ada_check_python import bot_challenge_reason, scanner_user_agent
 
 # Import in-memory helpers — no circular import because crawl_service only
 # imports crawl_task inside a function body (not at module level).
@@ -118,6 +118,7 @@ def crawl_site_task(
                 # desktop-width browser window.
                 viewport={"width": 1920, "height": 1080},
                 ignore_https_errors=True,
+                user_agent=scanner_user_agent(browser),
             )
             pw_page = context.new_page()
 

@@ -18,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 OUTPUT_JSON = PROJECT_ROOT / "output" / "ada_result.json"
 
+from scripts.run_ada_check_python import scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
+
 
 def _safe_int(value, default=0):
     try:
@@ -117,6 +119,7 @@ def run_keyboard_assisted_test(url: str) -> dict:
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            user_agent=scanner_user_agent(browser),
         )
         page = context.new_page()
         try:
@@ -396,6 +399,7 @@ def run_page_structure_assisted_test(url: str) -> dict:
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            user_agent=scanner_user_agent(browser),
         )
             page = context.new_page()
             try:
@@ -575,6 +579,7 @@ def run_forms_accessibility_test(url: str) -> dict:
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            user_agent=scanner_user_agent(browser),
         )
             page = context.new_page()
             try:
