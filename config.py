@@ -27,6 +27,9 @@ class Config:
     CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "3"))
     CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "50"))
     CRAWL_TIMEOUT_SECONDS = int(os.getenv("CRAWL_TIMEOUT_SECONDS", "1800"))
+    # Pages scanned at once during a crawl, each in its own browser (~150-250 MB
+    # RAM each). Lower it on a machine short of memory.
+    CRAWL_CONCURRENCY = int(os.getenv("CRAWL_CONCURRENCY", "3"))
     # Full-site crawl ceilings (used when fullSite=true is sent from the UI)
     CRAWL_MAX_PAGES_FULL = int(os.getenv("CRAWL_MAX_PAGES_FULL", "10000"))
     CRAWL_MAX_DEPTH_FULL = int(os.getenv("CRAWL_MAX_DEPTH_FULL", "10"))
