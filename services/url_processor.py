@@ -18,7 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 OUTPUT_JSON = PROJECT_ROOT / "output" / "ada_result.json"
 
-from scripts.run_ada_check_python import scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
+from scripts.run_ada_check_python import load_page_checked, scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
 
 
 def _safe_int(value, default=0):
@@ -96,7 +96,7 @@ def process_url(url: str, include_best_practices: bool = False, write_output: bo
     }
 
 
-def run_keyboard_assisted_test(url: str) -> dict:
+def run_keyboard_assisted_test(url: str, assisted: bool = False) -> dict:
     """
     Run a lightweight automated keyboard test for a URL.
     Returns pass/fail-style checks and simple evidence.
@@ -114,18 +114,17 @@ def run_keyboard_assisted_test(url: str) -> dict:
     focusable_count = 0
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=not assisted)
         context = browser.new_context(
             viewport={"width": 1366, "height": 768},
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser),
+            user_agent=scanner_user_agent(browser, headless=not assisted),
         )
         page = context.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            page.wait_for_timeout(800)
+            load_page_checked(page, url, assisted)
             page_title = page.title() or ""
 
             focusable_count = _safe_int(page.evaluate("""
@@ -260,7 +259,7 @@ def run_keyboard_assisted_test(url: str) -> dict:
     }
 
 
-def run_color_contrast_assisted_test(url: str) -> dict:
+def run_color_contrast_assisted_test(url: str, assisted: bool = False) -> dict:
     """
     Run automated color contrast checks for a URL using axe rule: color-contrast.
     Returns pass/fail summary and affected element samples.
@@ -271,7 +270,7 @@ def run_color_contrast_assisted_test(url: str) -> dict:
 
     from scripts.run_ada_check_python import run_axe_playwright
 
-    axe_result = run_axe_playwright(url, include_best_practices=False)
+    axe_result = run_axe_playwright(url, include_best_practices=False, assisted=assisted)
     violations = axe_result.get("violations") or []
     contrast_rules = [v for v in violations if (v.get("id") or "").lower() == "color-contrast"]
 
@@ -376,7 +375,7 @@ def run_color_contrast_assisted_test(url: str) -> dict:
     }
 
 
-def run_page_structure_assisted_test(url: str) -> dict:
+def run_page_structure_assisted_test(url: str, assisted: bool = False) -> dict:
     """
     Audit page structure: heading hierarchy and landmark regions.
     Uses Playwright to extract the real DOM state, plus axe for violations.
@@ -394,18 +393,17 @@ def run_page_structure_assisted_test(url: str) -> dict:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=not assisted)
             context = browser.new_context(
             viewport={"width": 1366, "height": 768},
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser),
+            user_agent=scanner_user_agent(browser, headless=not assisted),
         )
             page = context.new_page()
             try:
-                page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                page.wait_for_timeout(800)
+                load_page_checked(page, url, assisted)
                 page_title = page.title() or ""
 
                 headings = page.evaluate("""() => {
@@ -556,7 +554,7 @@ def run_page_structure_assisted_test(url: str) -> dict:
     }
 
 
-def run_forms_accessibility_test(url: str) -> dict:
+def run_forms_accessibility_test(url: str, assisted: bool = False) -> dict:
     """
     Audit form accessibility: labels, required fields, autocomplete, fieldset/legend.
     Uses Playwright to extract the live DOM state.
@@ -574,18 +572,17 @@ def run_forms_accessibility_test(url: str) -> dict:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=not assisted)
             context = browser.new_context(
             viewport={"width": 1366, "height": 768},
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser),
+            user_agent=scanner_user_agent(browser, headless=not assisted),
         )
             page = context.new_page()
             try:
-                page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                page.wait_for_timeout(800)
+                load_page_checked(page, url, assisted)
                 page_title = page.title() or ""
 
                 fields = page.evaluate("""() => {

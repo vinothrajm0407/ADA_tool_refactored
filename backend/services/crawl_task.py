@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 
 from services import db
 from services.crawler import get_root_domain, normalize_url, extract_internal_links
-from scripts.run_ada_check_python import bot_challenge_reason, page_title_and_html, scanner_user_agent
+from scripts.run_ada_check_python import (
+    bot_challenge_reason, page_title_and_html, scanner_user_agent, wait_for_person_to_verify,
+)
 
 # Import in-memory helpers — no circular import because crawl_service only
 # imports crawl_task inside a function body (not at module level).
@@ -82,6 +84,7 @@ def crawl_site_task(
     max_pages: int,
     notify_email: str = None,
     user_id: int = None,
+    assisted: bool = False,
 ) -> dict:
     """
     BFS site crawl: navigate each page with a shared Playwright browser,
@@ -109,7 +112,10 @@ def crawl_site_task(
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # assisted: a visible window on this computer, so a person can pass a
+            # site's bot check (usually once — the clearance cookie then covers
+            # the rest of the crawl). Same idea as the assisted page scan.
+            browser = p.chromium.launch(headless=not assisted)
             context = browser.new_context(
                 # Matches the single-page scan path's viewport (see
                 # scripts/run_ada_check_python.py) — a narrower viewport
@@ -118,7 +124,7 @@ def crawl_site_task(
                 # desktop-width browser window.
                 viewport={"width": 1920, "height": 1080},
                 ignore_https_errors=True,
-                user_agent=scanner_user_agent(browser),
+                user_agent=scanner_user_agent(browser, headless=not assisted),
             )
             pw_page = context.new_page()
 
@@ -169,6 +175,8 @@ def crawl_site_task(
                     # page with the reason instead of scoring the challenge page.
                     blocked = bot_challenge_reason(response.status if response else None,
                                                    *page_title_and_html(pw_page))
+                    if blocked and assisted and wait_for_person_to_verify(pw_page):
+                        blocked = None
                     if blocked:
                         raise RuntimeError(blocked)
 

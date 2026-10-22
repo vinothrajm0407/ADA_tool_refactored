@@ -27,6 +27,8 @@ export default function CrawlForm({
   onMaxDepthChange,
   fullSite,
   onFullSiteChange,
+  assisted,
+  onAssistedChange,
   notifyEmail,
   onNotifyEmailChange,
   crawlLoading,
@@ -118,6 +120,27 @@ export default function CrawlForm({
             />
           </div>
         </div>
+
+        {onAssistedChange && (
+          <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white mt-3">
+            <div className="flex-1 min-w-0">
+              <p id="crawl-assisted-label" className="text-sm font-semibold text-ink m-0">Use a visible browser</p>
+              <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
+                For sites with bot protection (e.g. Cloudflare). A browser window opens on this computer and stays open
+                for the whole crawl — if the site asks you to verify you're human, complete it there.
+              </p>
+            </div>
+            <div className="flex-shrink-0 pt-0.5">
+              <Toggle
+                id="crawl-assisted"
+                checked={!!assisted}
+                onChange={e => onAssistedChange(e.target.checked)}
+                disabled={crawlLoading}
+                ariaLabelledBy="crawl-assisted-label"
+              />
+            </div>
+          </div>
+        )}
 
         {fullSite && (
           <div className="flex items-start gap-2.5 bg-amber/10 px-4 py-3 rounded-xl mt-3">

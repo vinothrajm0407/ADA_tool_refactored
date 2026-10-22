@@ -282,3 +282,15 @@ class TestCrawlPageResult:
         db_mock.get_crawl_page_result.return_value = None
         resp = client.get(f"/api/crawl/{FAKE_CRAWL_ID}/pages/201/result", headers=authed_headers)
         assert resp.status_code == 404
+
+
+class TestAssistedCrawl:
+    def test_assisted_flag_reaches_the_crawl(self, client, db_mock, authed_headers):
+        with patch("app.create_crawl_job", return_value=_fake_crawl_job()) as create:
+            resp = client.post("/api/crawl", json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
+        assert resp.status_code == 202 and create.call_args[0][1]["assisted"] is True
+
+    def test_assisted_refused_on_a_hosted_server(self, client, db_mock, authed_headers):
+        with patch("app.Config.IS_PRODUCTION", True), patch("app.create_crawl_job") as create:
+            resp = client.post("/api/crawl", json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
+        assert resp.status_code == 400 and not create.called

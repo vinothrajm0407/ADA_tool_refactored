@@ -452,6 +452,15 @@ def api_auth_logout():
 
 # ── Protected API routes start here ───────────────────────────────────────────
 
+def _refuse_assisted_on_hosted_server(data):
+    """An assisted ("visible browser") run opens a browser window on the
+    server's own screen for a person to pass a site's bot check — only possible
+    when the server is the user's own computer, never on a hosted deployment."""
+    if data.get("assisted") and Config.IS_PRODUCTION:
+        return jsonify({"ok": False, "error": "Visible-browser scans only work when the tool runs on your own computer"}), 400
+    return None
+
+
 @app.route("/api/scan", methods=["POST"])
 @require_auth
 def api_scan():
@@ -471,11 +480,8 @@ def api_scan():
     assisted = bool(data.get("assisted"))
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
-    # An assisted scan opens a browser window on the server's own screen for a
-    # person to complete a site's bot check — only possible when the server is
-    # the user's own computer, never on a hosted deployment.
-    if assisted and Config.IS_PRODUCTION:
-        return jsonify({"ok": False, "error": "Visible-browser scans only work when the tool runs on your own computer"}), 400
+    if refused := _refuse_assisted_on_hosted_server(data):
+        return refused
 
     try:
         scan_job = create_scan_job(url, {
@@ -648,7 +654,9 @@ def api_assisted_keyboard():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     try:
-        result = run_keyboard_assisted_test(url)
+        if refused := _refuse_assisted_on_hosted_server(data):
+            return refused
+        result = run_keyboard_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
                 db.save_assistive_scan("keyboard", url, bool(result.get("passed", False)), result)
@@ -673,7 +681,9 @@ def api_assisted_color_contrast():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     try:
-        result = run_color_contrast_assisted_test(url)
+        if refused := _refuse_assisted_on_hosted_server(data):
+            return refused
+        result = run_color_contrast_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
                 db.save_assistive_scan("contrast", url, bool(result.get("passed", False)), result)
@@ -698,7 +708,9 @@ def api_assisted_page_structure():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     try:
-        result = run_page_structure_assisted_test(url)
+        if refused := _refuse_assisted_on_hosted_server(data):
+            return refused
+        result = run_page_structure_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
                 db.save_assistive_scan("page-structure", url, bool(result.get("passed", False)), result)
@@ -723,7 +735,9 @@ def api_assisted_forms():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     try:
-        result = run_forms_accessibility_test(url)
+        if refused := _refuse_assisted_on_hosted_server(data):
+            return refused
+        result = run_forms_accessibility_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
                 db.save_assistive_scan("forms", url, bool(result.get("passed", False)), result)
@@ -834,7 +848,11 @@ def api_crawl_create():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     logging.info("Crawl API received | keys=%s notifyEmail=%r", list(data.keys()), data.get("notifyEmail"))
+    assisted = bool(data.get("assisted"))
+    if refused := _refuse_assisted_on_hosted_server(data):
+        return refused
     options = {
+        "assisted": assisted,
         "max_depth": data.get("maxDepth"),
         "max_pages": data.get("maxPages"),
         "full_site": bool(data.get("fullSite", False)),

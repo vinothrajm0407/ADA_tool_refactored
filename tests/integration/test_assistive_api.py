@@ -254,3 +254,19 @@ class TestAssistiveHistory:
     def test_no_auth_401(self, client):
         resp = client.get("/api/assistive-history")
         assert resp.status_code == 401
+
+
+@pytest.mark.parametrize("route,fn", [
+    ("/api/assisted/keyboard", "run_keyboard_assisted_test"),
+    ("/api/assisted/color-contrast", "run_color_contrast_assisted_test"),
+    ("/api/assisted/page-structure", "run_page_structure_assisted_test"),
+    ("/api/assisted/forms", "run_forms_accessibility_test"),
+])
+def test_assistive_routes_pass_the_visible_browser_flag(client, db_mock, authed_headers, route, fn):
+    with patch(f"app.{fn}", return_value={"passed": True, "checks": []}) as run:
+        resp = client.post(route, json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
+    assert resp.status_code == 200
+    assert run.call_args.kwargs["assisted"] is True
+    with patch("app.Config.IS_PRODUCTION", True), patch(f"app.{fn}") as run:
+        assert client.post(route, json={"url": "https://example.com", "assisted": True}, headers=authed_headers).status_code == 400
+        assert not run.called

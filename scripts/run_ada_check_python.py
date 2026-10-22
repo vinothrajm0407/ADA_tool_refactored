@@ -126,7 +126,7 @@ def page_title_and_html(page) -> tuple[str, str]:
 ASSISTED_VERIFY_SECONDS = 120
 
 
-def _wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> bool:
+def wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> bool:
     """Assisted scan: the window is visible on the user's own screen, so the
     user can complete the site's "verify you are human" check themselves.
     Poll until the challenge page is gone. True once the real page shows."""
@@ -139,6 +139,37 @@ def _wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> 
             page.wait_for_timeout(3000)  # let the real page settle before axe runs
             return True
     return False
+
+
+def load_page_checked(page, url: str, assisted: bool = False, timeout: int = 45000, settle_ms: int = 800):
+    """Open url and make sure it is the real site, not a bot-protection page.
+    assisted: the window is visible, so wait for the person to pass the check.
+    Raises RuntimeError with a user-facing reason when blocked. Used by the
+    Assistive Testing modules, which each drive their own page."""
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    response = None
+    try:
+        response = page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+    except PlaywrightTimeoutError:
+        pass  # proceed with what loaded
+    page.wait_for_timeout(settle_ms)
+    blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
+    if blocked and assisted and wait_for_person_to_verify(page):
+        blocked = None
+    if blocked:
+        raise RuntimeError(blocked)
+    # Some sites redirect again shortly after load (seen on tommyjohn.com ->
+    # /pages/explore), which destroys the page mid-test ("Execution context was
+    # destroyed"). Wait until the address has stopped changing for 2s.
+    for _ in range(8):
+        before = page.url
+        page.wait_for_timeout(2000)
+        if page.url == before:
+            break
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=15000)
+    except Exception:
+        pass
 
 
 def run_axe_playwright(url: str, include_best_practices: bool = False, assisted: bool = False) -> dict:
@@ -198,7 +229,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
         page.wait_for_timeout(3000)
         blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
         if blocked and assisted:
-            blocked = None if _wait_for_person_to_verify(page) else (
+            blocked = None if wait_for_person_to_verify(page) else (
                 f"The site's verification wasn't completed in the browser window within "
                 f"{ASSISTED_VERIFY_SECONDS // 60} minutes, so the scan stopped. Run it again and complete "
                 "the check in the window that opens.")
