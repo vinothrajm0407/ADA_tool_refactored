@@ -160,10 +160,10 @@ def load_page_checked(page, url: str, assisted: bool = False, timeout: int = 450
         raise RuntimeError(blocked)
     # Some sites redirect again shortly after load (seen on tommyjohn.com ->
     # /pages/explore), which destroys the page mid-test ("Execution context was
-    # destroyed"). Wait until the address has stopped changing for 2s.
-    for _ in range(8):
+    # destroyed"). Wait until the address has stopped changing for 1s.
+    for _ in range(10):
         before = page.url
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(1000)
         if page.url == before:
             break
     try:

@@ -268,9 +268,28 @@ def run_color_contrast_assisted_test(url: str, assisted: bool = False) -> dict:
     if not url:
         raise ValueError("URL is required")
 
-    from scripts.run_ada_check_python import run_axe_playwright
+    from playwright.sync_api import sync_playwright
+    from axe_playwright_python.sync_playwright import Axe
 
-    axe_result = run_axe_playwright(url, include_best_practices=False, assisted=assisted)
+    # Only axe's color-contrast rule and no screenshots. This used to run the
+    # whole page scan (every WCAG rule + a full-page and up to 10 element
+    # screenshots) just to read one rule — the slowest module, and on a busy
+    # machine it ran out of memory (MemoryError, 2026-10-22). Same viewport as
+    # the page scan, since contrast results depend on layout.
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not assisted)
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080}, ignore_https_errors=True,
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            user_agent=scanner_user_agent(browser, headless=not assisted),
+        )
+        try:
+            page = context.new_page()
+            load_page_checked(page, url, assisted, settle_ms=3000)
+            axe_result = Axe().run(page, options={"runOnly": {"type": "rule", "values": ["color-contrast"]}}).response or {}
+        finally:
+            context.close()
+            browser.close()
     violations = axe_result.get("violations") or []
     contrast_rules = [v for v in violations if (v.get("id") or "").lower() == "color-contrast"]
 
