@@ -10,7 +10,9 @@
 export function nsFriendlyScanError(rawReason) {
   const reason = (rawReason || '').toLowerCase();
   // Backend already words this one for users (bot-challenge page detected).
-  if (reason.includes("blocked by the site's bot protection")) return rawReason;
+  if (reason.includes("blocked by the site's bot protection")) {
+    return `${rawReason} Or scan it yourself with the ADA Chrome extension: open the page in Chrome, click the ADA icon, then Scan — it runs in your browser and saves to Scan History.`;
+  }
   if (reason.includes('err_http2_protocol_error') || reason.includes('err_connection_closed')) {
     return "This site appears to block automated scanning tools (bot/anti-automation protection). The URL itself is fine — no scanner, including ours, can get past this kind of block.";
   }
