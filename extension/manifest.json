@@ -6,6 +6,7 @@
   "description": "Scan any page for accessibility issues. Results saved to your ADA platform dashboard.",
   "permissions": [
     "activeTab",
+    "scripting",
     "storage",
     "tabs"
   ],

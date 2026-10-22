@@ -4,9 +4,7 @@
 
 export const AUTH_KEY         = 'ada_auth'
 export const DARK_KEY         = 'ada_dark'
-export const POLL_INTERVAL_MS = 2500        // matches NewScanPage.jsx polling interval
 export const MAX_VIOLATIONS_SHOWN = 10      // cap list in popup (full list in dashboard)
-export const RATE_LIMIT_SECS  = 15          // matches Flask SCAN_RATE_LIMIT_SECONDS
 
 // Injected by vite.config.js define block from VITE_PLATFORM_URL env var.
 // Falls back to localhost:5000 when not set (development default).

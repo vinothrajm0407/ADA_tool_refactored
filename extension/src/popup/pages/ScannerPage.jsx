@@ -1,11 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Sun, Moon, LogOut, AlertTriangle } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Sun, Moon, LogOut } from 'lucide-react'
 import { apiFetch } from '../../utils/api.js'
 import { formatUrl } from '../../utils/format.js'
-import {
-  POLL_INTERVAL_MS,
-  RATE_LIMIT_SECS,
-} from '../../config/constants.js'
 import ShieldMark       from '../components/ShieldMark.jsx'
 import ScanButton       from '../components/ScanButton.jsx'
 import ScanProgress     from '../components/ScanProgress.jsx'
@@ -14,131 +10,105 @@ import ViolationList    from '../components/ViolationList.jsx'
 import DeltaBadge       from '../components/DeltaBadge.jsx'
 import FooterActions    from '../components/FooterActions.jsx'
 
+// Same rule set as the server scan (scripts/run_ada_check_python.py) so results compare.
+const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
+
 /**
  * Main scanner view (shown after login).
  *
  * Phase state machine:
- *   idle         → show ScanButton
- *   scanning     → show ScanProgress (POST /api/scan + polling GET /api/scan/<id>)
- *   done         → show ImpactSummary + ViolationList + FooterActions
- *   error        → show error message + retry
- *   rate_limited → show countdown timer (15s, matches Flask SCAN_RATE_LIMIT_SECONDS)
+ *   idle      → show ScanButton
+ *   scanning  → run axe-core in the active tab, then save via POST /api/scan/import
+ *   done      → show ImpactSummary + ViolationList + FooterActions
+ *   error     → show error message + retry
  *
- * Mirrors NewScanPage.jsx scan logic: same endpoints, same poll interval,
- * same error detection pattern.
+ * The scan runs in the user's own browser, on the page they already have open
+ * (like axe DevTools), not on our server. Sites behind bot protection
+ * (Cloudflare etc.) let a real visitor through but show our server's headless
+ * browser a challenge page, so this is how such sites get real results.
  */
 export default function ScannerPage({ auth, dark, toggleDark, onLogout }) {
   const [phase,      setPhase]      = useState('idle')
   const [tabUrl,     setTabUrl]     = useState('')
   const [scanResult, setScanResult] = useState(null)
   const [prevCount,  setPrevCount]  = useState(null)
-  const [jobId,      setJobId]      = useState(null)
   const [errorMsg,   setErrorMsg]   = useState('')
-  const [cooldown,   setCooldown]   = useState(0)
-
-  const pollRef     = useRef(null)
-  const cooldownRef = useRef(null)
 
   // Read current tab URL on mount
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.url) setTabUrl(tabs[0].url)
     })
-    return () => {
-      clearInterval(pollRef.current)
-      clearInterval(cooldownRef.current)
-    }
-  }, [])
-
-  // ── Cooldown counter (rate limit) ──────────────────────────────────
-  const startCooldown = useCallback((secs = RATE_LIMIT_SECS) => {
-    setCooldown(secs)
-    cooldownRef.current = setInterval(() => {
-      setCooldown(prev => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current)
-          setPhase('idle')
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
   }, [])
 
   // ── Scan trigger ───────────────────────────────────────────────────
   const handleScan = useCallback(async () => {
     if (!tabUrl) return
-    clearInterval(pollRef.current)
-
     setPhase('scanning')
     setErrorMsg('')
     setScanResult(null)
     setPrevCount(null)
-    setJobId(null)
 
     try {
-      const res  = await apiFetch('/api/scan', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ url: tabUrl, includeBestPractices: false }),
-      })
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
 
-      // Rate limited — Flask returns 429 with retry_after header
-      if (res.status === 429) {
-        const data        = await res.json().catch(() => ({}))
-        const retryAfter  = parseInt(res.headers.get('Retry-After') ?? '') || RATE_LIMIT_SECS
-        setPhase('rate_limited')
-        startCooldown(retryAfter)
+      let axeResult = null
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['axe.min.js'] })
+        const [injection] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          // Runs inside the page; the JSON round-trip keeps only plain data.
+          func: async (tags) => JSON.parse(JSON.stringify(
+            await window.axe.run(document, { runOnly: { type: 'tag', values: tags } })
+          )),
+          args: [WCAG_TAGS],
+        })
+        axeResult = injection?.result ?? null
+      } catch {
+        setErrorMsg("This page can't be scanned — browser pages (chrome://) and the Chrome Web Store don't allow extensions.")
+        setPhase('error')
         return
       }
-
-      const data = await res.json()
-      if (!res.ok || !data.ok) {
-        setErrorMsg(data.error || 'Scan could not be started. Please try again.')
+      if (!axeResult) {
+        setErrorMsg('The scan returned no results. Reload the page and try again.')
         setPhase('error')
         return
       }
 
-      const id = data.jobId
-      setJobId(id)
+      // Visible-area screenshot, same field the server scan uses. Optional.
+      try {
+        const shot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 })
+        axeResult.screenshot = shot.split(',')[1]
+        axeResult.screenshotType = 'image/jpeg'
+      } catch { /* scan is still valid without it */ }
 
-      // Poll — identical interval to NewScanPage.jsx pollScan()
-      pollRef.current = setInterval(async () => {
-        try {
-          const pollRes  = await apiFetch(`/api/scan/${id}`)
-          const pollData = await pollRes.json()
-          const status   = pollData.job?.status
+      const res  = await apiFetch('/api/scan/import', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ url: tabUrl, axeResult }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) {
+        setErrorMsg(data.error || 'The scan ran but could not be saved. Please try again.')
+        setPhase('error')
+        return
+      }
 
-          if (status === 'completed') {
-            clearInterval(pollRef.current)
-            const result = pollData.job?.result ?? null
-            setScanResult(result)
-            setPhase('done')
+      setScanResult(data.result)
+      setPhase('done')
 
-            // Notify background worker to update badge count
-            const count = result?.axeResult?.violations?.length ?? 0
-            chrome.runtime.sendMessage({ type: 'SCAN_COMPLETE', violationCount: count })
-              .catch(() => {}) // background may not be listening yet — ignore
+      // Notify background worker to update badge count
+      const count = axeResult.violations?.length ?? 0
+      chrome.runtime.sendMessage({ type: 'SCAN_COMPLETE', violationCount: count })
+        .catch(() => {}) // background may not be listening yet — ignore
 
-            // Fetch delta from previous scan (best-effort, non-blocking)
-            fetchDelta(tabUrl, count)
-
-          } else if (status === 'failed') {
-            clearInterval(pollRef.current)
-            setErrorMsg('The scan failed on the server. Please try again.')
-            setPhase('error')
-          }
-          // queued / started → keep polling
-        } catch {
-          // Network hiccup during polling — keep trying silently
-        }
-      }, POLL_INTERVAL_MS)
-
+      // Fetch delta from previous scan (best-effort, non-blocking)
+      fetchDelta(tabUrl, count)
     } catch {
       setErrorMsg('Unable to reach the server. Check your connection.')
       setPhase('error')
     }
-  }, [tabUrl, startCooldown])
+  }, [tabUrl])
 
   // ── Delta fetch (non-blocking) ─────────────────────────────────────
   async function fetchDelta(url, currentCount) {
@@ -157,14 +127,10 @@ export default function ScannerPage({ auth, dark, toggleDark, onLogout }) {
 
   // ── Reset for re-scan ──────────────────────────────────────────────
   const handleRescan = useCallback(() => {
-    clearInterval(pollRef.current)
-    clearInterval(cooldownRef.current)
     setPhase('idle')
     setScanResult(null)
     setPrevCount(null)
-    setJobId(null)
     setErrorMsg('')
-    setCooldown(0)
   }, [])
 
   // ── Compute pass rate from scan result ─────────────────────────────
@@ -224,18 +190,6 @@ export default function ScannerPage({ auth, dark, toggleDark, onLogout }) {
 
         {phase === 'scanning' && (
           <ScanProgress />
-        )}
-
-        {phase === 'rate_limited' && (
-          <div className="flex flex-col items-center justify-center py-6 fade-in">
-            <AlertTriangle className="w-6 h-6 text-amber mb-2" />
-            <p className="text-sm font-semibold text-ink dark:text-white mb-1">
-              Rate limited
-            </p>
-            <p className="text-xs text-body dark:text-gray-400 text-center">
-              Please wait <span className="font-bold text-ink dark:text-white">{cooldown}s</span> before scanning again.
-            </p>
-          </div>
         )}
 
         {phase === 'error' && (

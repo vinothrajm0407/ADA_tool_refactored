@@ -508,6 +508,50 @@ def api_scan_status(job_id):
     return jsonify({"ok": True, "job": job})
 
 
+_IMPORT_MAX_BYTES = 20 * 1024 * 1024  # axe JSON plus one visible-area JPEG
+_AXE_LIST_KEYS = ("violations", "passes", "incomplete", "inapplicable")
+
+
+@app.route("/api/scan/import", methods=["POST"])
+@require_auth
+def api_scan_import():
+    """Save an axe-core result produced in the user's own browser (the Chrome
+    extension). Used for pages our server can't load itself — e.g. sites whose
+    bot protection shows our headless browser a challenge page but lets a real
+    visitor through. Nothing is fetched here; the result is only validated and
+    stored like a normal scan."""
+    if (request.content_length or 0) > _IMPORT_MAX_BYTES:
+        return jsonify({"ok": False, "error": "Scan result is too large"}), 413
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    axe = data.get("axeResult")
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"ok": False, "error": "Only http and https pages can be saved"}), 400
+    if not isinstance(axe, dict) or not all(isinstance(axe.get(k, []), list) for k in _AXE_LIST_KEYS) \
+            or "violations" not in axe:
+        return jsonify({"ok": False, "error": "axeResult must be an axe-core results object"}), 400
+
+    axe_result = {k: axe[k] for k in (*_AXE_LIST_KEYS, "timestamp", "testEngine", "toolOptions",
+                                      "screenshot", "screenshotType") if k in axe}
+    axe_result["url"] = url
+    result = {
+        "url": url,
+        "message": "ADA check completed in the browser extension",
+        "axeResult": axe_result,
+        "includeBestPractices": False,
+        "usedFallback": False,
+        "source": "extension",
+    }
+    if not db.is_ready():
+        return jsonify({"ok": False, "error": "Scan history is unavailable — database not configured"}), 503
+    try:
+        scan_id = db.save_scan_history(result)
+    except Exception:
+        logging.exception("Failed to save imported scan for %s", url)
+        return jsonify({"ok": False, "error": "Could not save the scan"}), 500
+    return jsonify({"ok": True, "scanId": scan_id, "result": result}), 201
+
+
 @app.route("/health/live", methods=["GET"])
 def health_live():
     return jsonify({"status": "ok", "request_id": _get_request_id()})

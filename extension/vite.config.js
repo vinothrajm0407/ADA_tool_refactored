@@ -11,6 +11,8 @@ export default defineConfig({
         { src: 'manifest.json',              dest: '.' },
         { src: 'icons',                      dest: '.' },
         { src: 'src/background/service-worker.js', dest: '.' },
+        // Injected into the active tab to scan it in the user's own browser
+        { src: 'node_modules/axe-core/axe.min.js', dest: '.' },
       ],
     }),
   ],

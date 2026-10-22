@@ -194,3 +194,33 @@ class TestHealthEndpoints:
         with patch("app.get_queue_service", return_value=queue_mock):
             resp = client.get("/health/ready")
         assert resp.status_code == 503
+
+
+class TestScanImport:
+    AXE = {"violations": [{"id": "image-alt", "impact": "critical", "tags": ["wcag2a"], "nodes": [{"html": "<img>"}]}],
+           "passes": [], "incomplete": [], "inapplicable": [], "screenshot": "abc", "screenshotType": "image/jpeg",
+           "extraJunk": "dropped"}
+
+    def test_saves_browser_result_as_a_scan(self, client, db_mock, authed_headers):
+        db_mock.save_scan_history.return_value = 950
+        resp = client.post("/api/scan/import", json={"url": "https://shop.example.com/", "axeResult": self.AXE},
+                           headers=authed_headers)
+        assert resp.status_code == 201
+        body = resp.get_json()
+        assert body["scanId"] == 950 and body["result"]["source"] == "extension"
+        saved = db_mock.save_scan_history.call_args[0][0]
+        assert saved["axeResult"]["url"] == "https://shop.example.com/"
+        assert "extraJunk" not in saved["axeResult"] and saved["axeResult"]["screenshot"] == "abc"
+
+    @pytest.mark.parametrize("payload", [
+        {"url": "javascript:alert(1)", "axeResult": AXE},
+        {"url": "https://x.com/", "axeResult": {"passes": []}},
+        {"url": "https://x.com/", "axeResult": {"violations": "nope"}},
+        {"url": "https://x.com/"},
+    ])
+    def test_rejects_bad_input(self, client, db_mock, authed_headers, payload):
+        assert client.post("/api/scan/import", json=payload, headers=authed_headers).status_code == 400
+        db_mock.save_scan_history.assert_not_called()
+
+    def test_requires_auth(self, client):
+        assert client.post("/api/scan/import", json={"url": "https://x.com/", "axeResult": self.AXE}).status_code == 401
