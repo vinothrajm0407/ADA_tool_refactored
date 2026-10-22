@@ -70,8 +70,8 @@ def _remove_best_practice_rules(data: dict) -> dict:
     return data
 
 
-def scanner_user_agent(browser) -> str:
-    """The browser's normal headless user agent plus an identifying tag
+def scanner_user_agent(browser, headless: bool = True) -> str:
+    """The browser's normal user agent (headless or not) plus an identifying tag
     (Config.SCANNER_UA_TOKEN). Sites render as usual, and site owners can see —
     and allowlist — exactly which visits are our accessibility scans."""
     try:
@@ -81,7 +81,7 @@ def scanner_user_agent(browser) -> str:
         token = "ADA-Accessibility-Scanner/1.0"
     platform = {"win32": "Windows NT 10.0; Win64; x64", "darwin": "Macintosh; Intel Mac OS X 10_15_7"}.get(sys.platform, "X11; Linux x86_64")
     return (f"Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"HeadlessChrome/{browser.version} Safari/537.36 {token}").strip()
+            f"{'HeadlessChrome' if headless else 'Chrome'}/{browser.version} Safari/537.36 {token}").strip()
 
 
 _CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "security check",
@@ -107,16 +107,55 @@ def bot_challenge_reason(status: int | None, title: str, html: str) -> str | Non
             "not the site, so no valid results. Ask the site owner to allowlist the scanner, then scan again.")
 
 
-def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
+def page_title_and_html(page) -> tuple[str, str]:
+    """Title and HTML, tolerating a page that is still navigating (a redirect,
+    or a bot check handing over to the real page) — reading mid-navigation
+    raises "Execution context was destroyed"."""
+    for _ in range(5):
+        try:
+            return page.title(), page.content()
+        except Exception:
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1000)
+    return "", ""
+
+
+ASSISTED_VERIFY_SECONDS = 120
+
+
+def _wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> bool:
+    """Assisted scan: the window is visible on the user's own screen, so the
+    user can complete the site's "verify you are human" check themselves.
+    Poll until the challenge page is gone. True once the real page shows."""
+    import time
+    page.bring_to_front()
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        page.wait_for_timeout(2000)
+        if not bot_challenge_reason(None, *page_title_and_html(page)):
+            page.wait_for_timeout(3000)  # let the real page settle before axe runs
+            return True
+    return False
+
+
+def run_axe_playwright(url: str, include_best_practices: bool = False, assisted: bool = False) -> dict:
+    """assisted=True opens a visible browser window on this computer, for sites
+    whose bot protection blocks headless browsers: if the site shows a
+    verification page, the person at the computer completes it, then the scan
+    runs on the real page. Only meaningful when the server runs on the user's
+    own machine (there is no screen on a hosted server)."""
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     from axe_playwright_python.sync_playwright import Axe
 
     axe = Axe()
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=not assisted)
         context = browser.new_context(
             viewport=SCREENSHOT_VIEWPORT, ignore_https_errors=True,
-            user_agent=scanner_user_agent(browser),
+            user_agent=scanner_user_agent(browser, headless=not assisted),
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
@@ -157,7 +196,12 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         # predictable quantity; "wait for quiet" isn't reliable on a page
         # that's never actually quiet.
         page.wait_for_timeout(3000)
-        blocked = bot_challenge_reason(response.status if response else None, page.title(), page.content())
+        blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
+        if blocked and assisted:
+            blocked = None if _wait_for_person_to_verify(page) else (
+                f"The site's verification wasn't completed in the browser window within "
+                f"{ASSISTED_VERIFY_SECONDS // 60} minutes, so the scan stopped. Run it again and complete "
+                "the check in the window that opens.")
         if blocked:
             raise RuntimeError(blocked)
         # Was wcag2a/wcag2aa only — silently excluded every WCAG 2.1-specific

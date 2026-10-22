@@ -53,6 +53,7 @@ def run_ada_scan(scan_url: str, metadata: dict | None = None, timeout: int = 300
             scan_url,
             include_best_practices=include_best_practices,
             write_output=False,
+            assisted=bool(metadata.get("assisted")),
         )
         completed_at = _utcnow_iso()
 

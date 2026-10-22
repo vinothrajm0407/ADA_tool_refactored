@@ -224,3 +224,16 @@ class TestScanImport:
 
     def test_requires_auth(self, client):
         assert client.post("/api/scan/import", json={"url": "https://x.com/", "axeResult": self.AXE}).status_code == 401
+
+
+class TestAssistedScan:
+    def test_assisted_flag_reaches_the_job(self, client, db_mock, authed_headers):
+        with patch("app.create_scan_job", side_effect=_mock_create_scan) as create:
+            resp = client.post("/api/scan", json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
+        assert resp.status_code == 202
+        assert create.call_args[0][1]["assisted"] is True
+
+    def test_assisted_refused_on_a_hosted_server(self, client, db_mock, authed_headers):
+        with patch("app.Config.IS_PRODUCTION", True), patch("app.create_scan_job") as create:
+            resp = client.post("/api/scan", json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
+        assert resp.status_code == 400 and not create.called

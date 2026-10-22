@@ -10,6 +10,8 @@ export default function SingleScanForm({
   onUrlChange,
   includeBestPractices,
   onBestPracticesChange,
+  assisted,
+  onAssistedChange,
   scanPhase,
   scanError,
   onStartScan,
@@ -58,6 +60,28 @@ export default function SingleScanForm({
           </div>
         </div>
       </section>
+
+      {onAssistedChange && (
+        <section className="pt-2 pb-1">
+          <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white">
+            <div className="flex-1 min-w-0">
+              <p id="assisted-label" className="text-sm font-semibold text-ink m-0">Use a visible browser</p>
+              <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
+                For sites with bot protection (e.g. Cloudflare). A browser window opens on this computer —
+                if the site asks you to verify you're human, complete it there and the scan runs on the real page.
+              </p>
+            </div>
+            <div className="flex-shrink-0 pt-0.5">
+              <Toggle
+                id="assisted-scan"
+                checked={!!assisted}
+                onChange={e => onAssistedChange(e.target.checked)}
+                ariaLabelledBy="assisted-label"
+              />
+            </div>
+          </div>
+        </section>
+      )}
 
       {scanPhase === 'failed' && scanError && (
         <div className="flex items-center gap-2.5 bg-coral/10 text-coral px-4 py-3 rounded-xl text-sm mb-3">

@@ -307,6 +307,7 @@ export default function NewScanPage() {
   const composeBestPractices = formIncludeBestPractices;
   const setComposeUrl = setFormUrl;
   const setComposeBestPractices = setFormIncludeBestPractices;
+  const [composeAssisted, setComposeAssisted] = useState(false);
 
   const startNewTab = useCallback(() => {
     setCompareOpen(false);
@@ -354,12 +355,12 @@ export default function NewScanPage() {
     }, 2500);
   }, [updateScanSession]);
 
-  const runScan = useCallback(async (sessionId, url, includeBestPractices) => {
+  const runScan = useCallback(async (sessionId, url, includeBestPractices, assisted = false) => {
     try {
       const res  = await apiFetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, includeBestPractices }),
+        body: JSON.stringify({ url, includeBestPractices, assisted }),
       });
       const data = await res.json();
       if (!data.ok) { updateScanSession(sessionId, { phase: 'failed', error: data.error ?? 'Failed to start scan.' }); return; }
@@ -371,14 +372,15 @@ export default function NewScanPage() {
     const url = composeUrl.trim();
     if (!url) return;
     const sessionId = createScanSession(url, composeBestPractices);
+    if (composeAssisted) updateScanSession(sessionId, { assisted: true });
     setFormUrl('');
     setFocusedTab({ kind: 'single', id: sessionId });
-    runScan(sessionId, url, composeBestPractices);
-  }, [composeUrl, composeBestPractices, createScanSession, runScan]);
+    runScan(sessionId, url, composeBestPractices, composeAssisted);
+  }, [composeUrl, composeBestPractices, composeAssisted, createScanSession, updateScanSession, runScan]);
 
   const retryScan = useCallback((session) => {
     updateScanSession(session.id, { phase: 'scanning', error: '' });
-    runScan(session.id, session.url, session.includeBestPractices);
+    runScan(session.id, session.url, session.includeBestPractices, !!session.assisted);
   }, [updateScanSession, runScan]);
 
   const handleStartCrawl = useCallback(async () => {
@@ -538,6 +540,8 @@ export default function NewScanPage() {
                   onUrlChange={(val) => updateScanSession(activeSession.id, { url: val })}
                   includeBestPractices={activeSession.includeBestPractices}
                   onBestPracticesChange={(val) => updateScanSession(activeSession.id, { includeBestPractices: val })}
+                  assisted={activeSession.assisted}
+                  onAssistedChange={(val) => updateScanSession(activeSession.id, { assisted: val })}
                   scanPhase="failed"
                   scanError={activeSession.error}
                   onStartScan={() => retryScan(activeSession)}
@@ -595,6 +599,8 @@ export default function NewScanPage() {
                   onUrlChange={setComposeUrl}
                   includeBestPractices={composeBestPractices}
                   onBestPracticesChange={setComposeBestPractices}
+                  assisted={composeAssisted}
+                  onAssistedChange={setComposeAssisted}
                   scanPhase="idle"
                   scanError=""
                   onStartScan={handleStartScan}

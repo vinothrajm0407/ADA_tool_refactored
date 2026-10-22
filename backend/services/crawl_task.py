@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from services import db
 from services.crawler import get_root_domain, normalize_url, extract_internal_links
-from scripts.run_ada_check_python import bot_challenge_reason, scanner_user_agent
+from scripts.run_ada_check_python import bot_challenge_reason, page_title_and_html, scanner_user_agent
 
 # Import in-memory helpers — no circular import because crawl_service only
 # imports crawl_task inside a function body (not at module level).
@@ -168,7 +168,7 @@ def crawl_site_task(
                     # A bot-protection challenge page is not the site — fail this
                     # page with the reason instead of scoring the challenge page.
                     blocked = bot_challenge_reason(response.status if response else None,
-                                                   pw_page.title(), pw_page.content())
+                                                   *page_title_and_html(pw_page))
                     if blocked:
                         raise RuntimeError(blocked)
 

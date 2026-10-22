@@ -64,7 +64,8 @@ def _extract_ratio_info(failure_summary: str) -> dict:
     return {"current": current, "required": required, "gap": gap}
 
 
-def process_url(url: str, include_best_practices: bool = False, write_output: bool = False) -> dict:
+def process_url(url: str, include_best_practices: bool = False, write_output: bool = False,
+                assisted: bool = False) -> dict:
     """
     Run ADA check for the given URL using Playwright + axe (axe-playwright-python).
     Returns dict with axeResult (full axe report) and message.
@@ -76,7 +77,7 @@ def process_url(url: str, include_best_practices: bool = False, write_output: bo
     from scripts.run_ada_check_python import run_axe_playwright
 
     try:
-        axe_result = run_axe_playwright(url, include_best_practices=include_best_practices)
+        axe_result = run_axe_playwright(url, include_best_practices=include_best_practices, assisted=assisted)
     except Exception as e:
         logger.exception("Playwright scan failed for %s", url)
         raise

@@ -468,12 +468,19 @@ def api_scan():
         return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
     url = (data.get("url") or "").strip()
     include_best_practices = bool(data.get("includeBestPractices"))
+    assisted = bool(data.get("assisted"))
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
+    # An assisted scan opens a browser window on the server's own screen for a
+    # person to complete a site's bot check — only possible when the server is
+    # the user's own computer, never on a hosted deployment.
+    if assisted and Config.IS_PRODUCTION:
+        return jsonify({"ok": False, "error": "Visible-browser scans only work when the tool runs on your own computer"}), 400
 
     try:
         scan_job = create_scan_job(url, {
             "include_best_practices": include_best_practices,
+            "assisted": assisted,
             "user_id": g.current_user_id,
         })
         return jsonify({"ok": True, "jobId": scan_job["job_id"], "status": scan_job["status"]}), 202
