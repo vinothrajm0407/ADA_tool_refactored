@@ -331,7 +331,6 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
   // elements reads as 7, not 1).
   const violCount       = useCountUp(nsTotalElementCount(violations));
   const passCount       = useCountUp(passes.length);
-  const incompleteCount = useCountUp(incomplete.length);
   const [showIncomplete, setShowIncomplete] = useState(false);
 
   useEffect(() => {
@@ -475,19 +474,12 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
               </div>
 
               <div>
-                <div className={`grid gap-3 ${incomplete.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                <div className="grid gap-3 grid-cols-2">
                   <StatTile
                     value={violCount} label="Violations" tone="text-coral-700"
                     onClick={violations.length > 0 ? () => scrollToSection('ns-violations-section', 'violations') : undefined}
                     aria-label={`${nsTotalElementCount(violations)} violations`}
                   />
-                  {incomplete.length > 0 && (
-                    <StatTile
-                      value={incompleteCount} label="Needs review" tone="text-amber-800"
-                      onClick={() => scrollToSection('ns-incomplete-section', 'incomplete')}
-                      aria-label={`${incomplete.length} items need manual review`}
-                    />
-                  )}
                   <StatTile value={passCount} label="Passed" tone="text-sage-700" />
                 </div>
 
