@@ -70,6 +70,29 @@ def _remove_best_practice_rules(data: dict) -> dict:
     return data
 
 
+_CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "security check",
+                     "verify you are human", "pardon our interruption", "request unsuccessful")
+_CHALLENGE_VENDORS = (("captcha-delivery.com", "DataDome"), ("_incapsula_resource", "Imperva"),
+                      ("px-captcha", "PerimeterX"), ("cf-chl", "Cloudflare"), ("cloudflare", "Cloudflare"),
+                      ("akamai", "Akamai"))
+
+
+def bot_challenge_reason(status: int | None, title: str, html: str) -> str | None:
+    """Message when the browser got a bot-protection challenge page instead of the
+    site (e.g. Cloudflare's "Just a moment..."), else None. Scanning that page gives
+    a meaningless near-perfect score — confirmed 2026-10-22 on a Cloudflare-protected
+    store: 1 violation and "Grade A" for the challenge page, while the real page had
+    real issues. A known challenge title, or a blocking status plus a vendor marker,
+    counts; a vendor script alone doesn't (protected sites embed it on normal pages)."""
+    t, h = (title or "").strip().lower(), (html or "").lower()
+    vendor = next((name for marker, name in _CHALLENGE_VENDORS if marker in h), None)
+    if not (any(t.startswith(x) for x in _CHALLENGE_TITLES) or (status in (403, 429, 503) and vendor)):
+        return None
+    return (f"Blocked by the site's bot protection ({vendor or 'security check'}"
+            f"{f', HTTP {status}' if status else ''}): the scanner was shown a verification page, "
+            "not the site, so no valid results. Ask the site owner to allowlist the scanner, then scan again.")
+
+
 def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     from axe_playwright_python.sync_playwright import Axe
@@ -93,8 +116,9 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         # must be disabled, not just bypassed with a one-off cache-busting
         # query param that every caller would otherwise need to remember.
         page.context.new_cdp_session(page).send("Network.setCacheDisabled", {"cacheDisabled": True})
+        response = None
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightTimeoutError:
             pass
         # Allow JS-rendered content (SPAs, lazy-loaded regions) to settle before axe runs.
@@ -118,6 +142,9 @@ def run_axe_playwright(url: str, include_best_practices: bool = False) -> dict:
         # predictable quantity; "wait for quiet" isn't reliable on a page
         # that's never actually quiet.
         page.wait_for_timeout(3000)
+        blocked = bot_challenge_reason(response.status if response else None, page.title(), page.content())
+        if blocked:
+            raise RuntimeError(blocked)
         # Was wcag2a/wcag2aa only — silently excluded every WCAG 2.1-specific
         # rule (confirmed live 2026-10-05: axe DevTools found autocomplete-valid,
         # a wcag21aa rule, on a page where this tool found nothing for it,

@@ -9,6 +9,8 @@
 // two other bot-protected sites found earlier (metallica.com, henryschein.com).
 export function nsFriendlyScanError(rawReason) {
   const reason = (rawReason || '').toLowerCase();
+  // Backend already words this one for users (bot-challenge page detected).
+  if (reason.includes("blocked by the site's bot protection")) return rawReason;
   if (reason.includes('err_http2_protocol_error') || reason.includes('err_connection_closed')) {
     return "This site appears to block automated scanning tools (bot/anti-automation protection). The URL itself is fine — no scanner, including ours, can get past this kind of block.";
   }
