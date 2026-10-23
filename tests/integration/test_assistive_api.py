@@ -270,3 +270,22 @@ def test_assistive_routes_pass_the_visible_browser_flag(client, db_mock, authed_
     with patch("app.Config.IS_PRODUCTION", True), patch(f"app.{fn}") as run:
         assert client.post(route, json={"url": "https://example.com", "assisted": True}, headers=authed_headers).status_code == 400
         assert not run.called
+
+
+class TestAssistedRunAll:
+    def test_runs_selected_modules_once_and_saves_each(self, client, db_mock, authed_headers):
+        out = {"keyboard": {"passed": True, "checks": []}, "forms": {"passed": False, "checks": []}}
+        with patch("app.run_assistive_modules", return_value=out) as run:
+            resp = client.post("/api/assisted/run", json={"url": "https://example.com", "modules": ["keyboard", "forms", "bogus"]},
+                               headers=authed_headers)
+        assert resp.status_code == 200 and resp.get_json()["results"] == out
+        assert run.call_args[0][1] == ["keyboard", "forms"]                      # unknown module dropped
+        saved = sorted(c[0][0] for c in db_mock.save_assistive_scan.call_args_list)
+        assert saved == ["forms", "keyboard"]
+
+    def test_validation_and_hosted_refusal(self, client, db_mock, authed_headers):
+        assert client.post("/api/assisted/run", json={"url": "https://e.com", "modules": []}, headers=authed_headers).status_code == 400
+        assert client.post("/api/assisted/run", json={"modules": ["forms"]}, headers=authed_headers).status_code == 400
+        with patch("app.Config.IS_PRODUCTION", True), patch("app.run_assistive_modules") as run:
+            r = client.post("/api/assisted/run", json={"url": "https://e.com", "modules": ["forms"], "assisted": True}, headers=authed_headers)
+        assert r.status_code == 400 and not run.called

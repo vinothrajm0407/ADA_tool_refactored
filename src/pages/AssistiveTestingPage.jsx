@@ -143,7 +143,7 @@ export default function AssistiveTestingPage() {
   // Runs whichever modules are checked in the "Test modules" list. With
   // nothing checked, falls back to just the active tab (the original
   // single-test behavior) so Start Test still works without touching a
-  // checkbox. Multiple checked modules run one after another; when exactly
+  // checkbox. Checked modules all run on one page load (one request); when exactly
   // one ran, its full results page opens as before — with several, there's
   // no single result to navigate to, so every module's real result renders
   // inline below instead (see multiResults / the JSX further down).
@@ -164,28 +164,33 @@ export default function AssistiveTestingPage() {
     const okResults = []; // [{ id, built }]
     let firstError = '';
 
-    for (const id of idsToRun) {
-      const mod = MODULES.find((m) => m.id === id);
-      if (!mod || mod.status !== 'active') continue;
-      setActiveModuleId(id);
-      try {
-        const res = await apiFetch(mod.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: trimmed, assisted }),
-        });
-        const data = await res.json();
-        // A module that hit a bot-protection page reports it in result.errors —
-        // show that instead of results from the verification page.
-        const blocked = (data.result?.errors || []).find((e) => /bot protection|verification/i.test(e));
-        if (!data.ok || blocked) {
-          firstError ||= `${mod.label}: ${blocked || data.error || 'Test failed.'}`;
-        } else {
-          okResults.push({ id, built: buildAssistiveResult(data.result ?? data, id, trimmed) });
+    // One request for every selected module: the server loads the page once and
+    // runs them all on it (was one request — and one full page load — per module).
+    const mods = idsToRun.map((id) => MODULES.find((m) => m.id === id)).filter((m) => m && m.status === 'active');
+    try {
+      const res = await apiFetch('/api/assisted/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: trimmed, modules: mods.map((m) => m.id), assisted }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        firstError = data.error || 'Test failed.';
+      } else {
+        for (const mod of mods) {
+          const result = data.results?.[mod.id];
+          // A module that hit a bot-protection page reports it in result.errors —
+          // show that instead of results from the verification page.
+          const blocked = (result?.errors || []).find((e) => /bot protection|verification/i.test(e));
+          if (!result || result.ok === false || blocked) {
+            firstError ||= `${mod.label}: ${blocked || result?.errors?.[0] || 'Test failed.'}`;
+          } else {
+            okResults.push({ id: mod.id, built: buildAssistiveResult(result, mod.id, trimmed) });
+          }
         }
-      } catch {
-        firstError ||= `${mod.label}: Network error. Please check your connection and try again.`;
       }
+    } catch {
+      firstError = 'Network error. Please check your connection and try again.';
     }
 
     setLoading(false);

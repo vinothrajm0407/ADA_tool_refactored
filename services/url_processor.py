@@ -19,6 +19,39 @@ if str(PROJECT_ROOT) not in sys.path:
 OUTPUT_JSON = PROJECT_ROOT / "output" / "ada_result.json"
 
 from scripts.run_ada_check_python import load_page_checked, scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
+import threading  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+_shared = threading.local()
+
+
+@contextmanager
+def _page_for(url: str, assisted: bool, viewport: dict, settle_ms: int = 800):
+    """A loaded page for an Assistive Testing module. Inside
+    run_assistive_modules() it is the one page already loaded for every
+    selected module (one browser, one page load); on its own, a fresh browser
+    loads the url, as each module always did."""
+    shared = getattr(_shared, "page", None)
+    if shared is not None:
+        yield shared
+        return
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=not assisted)
+        context = browser.new_context(
+            viewport=viewport, ignore_https_errors=True,
+            # Harmless on every other site — only an ngrok-tunneled dev URL checks
+            # for this header, to skip its free-tier browser-warning interstitial.
+            extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            user_agent=scanner_user_agent(browser, headless=not assisted),
+        )
+        try:
+            page = context.new_page()
+            load_page_checked(page, url, assisted, settle_ms=settle_ms)
+            yield page
+        finally:
+            context.close()
+            browser.close()
 
 
 def _safe_int(value, default=0):
@@ -105,26 +138,14 @@ def run_keyboard_assisted_test(url: str, assisted: bool = False) -> dict:
     if not url:
         raise ValueError("URL is required")
 
-    from playwright.sync_api import sync_playwright
-
     checks = []
     focus_path = []
     errors = []
     page_title = ""
     focusable_count = 0
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not assisted)
-        context = browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            # Harmless on every other site — only an ngrok-tunneled dev URL checks
-            # for this header, to skip its free-tier browser-warning interstitial.
-            extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser, headless=not assisted),
-        )
-        page = context.new_page()
+    with _page_for(url, assisted, {"width": 1366, "height": 768}) as page:
         try:
-            load_page_checked(page, url, assisted)
             page_title = page.title() or ""
 
             focusable_count = _safe_int(page.evaluate("""
@@ -234,9 +255,6 @@ def run_keyboard_assisted_test(url: str, assisted: bool = False) -> dict:
             })
         except Exception as e:
             errors.append(str(e))
-        finally:
-            context.close()
-            browser.close()
 
     passed = all(c.get("passed") for c in checks) and len(errors) == 0 and len(checks) > 0
     failed_checks = [c for c in checks if not c.get("passed")]
@@ -268,7 +286,6 @@ def run_color_contrast_assisted_test(url: str, assisted: bool = False) -> dict:
     if not url:
         raise ValueError("URL is required")
 
-    from playwright.sync_api import sync_playwright
     from axe_playwright_python.sync_playwright import Axe
 
     # Only axe's color-contrast rule and no screenshots. This used to run the
@@ -276,20 +293,8 @@ def run_color_contrast_assisted_test(url: str, assisted: bool = False) -> dict:
     # screenshots) just to read one rule — the slowest module, and on a busy
     # machine it ran out of memory (MemoryError, 2026-10-22). Same viewport as
     # the page scan, since contrast results depend on layout.
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not assisted)
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080}, ignore_https_errors=True,
-            extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser, headless=not assisted),
-        )
-        try:
-            page = context.new_page()
-            load_page_checked(page, url, assisted, settle_ms=3000)
-            axe_result = Axe().run(page, options={"runOnly": {"type": "rule", "values": ["color-contrast"]}}).response or {}
-        finally:
-            context.close()
-            browser.close()
+    with _page_for(url, assisted, {"width": 1920, "height": 1080}, settle_ms=3000) as page:
+        axe_result = Axe().run(page, options={"runOnly": {"type": "rule", "values": ["color-contrast"]}}).response or {}
     violations = axe_result.get("violations") or []
     contrast_rules = [v for v in violations if (v.get("id") or "").lower() == "color-contrast"]
 
@@ -403,74 +408,58 @@ def run_page_structure_assisted_test(url: str, assisted: bool = False) -> dict:
     if not url:
         raise ValueError("URL is required")
 
-    from playwright.sync_api import sync_playwright
-
     headings = []
     landmarks = []
     page_title = ""
     errors = []
 
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not assisted)
-            context = browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            # Harmless on every other site — only an ngrok-tunneled dev URL checks
-            # for this header, to skip its free-tier browser-warning interstitial.
-            extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser, headless=not assisted),
-        )
-            page = context.new_page()
-            try:
-                load_page_checked(page, url, assisted)
-                page_title = page.title() or ""
+        with _page_for(url, assisted, {"width": 1366, "height": 768}) as page:
+            page_title = page.title() or ""
 
-                headings = page.evaluate("""() => {
-                    const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
-                    return hs.map(h => ({
-                        level: parseInt(h.tagName[1], 10),
-                        text: (h.innerText || h.textContent || '').trim().slice(0, 120),
-                        id: h.id || '',
-                        visible: h.offsetParent !== null || h.offsetWidth > 0 || h.offsetHeight > 0,
-                        outerHTML: h.outerHTML || '',
-                    }));
-                }""")
+            headings = page.evaluate("""() => {
+                const hs = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+                return hs.map(h => ({
+                    level: parseInt(h.tagName[1], 10),
+                    text: (h.innerText || h.textContent || '').trim().slice(0, 120),
+                    id: h.id || '',
+                    visible: h.offsetParent !== null || h.offsetWidth > 0 || h.offsetHeight > 0,
+                    outerHTML: h.outerHTML || '',
+                }));
+            }""")
 
-                landmarks = page.evaluate("""() => {
-                    const ROLE_TO_LABEL = {
-                        main: 'main', navigation: 'navigation', banner: 'banner',
-                        contentinfo: 'contentinfo', complementary: 'complementary',
-                        search: 'search', form: 'form', region: 'region',
+            landmarks = page.evaluate("""() => {
+                const ROLE_TO_LABEL = {
+                    main: 'main', navigation: 'navigation', banner: 'banner',
+                    contentinfo: 'contentinfo', complementary: 'complementary',
+                    search: 'search', form: 'form', region: 'region',
+                };
+                const IMPLICIT = {
+                    main: 'main', nav: 'navigation', header: 'banner',
+                    footer: 'contentinfo', aside: 'complementary',
+                    form: 'form', section: 'region',
+                };
+                const elems = Array.from(document.querySelectorAll(
+                    'main,[role="main"],nav,[role="navigation"],header,[role="banner"],' +
+                    'footer,[role="contentinfo"],aside,[role="complementary"],' +
+                    '[role="search"],[role="form"],[role="region"],section[aria-label],section[aria-labelledby]'
+                ));
+                return elems.map(el => {
+                    const explicitRole = (el.getAttribute('role') || '').toLowerCase();
+                    const tagRole = IMPLICIT[el.tagName.toLowerCase()] || '';
+                    const role = explicitRole || tagRole || 'region';
+                    const ariaLabel = el.getAttribute('aria-label') || '';
+                    const ariaLabelledby = el.getAttribute('aria-labelledby') || '';
+                    return {
+                        role: ROLE_TO_LABEL[role] || role,
+                        tagName: el.tagName.toLowerCase(),
+                        label: ariaLabel,
+                        labelledby: ariaLabelledby,
+                        visible: el.offsetParent !== null,
+                        outerHTML: el.outerHTML || '',
                     };
-                    const IMPLICIT = {
-                        main: 'main', nav: 'navigation', header: 'banner',
-                        footer: 'contentinfo', aside: 'complementary',
-                        form: 'form', section: 'region',
-                    };
-                    const elems = Array.from(document.querySelectorAll(
-                        'main,[role="main"],nav,[role="navigation"],header,[role="banner"],' +
-                        'footer,[role="contentinfo"],aside,[role="complementary"],' +
-                        '[role="search"],[role="form"],[role="region"],section[aria-label],section[aria-labelledby]'
-                    ));
-                    return elems.map(el => {
-                        const explicitRole = (el.getAttribute('role') || '').toLowerCase();
-                        const tagRole = IMPLICIT[el.tagName.toLowerCase()] || '';
-                        const role = explicitRole || tagRole || 'region';
-                        const ariaLabel = el.getAttribute('aria-label') || '';
-                        const ariaLabelledby = el.getAttribute('aria-labelledby') || '';
-                        return {
-                            role: ROLE_TO_LABEL[role] || role,
-                            tagName: el.tagName.toLowerCase(),
-                            label: ariaLabel,
-                            labelledby: ariaLabelledby,
-                            visible: el.offsetParent !== null,
-                            outerHTML: el.outerHTML || '',
-                        };
-                    });
-                }""")
-            finally:
-                context.close()
-                browser.close()
+                });
+            }""")
     except Exception as exc:
         errors.append(str(exc))
 
@@ -582,151 +571,134 @@ def run_forms_accessibility_test(url: str, assisted: bool = False) -> dict:
     if not url:
         raise ValueError("URL is required")
 
-    from playwright.sync_api import sync_playwright
-
     fields = []
     form_groups = {}
     page_title = ""
     errors = []
 
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=not assisted)
-            context = browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            # Harmless on every other site — only an ngrok-tunneled dev URL checks
-            # for this header, to skip its free-tier browser-warning interstitial.
-            extra_http_headers={"ngrok-skip-browser-warning": "true"},
-            user_agent=scanner_user_agent(browser, headless=not assisted),
-        )
-            page = context.new_page()
-            try:
-                load_page_checked(page, url, assisted)
-                page_title = page.title() or ""
+        with _page_for(url, assisted, {"width": 1366, "height": 768}) as page:
+            page_title = page.title() or ""
 
-                fields = page.evaluate("""() => {
-                    const AUTOCOMPLETE_MAP = {
-                        name: 'name', email: 'email', tel: 'tel', phone: 'tel',
-                        fname: 'given-name', firstname: 'given-name',
-                        lname: 'family-name', lastname: 'family-name',
-                        address: 'street-address', city: 'address-level2',
-                        zip: 'postal-code', postcode: 'postal-code',
-                        country: 'country', dob: 'bday', birthday: 'bday',
-                        username: 'username', password: 'current-password',
-                        newpassword: 'new-password', cardnumber: 'cc-number',
-                    };
+            fields = page.evaluate("""() => {
+                const AUTOCOMPLETE_MAP = {
+                    name: 'name', email: 'email', tel: 'tel', phone: 'tel',
+                    fname: 'given-name', firstname: 'given-name',
+                    lname: 'family-name', lastname: 'family-name',
+                    address: 'street-address', city: 'address-level2',
+                    zip: 'postal-code', postcode: 'postal-code',
+                    country: 'country', dob: 'bday', birthday: 'bday',
+                    username: 'username', password: 'current-password',
+                    newpassword: 'new-password', cardnumber: 'cc-number',
+                };
 
-                    function guessToken(el) {
-                        const key = ((el.id || '') + ' ' + (el.name || '') + ' ' +
-                                     Array.from(el.classList).join(' ')).toLowerCase()
-                                     .replace(/[-_\\s]/g, '');
-                        for (const [pat, token] of Object.entries(AUTOCOMPLETE_MAP)) {
-                            if (key.includes(pat)) return token;
+                function guessToken(el) {
+                    const key = ((el.id || '') + ' ' + (el.name || '') + ' ' +
+                                 Array.from(el.classList).join(' ')).toLowerCase()
+                                 .replace(/[-_\\s]/g, '');
+                    for (const [pat, token] of Object.entries(AUTOCOMPLETE_MAP)) {
+                        if (key.includes(pat)) return token;
+                    }
+                    return null;
+                }
+
+                const inputs = Array.from(document.querySelectorAll(
+                    'input:not([type="hidden"]):not([type="submit"]):not([type="button"])' +
+                    ':not([type="reset"]):not([type="image"]),select,textarea'
+                ));
+
+                return inputs.map(el => {
+                    const id = el.id || '';
+                    const type = el.getAttribute('type') || el.tagName.toLowerCase();
+                    const name = el.name || '';
+                    const visible = !!(el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0);
+
+                    let labelText = '';
+                    let labelMethod = 'none';
+
+                    if (el.getAttribute('aria-label')) {
+                        labelText = el.getAttribute('aria-label').trim();
+                        labelMethod = 'aria-label';
+                    } else if (el.getAttribute('aria-labelledby')) {
+                        const ref = document.getElementById(el.getAttribute('aria-labelledby'));
+                        labelText = ref ? (ref.innerText || ref.textContent || '').trim() : '';
+                        labelMethod = 'aria-labelledby';
+                    } else if (id) {
+                        const lbl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+                        if (lbl) {
+                            labelText = (lbl.innerText || lbl.textContent || '').trim();
+                            labelMethod = 'label-for';
                         }
-                        return null;
+                    }
+                    if (!labelText) {
+                        const wrap = el.closest('label');
+                        if (wrap) {
+                            labelText = (wrap.innerText || wrap.textContent || '').trim();
+                            labelMethod = 'wrapping-label';
+                        }
+                    }
+                    if (!labelText && el.getAttribute('title')) {
+                        labelText = el.getAttribute('title').trim();
+                        labelMethod = 'title';
+                    }
+                    if (!labelText && el.getAttribute('placeholder')) {
+                        labelText = el.getAttribute('placeholder').trim();
+                        labelMethod = 'placeholder-only';
                     }
 
-                    const inputs = Array.from(document.querySelectorAll(
-                        'input:not([type="hidden"]):not([type="submit"]):not([type="button"])' +
-                        ':not([type="reset"]):not([type="image"]),select,textarea'
-                    ));
+                    const hasLabel = labelMethod !== 'none' && labelMethod !== 'placeholder-only';
+                    const hasPlaceholderOnly = labelMethod === 'placeholder-only';
 
-                    return inputs.map(el => {
-                        const id = el.id || '';
-                        const type = el.getAttribute('type') || el.tagName.toLowerCase();
-                        const name = el.name || '';
-                        const visible = !!(el.offsetParent !== null || el.offsetWidth > 0 || el.offsetHeight > 0);
+                    const required = el.required || el.getAttribute('aria-required') === 'true';
+                    const autocompleteVal = el.getAttribute('autocomplete') || '';
+                    const hasAutocomplete = !!autocompleteVal && autocompleteVal !== 'off';
+                    const suggestedToken = guessToken(el);
+                    const needsAutocomplete = !!suggestedToken && !hasAutocomplete;
 
-                        let labelText = '';
-                        let labelMethod = 'none';
+                    let selector = id ? '#' + id : (name ? '[name="' + name + '"]' : el.tagName.toLowerCase());
+                    if (!id && !name && type) selector += '[type="' + type + '"]';
 
-                        if (el.getAttribute('aria-label')) {
-                            labelText = el.getAttribute('aria-label').trim();
-                            labelMethod = 'aria-label';
-                        } else if (el.getAttribute('aria-labelledby')) {
-                            const ref = document.getElementById(el.getAttribute('aria-labelledby'));
-                            labelText = ref ? (ref.innerText || ref.textContent || '').trim() : '';
-                            labelMethod = 'aria-labelledby';
-                        } else if (id) {
-                            const lbl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
-                            if (lbl) {
-                                labelText = (lbl.innerText || lbl.textContent || '').trim();
-                                labelMethod = 'label-for';
-                            }
-                        }
-                        if (!labelText) {
-                            const wrap = el.closest('label');
-                            if (wrap) {
-                                labelText = (wrap.innerText || wrap.textContent || '').trim();
-                                labelMethod = 'wrapping-label';
-                            }
-                        }
-                        if (!labelText && el.getAttribute('title')) {
-                            labelText = el.getAttribute('title').trim();
-                            labelMethod = 'title';
-                        }
-                        if (!labelText && el.getAttribute('placeholder')) {
-                            labelText = el.getAttribute('placeholder').trim();
-                            labelMethod = 'placeholder-only';
-                        }
+                    return {
+                        id, type, name, visible,
+                        labelText: labelText.slice(0, 100),
+                        hasLabel, labelMethod, hasPlaceholderOnly,
+                        hasRequired: !!required,
+                        hasAutocomplete, autocompleteValue: autocompleteVal,
+                        suggestedAutocomplete: suggestedToken,
+                        needsAutocomplete,
+                        inFieldset: !!el.closest('fieldset'),
+                        selector,
+                        outerHTML: el.outerHTML || '',
+                    };
+                });
+            }""")
 
-                        const hasLabel = labelMethod !== 'none' && labelMethod !== 'placeholder-only';
-                        const hasPlaceholderOnly = labelMethod === 'placeholder-only';
+            form_groups = page.evaluate("""() => {
+                const radio = {}, checkbox = {};
+                document.querySelectorAll('input[type="radio"],input[type="checkbox"]').forEach(el => {
+                    const n = el.name || '';
+                    if (!n) return;
+                    const bucket = el.type === 'radio' ? radio : checkbox;
+                    if (!bucket[n]) bucket[n] = { name: n, type: el.type, count: 0, inFieldset: false };
+                    bucket[n].count++;
+                    if (el.closest('fieldset')) bucket[n].inFieldset = true;
+                });
 
-                        const required = el.required || el.getAttribute('aria-required') === 'true';
-                        const autocompleteVal = el.getAttribute('autocomplete') || '';
-                        const hasAutocomplete = !!autocompleteVal && autocompleteVal !== 'off';
-                        const suggestedToken = guessToken(el);
-                        const needsAutocomplete = !!suggestedToken && !hasAutocomplete;
+                const groups = [...Object.values(radio), ...Object.values(checkbox)]
+                    .filter(g => g.count > 1)
+                    .map(g => ({ ...g, hasMissingFieldset: !g.inFieldset }));
 
-                        let selector = id ? '#' + id : (name ? '[name="' + name + '"]' : el.tagName.toLowerCase());
-                        if (!id && !name && type) selector += '[type="' + type + '"]';
+                const fieldsets = Array.from(document.querySelectorAll('fieldset')).map(fs => {
+                    const legend = fs.querySelector('legend');
+                    return {
+                        hasLegend: !!legend,
+                        legendText: legend ? (legend.innerText || legend.textContent || '').trim().slice(0, 80) : '',
+                        outerHTML: fs.outerHTML || '',
+                    };
+                });
 
-                        return {
-                            id, type, name, visible,
-                            labelText: labelText.slice(0, 100),
-                            hasLabel, labelMethod, hasPlaceholderOnly,
-                            hasRequired: !!required,
-                            hasAutocomplete, autocompleteValue: autocompleteVal,
-                            suggestedAutocomplete: suggestedToken,
-                            needsAutocomplete,
-                            inFieldset: !!el.closest('fieldset'),
-                            selector,
-                            outerHTML: el.outerHTML || '',
-                        };
-                    });
-                }""")
-
-                form_groups = page.evaluate("""() => {
-                    const radio = {}, checkbox = {};
-                    document.querySelectorAll('input[type="radio"],input[type="checkbox"]').forEach(el => {
-                        const n = el.name || '';
-                        if (!n) return;
-                        const bucket = el.type === 'radio' ? radio : checkbox;
-                        if (!bucket[n]) bucket[n] = { name: n, type: el.type, count: 0, inFieldset: false };
-                        bucket[n].count++;
-                        if (el.closest('fieldset')) bucket[n].inFieldset = true;
-                    });
-
-                    const groups = [...Object.values(radio), ...Object.values(checkbox)]
-                        .filter(g => g.count > 1)
-                        .map(g => ({ ...g, hasMissingFieldset: !g.inFieldset }));
-
-                    const fieldsets = Array.from(document.querySelectorAll('fieldset')).map(fs => {
-                        const legend = fs.querySelector('legend');
-                        return {
-                            hasLegend: !!legend,
-                            legendText: legend ? (legend.innerText || legend.textContent || '').trim().slice(0, 80) : '',
-                            outerHTML: fs.outerHTML || '',
-                        };
-                    });
-
-                    return { groups, fieldsets };
-                }""")
-
-            finally:
-                context.close()
-                browser.close()
+                return { groups, fieldsets };
+            }""")
     except Exception as exc:
         errors.append(str(exc))
 
@@ -870,3 +842,40 @@ def run_forms_accessibility_test(url: str, assisted: bool = False) -> dict:
         "issues": issues,
         "errors": errors,
     }
+
+
+# Keyboard last: it presses Tab, which moves focus and focus styles, and that
+# must not change what the other modules see on the shared page.
+_MODULE_ORDER = ("page-structure", "forms", "color-contrast", "keyboard")
+
+
+def run_assistive_modules(url: str, modules: list[str], assisted: bool = False) -> dict:
+    """Run several Assistive Testing modules on ONE browser and ONE page load,
+    instead of each module opening its own browser and loading the site again
+    (4 modules = 4 loads, 24-45 s measured 2026-10-22). Returns {module: result};
+    a module that raises gets {"ok": False, "errors": [reason]}. Page-load
+    failures (e.g. blocked by bot protection) raise, as a single module does."""
+    url = (url or "").strip()
+    if not url:
+        raise ValueError("URL is required")
+    runners = {
+        "keyboard": run_keyboard_assisted_test,
+        "color-contrast": run_color_contrast_assisted_test,
+        "page-structure": run_page_structure_assisted_test,
+        "forms": run_forms_accessibility_test,
+    }
+    wanted = [m for m in _MODULE_ORDER if m in set(modules)]
+    results = {}
+    # Contrast needs the page scan's viewport and settle time; the DOM-based
+    # modules are not viewport-sensitive enough to need their own load.
+    with _page_for(url, assisted, {"width": 1920, "height": 1080}, settle_ms=3000) as page:
+        _shared.page = page
+        try:
+            for m in wanted:
+                try:
+                    results[m] = runners[m](url, assisted)
+                except Exception as exc:
+                    results[m] = {"url": url, "module": m, "ok": False, "passed": False, "checks": [], "errors": [str(exc)]}
+        finally:
+            _shared.page = None
+    return results

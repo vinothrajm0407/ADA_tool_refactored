@@ -54,6 +54,7 @@ from services.url_processor import (
     run_color_contrast_assisted_test,
     run_page_structure_assisted_test,
     run_forms_accessibility_test,
+    run_assistive_modules,
 )
 from services import db
 from backend.services import create_scan_job, get_scan_status
@@ -746,6 +747,40 @@ def api_assisted_forms():
         return jsonify({"ok": True, "result": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# Module id -> the scan_type its single-module endpoint stores in history.
+_ASSISTIVE_HISTORY_TYPE = {"keyboard": "keyboard", "color-contrast": "contrast",
+                           "page-structure": "page-structure", "forms": "forms"}
+
+
+@app.route("/api/assisted/run", methods=["POST"])
+@require_auth
+def api_assisted_run():
+    """Run several Assistive Testing modules on one page load (one browser)
+    instead of one load per module. Body: {url, modules: [...], assisted}.
+    Returns {ok, results: {module: result}}; each module is saved to history
+    exactly as its own endpoint would."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    modules = [m for m in (data.get("modules") or []) if m in _ASSISTIVE_HISTORY_TYPE]
+    if not url:
+        return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
+    if not modules:
+        return jsonify({"ok": False, "error": f"modules must include one of: {', '.join(_ASSISTIVE_HISTORY_TYPE)}"}), 400
+    if refused := _refuse_assisted_on_hosted_server(data):
+        return refused
+    try:
+        results = run_assistive_modules(url, modules, assisted=bool(data.get("assisted")))
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if db.is_ready():
+        for module, result in results.items():
+            try:
+                db.save_assistive_scan(_ASSISTIVE_HISTORY_TYPE[module], url, bool(result.get("passed", False)), result)
+            except Exception as _e:
+                logging.warning("Failed to persist %s scan: %s", module, _e)
+    return jsonify({"ok": True, "results": results})
 
 
 @app.route("/api/assistive-history", methods=["GET"])
