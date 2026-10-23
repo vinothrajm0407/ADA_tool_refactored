@@ -888,6 +888,7 @@ def api_crawl_create():
         return refused
     options = {
         "assisted": assisted,
+        "fast": bool(data.get("fast")),
         "max_depth": data.get("maxDepth"),
         "max_pages": data.get("maxPages"),
         "full_site": bool(data.get("fullSite", False)),

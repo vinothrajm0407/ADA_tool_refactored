@@ -83,9 +83,9 @@ class _CrawlState:
     """Shared by the crawl's worker threads: the BFS queue, what's been seen,
     and the counters. Every read-modify-write goes through `lock`."""
 
-    def __init__(self, crawl_id, root_url, root_domain, max_depth, max_pages, assisted):
+    def __init__(self, crawl_id, root_url, root_domain, max_depth, max_pages, assisted, fast=False):
         self.crawl_id, self.root_url, self.root_domain = crawl_id, root_url, root_domain
-        self.max_depth, self.max_pages, self.assisted = max_depth, max_pages, assisted
+        self.max_depth, self.max_pages, self.assisted, self.fast = max_depth, max_pages, assisted, fast
         self.queue: deque[tuple[str, str | None, int]] = deque([(root_url, None, 0)])
         self.visited: set[str] = {normalize_url(root_url)}
         self.claimed = self.scanned = self.failed = self.active = 0
@@ -168,6 +168,23 @@ def _crawl_worker(c: _CrawlState) -> None:
             c.more_work.notify_all()
 
 
+def _settle(pw_page, fast: bool) -> None:
+    """Let JavaScript-rendered content appear before axe runs.
+
+    Default: a fixed 3s. fast: wait for the page's load event (max 5s) plus
+    1s — measured 2026-10-23 on 20 pages: 1.7-2.4x quicker, identical results
+    on 18/20, but on one heavy site (booking.com) it missed issues that render
+    late. So it's an opt-in "Fast crawl", not the default."""
+    if not fast:
+        pw_page.wait_for_timeout(3000)
+        return
+    try:
+        pw_page.wait_for_load_state("load", timeout=5000)
+    except Exception:
+        pass
+    pw_page.wait_for_timeout(1000)
+
+
 def _scan_one_page(c: _CrawlState, pw_page, axe, PWTimeout, url, parent_url, depth) -> bool:
     """Load, check and axe-scan one page, and persist it. True if scanned."""
     crawl_id = c.crawl_id
@@ -205,7 +222,7 @@ def _scan_one_page(c: _CrawlState, pw_page, axe, PWTimeout, url, parent_url, dep
             # — unreliable on pages with continuous third-party
             # script churn that never actually goes quiet.
             response = pw_page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            pw_page.wait_for_timeout(3000)
+            _settle(pw_page, c.fast)
         except PWTimeout:
             response = None  # proceed with what loaded
         # A bot-protection challenge page is not the site — fail this
@@ -299,6 +316,7 @@ def crawl_site_task(
     notify_email: str = None,
     user_id: int = None,
     assisted: bool = False,
+    fast: bool = False,
 ) -> dict:
     """
     BFS site crawl: CRAWL_CONCURRENCY worker threads, each with its own
@@ -314,7 +332,7 @@ def crawl_site_task(
     )
 
     root_domain = get_root_domain(root_url)
-    c = _CrawlState(crawl_id, root_url, root_domain, max_depth, max_pages, assisted)
+    c = _CrawlState(crawl_id, root_url, root_domain, max_depth, max_pages, assisted, fast)
     # Several pages at once, each worker with its own browser: about half of a
     # page's time is the fixed settle wait (measured 2026-10-22), so scanning
     # one page at a time left the machine idle. An assisted crawl keeps a single

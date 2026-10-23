@@ -46,3 +46,13 @@ def test_cancel_and_finish(db):
     with patch.object(crawl_task, "inmemory_get_status", return_value="running"):
         c2.next_page(); c2.finish_page(True)
         assert c2.next_page() is None                             # nothing queued, nobody busy -> done
+
+
+def test_settle_default_waits_3s_and_fast_waits_for_load_then_1s():
+    from unittest.mock import MagicMock
+    page = MagicMock()
+    crawl_task._settle(page, fast=False)
+    page.wait_for_timeout.assert_called_once_with(3000); page.wait_for_load_state.assert_not_called()
+    page = MagicMock()
+    crawl_task._settle(page, fast=True)
+    page.wait_for_load_state.assert_called_once_with("load", timeout=5000); page.wait_for_timeout.assert_called_once_with(1000)

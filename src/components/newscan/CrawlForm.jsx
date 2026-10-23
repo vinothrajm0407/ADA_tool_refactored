@@ -29,6 +29,8 @@ export default function CrawlForm({
   onFullSiteChange,
   assisted,
   onAssistedChange,
+  fast,
+  onFastChange,
   notifyEmail,
   onNotifyEmailChange,
   crawlLoading,
@@ -120,6 +122,27 @@ export default function CrawlForm({
             />
           </div>
         </div>
+
+        {onFastChange && (
+          <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white mt-3">
+            <div className="flex-1 min-w-0">
+              <p id="crawl-fast-label" className="text-sm font-semibold text-ink m-0">Fast crawl</p>
+              <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
+                About 2× quicker per page: scans as soon as each page has loaded instead of waiting a fixed 3 seconds.
+                Heavy, script-built pages can show issues late, so a few may be missed — leave it off for a full audit.
+              </p>
+            </div>
+            <div className="flex-shrink-0 pt-0.5">
+              <Toggle
+                id="crawl-fast"
+                checked={!!fast}
+                onChange={e => onFastChange(e.target.checked)}
+                disabled={crawlLoading}
+                ariaLabelledBy="crawl-fast-label"
+              />
+            </div>
+          </div>
+        )}
 
         {onAssistedChange && (
           <div className="flex items-start justify-between gap-8 p-4 rounded-xl border border-solid border-gray-200 bg-white mt-3">

@@ -77,6 +77,7 @@ def create_crawl_job(root_url: str, options: dict | None = None) -> dict:
     notify_email = (options.get("notify_email") or "").strip() or None
     user_id = options.get("user_id")
     assisted = bool(options.get("assisted"))
+    fast = bool(options.get("fast"))
     if full_site:
         max_depth = Config.CRAWL_MAX_DEPTH_FULL
         max_pages = Config.CRAWL_MAX_PAGES_FULL
@@ -126,6 +127,7 @@ def create_crawl_job(root_url: str, options: dict | None = None) -> dict:
         notify_email=notify_email,
         user_id=user_id,
         assisted=assisted,
+        fast=fast,
     )
     rq_job_id = str(getattr(job, "id", "")) or None
 
