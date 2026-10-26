@@ -289,7 +289,6 @@ export default function NewScanPage() {
   const [maxDepth, setMaxDepth]         = useState(3);
   const [fullSite, setFullSite]         = useState(false);
   const [crawlAssisted, setCrawlAssisted] = useState(false);
-  const [crawlFast, setCrawlFast]       = useState(false);
   const [notifyEmail, setNotifyEmail]   = useState('');
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError]     = useState('');
@@ -394,7 +393,7 @@ export default function NewScanPage() {
       const res  = await apiFetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, maxPages, maxDepth, fullSite, assisted: crawlAssisted, fast: crawlFast, notifyEmail: notifyEmail.trim() || undefined }),
+        body: JSON.stringify({ url, maxPages, maxDepth, fullSite, assisted: crawlAssisted, notifyEmail: notifyEmail.trim() || undefined }),
       });
       const data = await res.json();
       if (!data.ok) { setCrawlLoading(false); setCrawlError(data.error || 'Failed to start crawl.'); return; }
@@ -403,7 +402,7 @@ export default function NewScanPage() {
       setCrawlUrl('');
       setFocusedTab({ kind: 'crawl', id: data.crawl_id });
     } catch { setCrawlLoading(false); setCrawlError('Network error. Please try again.'); }
-  }, [crawlUrl, maxPages, maxDepth, fullSite, crawlAssisted, crawlFast, notifyEmail, createCrawlSession]);
+  }, [crawlUrl, maxPages, maxDepth, fullSite, crawlAssisted, notifyEmail, createCrawlSession]);
 
   const result     = activeSession?.result ?? null;
   const violations = result?.axeResult?.violations ?? [];
@@ -621,8 +620,6 @@ export default function NewScanPage() {
                   onFullSiteChange={setFullSite}
                   assisted={crawlAssisted}
                   onAssistedChange={setCrawlAssisted}
-                  fast={crawlFast}
-                  onFastChange={setCrawlFast}
                   notifyEmail={notifyEmail}
                   onNotifyEmailChange={setNotifyEmail}
                   crawlLoading={crawlLoading}

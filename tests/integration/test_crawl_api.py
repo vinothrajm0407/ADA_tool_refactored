@@ -294,9 +294,3 @@ class TestAssistedCrawl:
         with patch("app.Config.IS_PRODUCTION", True), patch("app.create_crawl_job") as create:
             resp = client.post("/api/crawl", json={"url": "https://example.com", "assisted": True}, headers=authed_headers)
         assert resp.status_code == 400 and not create.called
-
-
-def test_fast_crawl_flag_reaches_the_crawl(client, db_mock, authed_headers):
-    with patch("app.create_crawl_job", return_value=_fake_crawl_job()) as create:
-        resp = client.post("/api/crawl", json={"url": "https://example.com", "fast": True}, headers=authed_headers)
-    assert resp.status_code == 202 and create.call_args[0][1]["fast"] is True

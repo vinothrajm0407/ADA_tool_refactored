@@ -48,11 +48,18 @@ def test_cancel_and_finish(db):
         assert c2.next_page() is None                             # nothing queued, nobody busy -> done
 
 
-def test_settle_default_waits_3s_and_fast_waits_for_load_then_1s():
+def test_settle_stops_once_the_page_stops_growing():
     from unittest.mock import MagicMock
     page = MagicMock()
-    crawl_task._settle(page, fast=False)
-    page.wait_for_timeout.assert_called_once_with(3000); page.wait_for_load_state.assert_not_called()
+    page.evaluate.side_effect = [500, 900, 905]          # grew, then stable
+    crawl_task._settle(page)
+    page.wait_for_load_state.assert_called_once_with("load", timeout=5000)
+    assert page.wait_for_timeout.call_count == 2        # 1s after first count, 1s after growth
+
+
+def test_settle_is_capped_and_survives_a_redirect():
+    from unittest.mock import MagicMock
     page = MagicMock()
-    crawl_task._settle(page, fast=True)
-    page.wait_for_load_state.assert_called_once_with("load", timeout=5000); page.wait_for_timeout.assert_called_once_with(1000)
+    page.evaluate.side_effect = [100, RuntimeError("Execution context was destroyed"), 300, 600, 1200]  # keeps growing
+    crawl_task._settle(page)
+    assert page.wait_for_timeout.call_count == 5        # hard cap: at most 5s after load
