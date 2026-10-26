@@ -1,5 +1,11 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// Where the dev server sends /api calls. Default: a backend on this machine.
+// A frontend-only developer can point it at a teammate's running backend
+// instead (no database or Python needed) — put this in .env.local:
+//   ADA_API_TARGET=http://192.168.7.40:5000
+const API_TARGET = loadEnv(process.env.NODE_ENV || 'development', process.cwd(), '').ADA_API_TARGET || 'http://localhost:5000'
 
 export default defineConfig({
   plugins: [react()],
@@ -8,7 +14,7 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: API_TARGET,
         changeOrigin: true,
       },
       // Backend-only test-fixture relay routes (no frontend route matches
@@ -20,7 +26,7 @@ export default defineConfig({
       // 2026-10-06: scanning this path through the tunnel found our own
       // app's violations, not the test fixture's).
       '^/_ada_.*_relay.*': {
-        target: 'http://localhost:5000',
+        target: API_TARGET,
         changeOrigin: true,
       },
     },
