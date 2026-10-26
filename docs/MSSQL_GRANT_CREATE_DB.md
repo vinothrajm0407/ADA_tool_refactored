@@ -4,17 +4,17 @@ When using **Windows Authentication**, your Windows login must be allowed to **c
 
 ## In SSMS (connected as an admin, e.g. your Windows user if it’s admin)
 
-Run this **once** (replace `DESKTOP-P76MTNH\YourUsername` with your actual Windows login, e.g. the one you use to log into the PC):
+Run this **once** (replace `YOUR-PC\YourUsername` with your actual Windows login, e.g. the one you use to log into the PC):
 
 ```sql
 -- Add your Windows user to the dbcreator role so the app can create ADA_DB
 USE master;
 GO
 
-CREATE LOGIN [DESKTOP-P76MTNH\YourUsername] FROM WINDOWS;
+CREATE LOGIN [YOUR-PC\YourUsername] FROM WINDOWS;
 GO
 
-ALTER SERVER ROLE [dbcreator] ADD MEMBER [DESKTOP-P76MTNH\YourUsername];
+ALTER SERVER ROLE [dbcreator] ADD MEMBER [YOUR-PC\YourUsername];
 GO
 ```
 
@@ -24,5 +24,5 @@ After this, run the app again with `MSSQL_CONN_STR` set; it should create `ADA_D
 
 ## How to find your Windows username
 
-- In PowerShell: `whoami`  → e.g. `DESKTOP-P76MTNH\sheik`
-- Use that full value in the script above (e.g. `[DESKTOP-P76MTNH\sheik]`).
+- In PowerShell: `whoami`  → e.g. `YOUR-PC\your.name`
+- Use that full value in the script above (e.g. `[YOUR-PC\your.name]`).
