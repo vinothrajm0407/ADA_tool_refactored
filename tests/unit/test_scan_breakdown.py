@@ -21,6 +21,12 @@ def test_scan_breakdown_counts_rules_by_impact_level_and_review():
     assert b["review"] == 2
 
 
+def test_scan_breakdown_counts_affected_elements_for_trends():
+    many = {"impact": "serious", "tags": [], "nodes": [{}, {}, {}]}
+    b = _scan_breakdown({"axeResult": {"violations": [many, {"impact": "critical", "tags": []}]}})
+    assert b["nodes"] == {"critical": 1, "serious": 3, "moderate": 0, "minor": 0}  # no node list counts as 1
+
+
 def test_wcag_level_prefers_higher_level_when_tags_mix():
     assert _wcag_level(["wcag2a", "wcag2aa"]) == "aa"
     assert _wcag_level(["wcag2aaa"]) == "aaa"

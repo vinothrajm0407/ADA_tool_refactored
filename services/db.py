@@ -1255,16 +1255,19 @@ def _wcag_level(tags) -> str:
 
 
 def _scan_breakdown(result: dict) -> dict:
-    """Rule counts by impact and WCAG level, plus axe's 'needs review' (incomplete)
+    """Rule (and element) counts by impact and WCAG level, plus axe's 'needs review' (incomplete)
     count — the numbers Scan History trends chart without re-reading the payload."""
     axe = (result or {}).get("axeResult") or {}
     impact = {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
+    nodes = dict(impact)  # affected elements by impact, for the dashboard trends
     level = {"a": 0, "aa": 0, "aaa": 0, "best_practice": 0}
     for v in axe.get("violations") or []:
         key = (v.get("impact") or "minor").lower()
-        impact[key if key in impact else "minor"] += 1
+        key = key if key in impact else "minor"
+        impact[key] += 1
+        nodes[key] += max(len(v.get("nodes") or []), 1)
         level[_wcag_level(v.get("tags"))] += 1
-    return {"impact": impact, "level": level, "review": len(axe.get("incomplete") or [])}
+    return {"impact": impact, "nodes": nodes, "level": level, "review": len(axe.get("incomplete") or [])}
 
 
 def get_scan_history(limit: int = 500):
@@ -1488,8 +1491,10 @@ def get_scan_trends(
                 "total_passes": int(row[3] or 0),
             }
 
-        # Per-day severity breakdown (critical/serious/moderate/minor), parsed from
-        # each scan's stored axe payload the same way get_violation_intel does.
+        # Per-day severity breakdown (critical/serious/moderate/minor): element
+        # counts from each scan's small Breakdown, not its multi-MB payload
+        # (30 days was 2.7 GB read per dashboard load: 21s, 2026-11-05). A scan
+        # saved before Breakdown had "nodes" gets it computed once and stored.
         # Only meaningful at daily granularity — matching SQL Server's own
         # week/month bucketing exactly in Python isn't worth the risk for a path
         # the trends dashboard doesn't currently request.
@@ -1497,33 +1502,25 @@ def get_scan_trends(
             severity_by_date: dict[str, dict[str, int]] = {}
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT CAST(TimestampUtc AS DATE), ResultPayload
-                    FROM dbo.ScanHistory
-                    WHERE TimestampUtc >= ? AND TimestampUtc < ? AND ResultPayload IS NOT NULL
-                    """,
+                    "SELECT Id, CAST(TimestampUtc AS DATE), Breakdown FROM dbo.ScanHistory"
+                    " WHERE TimestampUtc >= ? AND TimestampUtc < ?",
                     (start_str, end_str),
                 )
-                for bucket_date, payload_raw in cur.fetchall():
-                    try:
-                        payload = json.loads(payload_raw) if payload_raw else None
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-                    if not isinstance(payload, dict):
-                        continue
-                    axe = payload.get("axeResult") or {}
-                    if not isinstance(axe, dict):
-                        continue
+                rows = cur.fetchall()
+                for scan_id, bucket_date, breakdown_raw in rows:
+                    nodes = (_safe_json(breakdown_raw) or {}).get("nodes")
+                    if nodes is None:
+                        cur.execute("SELECT ResultPayload FROM dbo.ScanHistory WHERE Id = ?", (scan_id,))
+                        breakdown = _scan_breakdown(_safe_json(cur.fetchone()[0]) or {})
+                        cur.execute("UPDATE dbo.ScanHistory SET Breakdown = ? WHERE Id = ?",
+                                    (json.dumps(breakdown), scan_id))
+                        conn.commit()
+                        nodes = breakdown["nodes"]
                     bucket = severity_by_date.setdefault(
                         bucket_date.isoformat(), {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
                     )
-                    for v in (axe.get("violations") or []):
-                        if not isinstance(v, dict):
-                            continue
-                        impact = (v.get("impact") or "minor").lower()
-                        if impact not in bucket:
-                            impact = "minor"
-                        bucket[impact] += max(len(v.get("nodes") or []), 1)
+                    for impact in bucket:
+                        bucket[impact] += nodes.get(impact, 0)
             for item in data:
                 sev = severity_by_date.get(
                     (item["date"] or "")[:10], {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
