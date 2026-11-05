@@ -29,9 +29,13 @@ def _format_enqueued_at(value):
         return str(value)
 
 
-def create_scan_job(url: str, metadata: dict | None = None):
+def create_scan_job(url: str, metadata: dict | None = None, login: dict | None = None):
+    """login (with the password) goes to the task only, never into metadata,
+    which is saved with the job."""
     metadata = metadata or {}
     normalized_url = validate_scan_url(url)
+    if login:
+        validate_scan_url(login["url"])
     job_meta = {"scan_url": normalized_url, "metadata": metadata}
 
     try:
@@ -41,6 +45,7 @@ def create_scan_job(url: str, metadata: dict | None = None):
             metadata,
             timeout=Config.SCAN_TIMEOUT_SECONDS,
             meta=job_meta,
+            **({"login": login} if login else {}),
         )
     except Exception as exc:
         logger.error("Failed to enqueue scan job", exc_info=exc)

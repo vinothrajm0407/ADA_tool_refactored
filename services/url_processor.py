@@ -18,7 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 OUTPUT_JSON = PROJECT_ROOT / "output" / "ada_result.json"
 
-from scripts.run_ada_check_python import load_page_checked, scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
+from scripts.run_ada_check_python import BROWSER_ARGS, load_page_checked, scanner_user_agent  # noqa: E402  (needs PROJECT_ROOT on sys.path)
 import threading  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
 
@@ -37,7 +37,7 @@ def _page_for(url: str, assisted: bool, viewport: dict, settle_ms: int = 800):
         return
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not assisted)
+        browser = p.chromium.launch(headless=not assisted, args=BROWSER_ARGS)
         context = browser.new_context(
             viewport=viewport, ignore_https_errors=True,
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
@@ -98,7 +98,7 @@ def _extract_ratio_info(failure_summary: str) -> dict:
 
 
 def process_url(url: str, include_best_practices: bool = False, write_output: bool = False,
-                assisted: bool = False) -> dict:
+                assisted: bool = False, login: dict | None = None) -> dict:
     """
     Run ADA check for the given URL using Playwright + axe (axe-playwright-python).
     Returns dict with axeResult (full axe report) and message.
@@ -107,10 +107,12 @@ def process_url(url: str, include_best_practices: bool = False, write_output: bo
     if not url:
         raise ValueError("URL is required")
 
-    from scripts.run_ada_check_python import run_axe_playwright
+    from scripts.run_ada_check_python import run_axe_playwright, with_person_fallback
 
     try:
-        axe_result = run_axe_playwright(url, include_best_practices=include_best_practices, assisted=assisted)
+        axe_result = with_person_fallback(
+            lambda a: run_axe_playwright(url, include_best_practices=include_best_practices, assisted=a,
+                                         login=login), assisted)
     except Exception as e:
         logger.exception("Playwright scan failed for %s", url)
         raise
@@ -865,17 +867,22 @@ def run_assistive_modules(url: str, modules: list[str], assisted: bool = False) 
         "forms": run_forms_accessibility_test,
     }
     wanted = [m for m in _MODULE_ORDER if m in set(modules)]
-    results = {}
-    # Contrast needs the page scan's viewport and settle time; the DOM-based
-    # modules are not viewport-sensitive enough to need their own load.
-    with _page_for(url, assisted, {"width": 1920, "height": 1080}, settle_ms=3000) as page:
-        _shared.page = page
-        try:
-            for m in wanted:
-                try:
-                    results[m] = runners[m](url, assisted)
-                except Exception as exc:
-                    results[m] = {"url": url, "module": m, "ok": False, "passed": False, "checks": [], "errors": [str(exc)]}
-        finally:
-            _shared.page = None
-    return results
+
+    def run(assisted):
+        results = {}
+        # Contrast needs the page scan's viewport and settle time; the DOM-based
+        # modules are not viewport-sensitive enough to need their own load.
+        with _page_for(url, assisted, {"width": 1920, "height": 1080}, settle_ms=3000) as page:
+            _shared.page = page
+            try:
+                for m in wanted:
+                    try:
+                        results[m] = runners[m](url, assisted)
+                    except Exception as exc:
+                        results[m] = {"url": url, "module": m, "ok": False, "passed": False, "checks": [], "errors": [str(exc)]}
+            finally:
+                _shared.page = None
+        return results
+
+    from scripts.run_ada_check_python import with_person_fallback
+    return with_person_fallback(run, assisted)

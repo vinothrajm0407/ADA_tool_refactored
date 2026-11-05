@@ -3,7 +3,6 @@ import { useApp } from '../context/AppContext';
 import { apiFetch } from '../utils/api';
 import { Play, AlertCircle, Link2, CheckCircle2, CircleMinus, Info, ArrowRight, ExternalLink } from 'lucide-react';
 import ScanProgress from '../components/newscan/ScanProgress';
-import Toggle from '../components/newscan/Toggle';
 import ScoreGauge from '../components/ui/ScoreGauge';
 import AssistiveResultView, { MODULE_LABELS } from '../components/assistive/AssistiveResultView';
 import './NewScanPage.css';
@@ -58,7 +57,7 @@ export default function AssistiveTestingPage() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [assisted, setAssisted] = useState(false);
+  const assisted = false; // the backend opens a visible window by itself when a site wants a person
   const [autoRun, setAutoRun] = useState(false);
   const [history, setHistory] = useState([]);
   const [selectedModuleIds, setSelectedModuleIds] = useState(() => new Set());
@@ -273,24 +272,6 @@ export default function AssistiveTestingPage() {
                       className="glow-input glow-input--large-text has-left-icon"
                       aria-describedby={error ? 'assistive-url-error' : undefined}
                       aria-invalid={error ? 'true' : undefined}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-start justify-between gap-6 p-4 rounded-xl border border-gray-200">
-                  <div className="flex-1 min-w-0">
-                    <p id="assistive-visible-label" className="text-sm font-semibold text-ink m-0">Use a visible browser</p>
-                    <p className="text-sm text-body mt-1 mb-0 leading-relaxed">
-                      For sites with bot protection (e.g. Cloudflare). A browser window opens on this computer for each
-                      module — if the site asks you to verify you're human, complete it there.
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0 pt-0.5">
-                    <Toggle
-                      id="assistive-visible"
-                      checked={assisted}
-                      onChange={(e) => setAssisted(e.target.checked)}
-                      ariaLabelledBy="assistive-visible-label"
                     />
                   </div>
                 </div>

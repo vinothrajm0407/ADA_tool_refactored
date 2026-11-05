@@ -11,6 +11,7 @@ Usage: python scripts/run_ada_check_python.py <url>
 """
 import base64
 import json
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -85,7 +86,43 @@ def scanner_user_agent(browser, headless: bool = True) -> str:
 
 
 _CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "security check",
-                     "verify you are human", "pardon our interruption", "request unsuccessful")
+                     "verify you are human", "pardon our interruption", "request unsuccessful",
+                     "authentication required")
+# Markers only a challenge page has, whatever its title or status. Amazon's
+# "are you a robot" page keeps the normal "Amazon.in" title and HTTP 200.
+_CHALLENGE_PAGES = (("/errors/validatecaptcha", "Amazon"),)
+
+# Every scanner browser refuses permission prompts (local network access,
+# notifications, location...): no scan needs them, and a visible one blocked
+# the page (amazon.in asked for local network access, 2026-10-28).
+BROWSER_ARGS = ["--deny-permission-prompts"]
+
+
+class BotBlocked(RuntimeError):
+    """The site showed a bot-protection check instead of the page."""
+
+
+def can_ask_person() -> bool:
+    """A visible window only helps when the backend runs on the person's own
+    PC: a hosted server has no screen (and no one at it)."""
+    try:
+        from config import Config
+        return not Config.IS_PRODUCTION
+    except Exception:
+        return False
+
+
+def with_person_fallback(run, assisted: bool = False):
+    """run(assisted) hidden first. If the site wants a person (a "verify you
+    are human" check), run it again in a visible window on this PC, where the
+    person completes the check. No setting: the window only appears when asked."""
+    try:
+        return run(assisted)
+    except BotBlocked:
+        if assisted or not can_ask_person():
+            raise
+        logging.getLogger(__name__).info("Site wants a person: reopening in a visible browser")
+        return run(True)
 _CHALLENGE_VENDORS = (("captcha-delivery.com", "DataDome"), ("_incapsula_resource", "Imperva"),
                       ("px-captcha", "PerimeterX"), ("cf-chl", "Cloudflare"), ("cloudflare", "Cloudflare"),
                       ("akamai", "Akamai"))
@@ -99,8 +136,9 @@ def bot_challenge_reason(status: int | None, title: str, html: str) -> str | Non
     real issues. A known challenge title, or a blocking status plus a vendor marker,
     counts; a vendor script alone doesn't (protected sites embed it on normal pages)."""
     t, h = (title or "").strip().lower(), (html or "").lower()
-    vendor = next((name for marker, name in _CHALLENGE_VENDORS if marker in h), None)
-    if not (any(t.startswith(x) for x in _CHALLENGE_TITLES) or (status in (403, 429, 503) and vendor)):
+    page_marker = next((name for marker, name in _CHALLENGE_PAGES if marker in h), None)
+    vendor = page_marker or next((name for marker, name in _CHALLENGE_VENDORS if marker in h), None)
+    if not (page_marker or any(t.startswith(x) for x in _CHALLENGE_TITLES) or (status in (403, 429, 503) and vendor)):
         return None
     return (f"Blocked by the site's bot protection ({vendor or 'security check'}"
             f"{f', HTTP {status}' if status else ''}): the scanner was shown a verification page, "
@@ -157,7 +195,7 @@ def load_page_checked(page, url: str, assisted: bool = False, timeout: int = 450
     if blocked and assisted and wait_for_person_to_verify(page):
         blocked = None
     if blocked:
-        raise RuntimeError(blocked)
+        raise BotBlocked(blocked)
     # Some sites redirect again shortly after load (seen on tommyjohn.com ->
     # /pages/explore), which destroys the page mid-test ("Execution context was
     # destroyed"). Wait until the address has stopped changing for 1s.
@@ -172,25 +210,38 @@ def load_page_checked(page, url: str, assisted: bool = False, timeout: int = 450
         pass
 
 
-def run_axe_playwright(url: str, include_best_practices: bool = False, assisted: bool = False) -> dict:
+def run_axe_playwright(url: str, include_best_practices: bool = False, assisted: bool = False,
+                       login: dict | None = None) -> dict:
     """assisted=True opens a visible browser window on this computer, for sites
     whose bot protection blocks headless browsers: if the site shows a
     verification page, the person at the computer completes it, then the scan
     runs on the real page. Only meaningful when the server runs on the user's
-    own machine (there is no screen on a hosted server)."""
+    own machine (there is no screen on a hosted server).
+    login: {url, username, password, ...} — signs in first (the crawl's login
+    code) and scans the page as the logged-in user."""
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     from axe_playwright_python.sync_playwright import Axe
 
+    session = None
+    if login:
+        from backend.services.crawl_task import sign_in
+        from services.crawler import get_root_domain
+        session, _, assisted = sign_in(login, get_root_domain(url), assisted, "scan")
+
     axe = Axe()
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=not assisted)
+        browser = playwright.chromium.launch(headless=not assisted, args=BROWSER_ARGS)
         context = browser.new_context(
             viewport=SCREENSHOT_VIEWPORT, ignore_https_errors=True,
             user_agent=scanner_user_agent(browser, headless=not assisted),
             # Harmless on every other site — only an ngrok-tunneled dev URL checks
             # for this header, to skip its free-tier browser-warning interstitial.
             extra_http_headers={"ngrok-skip-browser-warning": "true"},
+            storage_state=session,
         )
+        if session:
+            from backend.services.crawl_task import add_session_storage
+            add_session_storage(context, session)
         page = context.new_page()
         # Chromium's HTTP disk cache persists across separate launch() calls
         # on this machine (confirmed live 2026-10-05: a test-app URL scanned
@@ -234,7 +285,14 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
                 f"{ASSISTED_VERIFY_SECONDS // 60} minutes, so the scan stopped. Run it again and complete "
                 "the check in the window that opens.")
         if blocked:
-            raise RuntimeError(blocked)
+            raise BotBlocked(blocked)
+        if session:
+            from backend.services.crawl_task import _shows_login_page
+            from services.crawler import normalize_url
+            if normalize_url(url) != normalize_url(login["url"]) and _shows_login_page(
+                    page, login["url"], session.get("loginForm")):
+                raise RuntimeError("Not logged in on this page: the site showed its login page instead, so it "
+                                   "was not scored. Check the login details, or the page may need a different account.")
         # Was wcag2a/wcag2aa only — silently excluded every WCAG 2.1-specific
         # rule (confirmed live 2026-10-05: axe DevTools found autocomplete-valid,
         # a wcag21aa rule, on a page where this tool found nothing for it,

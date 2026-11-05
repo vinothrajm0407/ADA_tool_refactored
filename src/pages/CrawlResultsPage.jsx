@@ -15,6 +15,8 @@ import {
   Share2,
   Loader2,
   Printer,
+  Lock,
+  LockOpen,
 } from 'lucide-react';
 import SendReportModal from '../components/integrations/SendReportModal';
 import { useApp } from '../context/AppContext';
@@ -26,6 +28,7 @@ import CrawlIntelPanel from '../components/crawl/CrawlIntelPanel';
 import CrawlRegressionPanel from '../components/crawl/CrawlRegressionPanel';
 import CrawlAISummaryPanel from '../components/crawl/CrawlAISummaryPanel';
 import PageTrendsPanel from '../components/crawl/PageTrendsPanel';
+import LoginComparePanel from '../components/crawl/LoginComparePanel';
 import ScoreRing from '../components/ui/ScoreRing';
 
 
@@ -38,6 +41,53 @@ const FILTERS = [
   { id: 'failed', label: 'Failed to scan' },
 ];
 
+// Login crawls tag each page: public, or reachable only after signing in.
+const SECTIONS = {
+  before_login: { label: 'Public', Icon: LockOpen, hint: 'Anyone can open these, including the login page itself' },
+  after_login:  { label: 'Members-only', Icon: Lock, hint: 'Only open after logging in — a visitor is sent away' },
+};
+
+function SectionCompare({ pages, active, onPick, finished }) {
+  const unsorted = pages.filter((p) => !p.section && p._status === 'Failed').length;
+  return (
+    <section className="card p-6" aria-labelledby="section-compare-title">
+      <h3 id="section-compare-title" className="text-lg font-heading font-bold text-ink leading-snug m-0">Public vs members-only pages</h3>
+      <p className="text-sm text-body mt-1 mb-4">This crawl logged in. Every page was checked: can a visitor open it too? Click a side to show only its pages below.</p>
+      {finished && !pages.some((p) => p.section === 'after_login') && pages.some((p) => p.section) && (
+        <p role="note" className="text-sm text-ink bg-amber/10 rounded-xl px-4 py-3 mb-4">
+          The login worked, but no members-only pages were found — every page this crawl reached is public. To scan the
+          members area, start the crawl from a page inside it (for example the account or dashboard URL).
+        </p>
+      )}
+      <div className="grid sm:grid-cols-2 gap-4">
+        {Object.entries(SECTIONS).map(([id, { label, Icon, hint }]) => {
+          const group = pages.filter((p) => p.section === id);
+          const violations = group.reduce((n, p) => n + p._violations, 0);
+          const avg = group.length ? Math.round(group.reduce((n, p) => n + p._score, 0) / group.length) : null;
+          const withIssues = group.filter((p) => p._violations > 0).length;
+          return (
+            <button key={id} type="button" onClick={() => onPick(active === id ? 'all' : id)} aria-pressed={active === id}
+              className={`text-left rounded-2xl border-2 border-solid p-5 transition-colors cursor-pointer bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-teal ${active === id ? 'border-teal' : 'border-gray-100 hover:border-gray-200'}`}>
+              <span className="inline-flex items-center gap-2 font-heading font-semibold text-ink"><Icon size={16} aria-hidden="true" /> {label}</span>
+              <span className="block text-xs text-body mt-1">{hint}</span>
+              <span className="grid grid-cols-4 gap-2 mt-4 text-center">
+                {[[group.length, 'Pages'], [avg ?? '—', 'Avg score'], [violations, 'Violations'], [withIssues, 'With issues']].map(([v, l]) => (
+                  <span key={l}><span className="block font-heading font-bold text-2xl text-ink tabular-nums">{v}</span><span className="block text-[11px] text-body">{l}</span></span>
+                ))}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {unsorted > 0 && (
+        <p className="text-xs text-body mt-3 mb-0">
+          {unsorted} page{unsorted === 1 ? '' : 's'} failed to scan (for example blocked by the site) and {unsorted === 1 ? "isn't" : "aren't"} counted on either side.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function verdictFor(score) {
   return score >= 80 ? { label: 'Good', text: 'Most pages pass. Keep an eye on new pages.' }
     : score >= 60 ? { label: 'Fair', text: 'Some pages have real barriers — start with the worst ones.' }
@@ -47,7 +97,7 @@ function verdictFor(score) {
 function StatTile({ value, label }) {
   return (
     <div className="rounded-xl bg-white px-4 py-4 text-center shadow-sm">
-      <p className="font-heading font-bold text-3xl leading-none m-0 tabular-nums text-ink">{value}</p>
+      <p className={`font-heading font-bold leading-none m-0 tabular-nums text-ink ${String(value).length > 5 ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
       <p className="text-xs text-body mt-1.5 mb-0 font-medium">{label}</p>
     </div>
   );
@@ -86,7 +136,7 @@ function computePageScore(page) {
 }
 
 function exportCSV(pages) {
-  const header = ['URL', 'Score', 'Pass Rate', 'Violations', 'Depth', 'Status'];
+  const header = ['URL', 'Score', 'Pass Rate', 'Violations', 'Depth', 'Status', 'Section', 'Found on', 'Via button'];
   const rows = pages.map((p) => [
     `"${(p.url || '').replace(/"/g, '""')}"`,
     computePageScore(p),
@@ -94,6 +144,9 @@ function exportCSV(pages) {
     violationCount(p),
     p.depth ?? '',
     normaliseStatus(p.status),
+    SECTIONS[p.section]?.label ?? '',
+    `"${(p.parent_url || '').replace(/"/g, '""')}"`,
+    `"${(p.via || '').replace(/"/g, '""')}"`,
   ]);
   const csv = [header, ...rows].map((r) => r.join(',')).join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
@@ -144,10 +197,24 @@ function ScoreMiniBar({ score }) {
   );
 }
 
+// One labelled row of filter buttons; exactly one is selected.
+function FilterGroup({ label, options, value, onChange }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={`Filter by ${label.toLowerCase()}`}>
+      <span className="w-16 text-[11px] font-semibold uppercase tracking-widest text-body">{label}</span>
+      {options.map((o) => (
+        <FilterPill key={o.id} label={`${o.label} · ${o.count}`} active={value === o.id} onClick={() => onChange(o.id)} />
+      ))}
+    </div>
+  );
+}
+
 function FilterPill({ label, active, onClick }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
         active
           ? 'bg-teal text-white'
@@ -232,9 +299,13 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   const [drawerViolations, setDrawerViolations] = useState(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [reCrawlPassword, setReCrawlPassword] = useState(null); // null = prompt closed
+  const [reCrawlError, setReCrawlError] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [sectionFilter, setSectionFilter] = useState('all');
   const [sortKey, setSortKey] = useState('violations');
   const [sortDir, setSortDir] = useState('desc');
+  const [tablePage, setTablePage] = useState(0);
   const [reCrawlLoading, setReCrawlLoading] = useState(false);
   const [stopLoading, setStopLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -343,9 +414,23 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   }
 
   // ---- re-crawl ------------------------------------------------------------
-  async function handleReCrawl() {
+  function openCrawl(id) {
+    // In tab mode, re-target this same tab (see handleReCrawl).
+    if (onRecrawl) onRecrawl(id);
+    else setCrawlId(id);
+    setSelectedRow(null);
+    setDrawerViolations(null);
+    setPages([]);
+    setJob(null);
+    setPolling(false);
+  }
+
+  async function handleReCrawl(password) {
     if (!job || reCrawlLoading) return;
+    // A login crawl needs the password again — it is never saved with the crawl.
+    if (job.login && password === undefined) { setReCrawlPassword(''); return; }
     setReCrawlLoading(true);
+    setReCrawlError('');
     try {
       const res = await apiFetch('/api/crawl', {
         method: 'POST',
@@ -356,10 +441,21 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
           ...(job.max_pages > 500
             ? { fullSite: true }
             : { maxPages: job.max_pages }),
+          ...(job.extra_urls?.length && { extraPages: job.extra_urls }),
+          ...(job.login && {
+            assisted: job.assisted,
+            compareSignedOut: !!job.pair,
+            login: {
+              url: job.login.url, username: job.login.username, password,
+              usernameSelector: job.login.username_selector, passwordSelector: job.login.password_selector,
+            },
+          }),
         }),
       });
       const data = await res.json();
+      if (!data.ok) setReCrawlError(data.error || 'Could not start the crawl.');
       if (data.ok) {
+        setReCrawlPassword(null);
         // In tab mode, re-target this same tab at the fresh crawl instead of
         // the single global crawlId (which isn't what this tab is tracking).
         if (onRecrawl) onRecrawl(data.crawl_id);
@@ -401,7 +497,8 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         (statusFilter === 'issues' && p._violations > 0) ||
         (statusFilter === 'passed' && p._violations === 0 && p._status !== 'Failed') ||
         (statusFilter === 'failed' && p._status === 'Failed');
-      return matchSearch && matchStatus;
+      const matchSection = sectionFilter === 'all' || p.section === sectionFilter;
+      return matchSearch && matchStatus && matchSection;
     })
     .sort((a, b) => {
       let av, bv;
@@ -414,6 +511,17 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
       return sortDir === 'asc' ? av - bv : bv - av;
     });
 
+  // Page the table: 100+ rows in one list is hard to scan. Back to the first
+  // page whenever the filter, search or sort changes what is listed.
+  const ROWS_PER_PAGE = 25;
+  const pageCount = Math.max(1, Math.ceil(filteredPages.length / ROWS_PER_PAGE));
+  const currentTablePage = Math.min(tablePage, pageCount - 1);
+  const pageRows = filteredPages.slice(currentTablePage * ROWS_PER_PAGE, (currentTablePage + 1) * ROWS_PER_PAGE);
+  const listKey = `${statusFilter}|${sectionFilter}|${searchQuery}|${sortKey}|${sortDir}`;
+  const lastListKey = useRef(listKey);
+  if (lastListKey.current !== listKey) { lastListKey.current = listKey; if (tablePage !== 0) setTablePage(0); }
+
+  const hasSections = enrichedPages.some((p) => p.section);
   const totalPages = enrichedPages.length;
   const totalViolations = enrichedPages.reduce((s, p) => s + p._violations, 0);
   const avgScore = totalPages > 0
@@ -425,7 +533,16 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   const failingPages  = enrichedPages.filter((p) => p._violations > 0).length;
   const passingPages  = enrichedPages.filter((p) => p._violations === 0 && p._status !== 'Failed').length;
   const errorPages    = enrichedPages.filter((p) => p._status === 'Failed').length;
-  const filterCounts = { all: totalPages, issues: failingPages, passed: passingPages, failed: errorPages };
+  // Status counts follow the chosen login section, so each number is what clicking it shows.
+  const inSection = enrichedPages.filter((p) => sectionFilter === 'all' || p.section === sectionFilter);
+  const filterCounts = {
+    all: inSection.length,
+    issues: inSection.filter((p) => p._violations > 0).length,
+    passed: inSection.filter((p) => p._violations === 0 && p._status !== 'Failed').length,
+    failed: inSection.filter((p) => p._status === 'Failed').length,
+  };
+  const filtersOn = statusFilter !== 'all' || sectionFilter !== 'all' || !!searchQuery;
+  const clearFilters = () => { setStatusFilter('all'); setSectionFilter('all'); setSearchQuery(''); };
   const statusPieData = [
     passingPages > 0 && { name: 'Passing',    value: passingPages, color: '#6BA368' },
     failingPages > 0 && { name: 'Has Issues', value: failingPages, color: '#E76F51' },
@@ -533,12 +650,38 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
                   </button>
                 )}
                 {job?.root_url && !isActive && (
-                  <button onClick={handleReCrawl} disabled={reCrawlLoading} title="Start a new crawl of this site" className={HERO_BTN}>
+                  <button onClick={() => handleReCrawl()} disabled={reCrawlLoading} title="Start a new crawl of this site" className={HERO_BTN}>
                     <RefreshCw size={14} className={reCrawlLoading ? 'animate-spin' : ''} /> {reCrawlLoading ? 'Starting…' : 'Re-crawl'}
                   </button>
                 )}
               </div>
             </div>
+
+            {reCrawlPassword !== null && job?.login && (
+              <form
+                className="mt-5 bg-white/10 rounded-xl p-4 flex flex-wrap items-end gap-3"
+                onSubmit={(e) => { e.preventDefault(); handleReCrawl(reCrawlPassword); }}
+              >
+                <div className="flex-1 min-w-[220px]">
+                  <label htmlFor="recrawl-password" className="block text-sm font-semibold mb-1">
+                    Password for {job.login.username || 'the login'} on {pathOf(job.login.url).host}
+                  </label>
+                  <input
+                    id="recrawl-password" type="password" autoComplete="new-password" autoFocus
+                    value={reCrawlPassword} onChange={(e) => setReCrawlPassword(e.target.value)}
+                    className="w-full rounded-lg px-3 py-2 text-sm text-ink bg-white border-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                  />
+                  <p className="text-xs text-white/80 mt-1 mb-0">
+                    Leave empty to sign in yourself in a browser window on this computer. The password isn't saved.
+                  </p>
+                  {reCrawlError && <p role="alert" className="text-xs font-semibold text-white mt-1 mb-0">{reCrawlError}</p>}
+                </div>
+                <button type="submit" disabled={reCrawlLoading} className={HERO_BTN}>
+                  <RefreshCw size={14} /> {reCrawlLoading ? 'Starting…' : 'Log in & re-crawl'}
+                </button>
+                <button type="button" onClick={() => { setReCrawlPassword(null); setReCrawlError(''); }} className={HERO_BTN}>Cancel</button>
+              </form>
+            )}
 
             {isActive && (
               <div className="mt-6 bg-white/10 rounded-xl p-4">
@@ -590,6 +733,10 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
           </div>
         </section>
 
+        {job?.pair
+          ? <LoginComparePanel job={job} pages={pages} onOpenCrawl={openCrawl} />
+          : hasSections && <SectionCompare pages={enrichedPages} active={sectionFilter} onPick={setSectionFilter} finished={!isActive} />}
+
         {/* FIX THESE FIRST */}
         {topViolationPages.length > 0 && (
           <ChartCard
@@ -616,36 +763,50 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         <CrawlAISummaryPanel crawlId={crawlId} isComplete={isComplete} />
 
         {/* ALL PAGES */}
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          <div className="relative flex-1 max-w-sm">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-body pointer-events-none"/>
-            <label className="sr-only" htmlFor="crawl-search">Search pages by URL</label>
-            <input
-              id="crawl-search"
-              type="text"
-              className="input-base pl-9 py-2 text-sm w-full"
-              placeholder="Search pages…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {FILTERS.map(({ id, label }) => (
-              <FilterPill
-                key={id}
-                label={`${label} · ${filterCounts[id]}`}
-                active={statusFilter === id}
-                onClick={() => setStatusFilter(id)}
+        <div className="card p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+            <div className="relative flex-1 min-w-[220px] max-w-md">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-body pointer-events-none"/>
+              <label className="sr-only" htmlFor="crawl-search">Search pages by URL</label>
+              <input
+                id="crawl-search"
+                type="text"
+                className="input-base pl-9 py-2 text-sm w-full"
+                placeholder="Search pages by URL…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
               />
-            ))}
+            </div>
+            {filtersOn && (
+              <button type="button" className="text-sm font-semibold text-teal hover:underline" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+            <button
+              className="btn-secondary flex items-center gap-2 text-sm sm:ml-auto"
+              onClick={() => exportCSV(enrichedPages)}
+            >
+              <Download size={14} />
+              Export CSV
+            </button>
           </div>
-          <button
-            className="btn-secondary flex items-center gap-2 text-sm ml-auto"
-            onClick={() => exportCSV(enrichedPages)}
-          >
-            <Download size={14} />
-            Export CSV
-          </button>
+          {hasSections && (
+            <FilterGroup
+              label="Access"
+              value={sectionFilter}
+              onChange={setSectionFilter}
+              options={[
+                { id: 'all', label: 'All pages', count: totalPages },
+                ...Object.entries(SECTIONS).map(([id, { label }]) => ({ id, label, count: enrichedPages.filter((p) => p.section === id).length })),
+              ]}
+            />
+          )}
+          <FilterGroup
+            label="Status"
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={FILTERS.map(({ id, label }) => ({ id, label, count: filterCounts[id] }))}
+          />
         </div>
 
         {/* 8. PAGES TABLE */}
@@ -665,11 +826,15 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
                 {filteredPages.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-4 py-10 text-center text-body">
-                      {pages.length === 0 ? 'No pages scanned yet.' : 'No pages match your filters.'}
+                      {pages.length === 0 ? 'No pages scanned yet.' : (
+                        <>No pages match these filters.{' '}
+                          <button type="button" className="font-semibold text-teal hover:underline" onClick={clearFilters}>Clear filters</button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ) : (
-                  filteredPages.map((page, idx) => (
+                  pageRows.map((page, idx) => (
                     <tr
                       key={page.url ?? idx}
                       className="hover:bg-gray-50 cursor-pointer transition-colors"
@@ -679,7 +844,20 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
                         <span className="block truncate text-sm font-medium text-ink" title={page.url}>
                           {pathOf(page.url).path}
                         </span>
-                        <span className="block truncate text-xs text-body">{pathOf(page.url).host}</span>
+                        <span className="block truncate text-xs text-body">
+                          {pathOf(page.url).host}
+                          {page.via && (
+                            <span className="ml-2 text-[11px] text-body" title={`Opened by clicking “${page.via}” on ${page.parent_url || ''}`}>
+                              via “{page.via}” on {pathOf(page.parent_url || '').path}
+                            </span>
+                          )}
+                          {SECTIONS[page.section] && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-ink align-middle">
+                              {(() => { const { Icon } = SECTIONS[page.section]; return <Icon size={11} aria-hidden="true" />; })()}
+                              {SECTIONS[page.section].label}
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="px-4 py-3 min-w-[120px]">
                         <ScoreMiniBar score={page._score} />
@@ -702,9 +880,37 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
             </table>
           </div>
           {filteredPages.length > 0 && (
-            <div className="px-4 py-3 border-t border-gray-100 text-xs text-body">
-              Showing {filteredPages.length} of {totalPages} pages
-            </div>
+            <nav aria-label="Pages table pagination" className="px-4 py-3 border-t border-gray-100 flex flex-wrap items-center gap-3 text-xs text-body">
+              <span>
+                Showing {currentTablePage * ROWS_PER_PAGE + 1}–{currentTablePage * ROWS_PER_PAGE + pageRows.length} of {filteredPages.length}
+                {filteredPages.length < totalPages && <> filtered pages ({totalPages} in total) ·{' '}
+                  <button type="button" className="font-semibold text-teal hover:underline" onClick={clearFilters}>Show all</button>
+                </>}
+                {filteredPages.length === totalPages && ' pages'}
+              </span>
+              {pageCount > 1 && (
+                <span className="flex items-center gap-1 ml-auto">
+                  <button type="button" className="px-3 py-1.5 rounded-lg border border-solid border-gray-200 font-semibold text-ink disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                    disabled={currentTablePage === 0} onClick={() => setTablePage(currentTablePage - 1)}>
+                    <ChevronLeft size={14} className="inline -mt-0.5" aria-hidden="true" /> Previous
+                  </button>
+                  {Array.from({ length: pageCount }, (_, i) => i)
+                    .filter((i) => pageCount <= 7 || i === 0 || i === pageCount - 1 || Math.abs(i - currentTablePage) <= 1)
+                    .map((i, n, shown) => (
+                      <span key={i} className="flex items-center gap-1">
+                        {n > 0 && i - shown[n - 1] > 1 && <span aria-hidden="true">…</span>}
+                        <button type="button" aria-current={i === currentTablePage ? 'page' : undefined} aria-label={`Page ${i + 1}`}
+                          className={`min-w-[32px] px-2 py-1.5 rounded-lg font-semibold ${i === currentTablePage ? 'bg-teal text-white' : 'text-ink hover:bg-gray-100'}`}
+                          onClick={() => setTablePage(i)}>{i + 1}</button>
+                      </span>
+                    ))}
+                  <button type="button" className="px-3 py-1.5 rounded-lg border border-solid border-gray-200 font-semibold text-ink disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                    disabled={currentTablePage >= pageCount - 1} onClick={() => setTablePage(currentTablePage + 1)}>
+                    Next <ChevronRight size={14} className="inline -mt-0.5" aria-hidden="true" />
+                  </button>
+                </span>
+              )}
+            </nav>
           )}
         </div>
       </div>

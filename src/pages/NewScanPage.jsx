@@ -5,6 +5,7 @@ import { useApp } from '../context/AppContext';
 import './NewScanPage.css';
 import SingleScanForm from '../components/newscan/SingleScanForm';
 import CrawlForm from '../components/newscan/CrawlForm';
+import { EMPTY_LOGIN } from '../components/newscan/LoginPanel';
 import ScanProgress from '../components/newscan/ScanProgress';
 import ScanResults from '../components/newscan/ScanResults';
 import ScanComparisonView from '../components/newscan/ScanComparisonView';
@@ -289,6 +290,8 @@ export default function NewScanPage() {
   const [maxDepth, setMaxDepth]         = useState(3);
   const [fullSite, setFullSite]         = useState(false);
   const [crawlAssisted, setCrawlAssisted] = useState(false);
+  const [crawlLogin, setCrawlLogin] = useState(EMPTY_LOGIN);
+  const [scanLogin, setScanLogin] = useState(EMPTY_LOGIN);
   const [notifyEmail, setNotifyEmail]   = useState('');
   const [crawlLoading, setCrawlLoading] = useState(false);
   const [crawlError, setCrawlError]     = useState('');
@@ -356,12 +359,12 @@ export default function NewScanPage() {
     }, 2500);
   }, [updateScanSession]);
 
-  const runScan = useCallback(async (sessionId, url, includeBestPractices, assisted = false) => {
+  const runScan = useCallback(async (sessionId, url, includeBestPractices, assisted = false, login) => {
     try {
       const res  = await apiFetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, includeBestPractices, assisted }),
+        body: JSON.stringify({ url, includeBestPractices, assisted, login: login?.enabled ? login : undefined }),
       });
       const data = await res.json();
       if (!data.ok) { updateScanSession(sessionId, { phase: 'failed', error: data.error ?? 'Failed to start scan.' }); return; }
@@ -373,15 +376,17 @@ export default function NewScanPage() {
     const url = composeUrl.trim();
     if (!url) return;
     const sessionId = createScanSession(url, composeBestPractices);
-    if (composeAssisted) updateScanSession(sessionId, { assisted: true });
+    // Kept with the tab (in memory only) so Retry can sign in again.
+    updateScanSession(sessionId, { assisted: composeAssisted, login: scanLogin.enabled ? scanLogin : null });
     setFormUrl('');
+    setScanLogin(EMPTY_LOGIN);
     setFocusedTab({ kind: 'single', id: sessionId });
-    runScan(sessionId, url, composeBestPractices, composeAssisted);
-  }, [composeUrl, composeBestPractices, composeAssisted, createScanSession, updateScanSession, runScan]);
+    runScan(sessionId, url, composeBestPractices, composeAssisted, scanLogin);
+  }, [composeUrl, composeBestPractices, composeAssisted, scanLogin, createScanSession, updateScanSession, runScan]);
 
   const retryScan = useCallback((session) => {
     updateScanSession(session.id, { phase: 'scanning', error: '' });
-    runScan(session.id, session.url, session.includeBestPractices, !!session.assisted);
+    runScan(session.id, session.url, session.includeBestPractices, !!session.assisted, session.login);
   }, [updateScanSession, runScan]);
 
   const handleStartCrawl = useCallback(async () => {
@@ -393,16 +398,19 @@ export default function NewScanPage() {
       const res  = await apiFetch('/api/crawl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, maxPages, maxDepth, fullSite, assisted: crawlAssisted, notifyEmail: notifyEmail.trim() || undefined }),
+        body: JSON.stringify({ url, maxPages, maxDepth, fullSite, assisted: crawlAssisted, notifyEmail: notifyEmail.trim() || undefined,
+          login: crawlLogin.enabled ? crawlLogin : undefined,
+          compareSignedOut: crawlLogin.enabled && !!crawlLogin.compare }),
       });
       const data = await res.json();
       if (!data.ok) { setCrawlLoading(false); setCrawlError(data.error || 'Failed to start crawl.'); return; }
       createCrawlSession(data.crawl_id, url);
       setCrawlLoading(false);
       setCrawlUrl('');
+      setCrawlLogin(EMPTY_LOGIN); // a new crawl starts with a blank login
       setFocusedTab({ kind: 'crawl', id: data.crawl_id });
     } catch { setCrawlLoading(false); setCrawlError('Network error. Please try again.'); }
-  }, [crawlUrl, maxPages, maxDepth, fullSite, crawlAssisted, notifyEmail, createCrawlSession]);
+  }, [crawlUrl, maxPages, maxDepth, fullSite, crawlAssisted, crawlLogin, notifyEmail, createCrawlSession]);
 
   const result     = activeSession?.result ?? null;
   const violations = result?.axeResult?.violations ?? [];
@@ -542,7 +550,6 @@ export default function NewScanPage() {
                   includeBestPractices={activeSession.includeBestPractices}
                   onBestPracticesChange={(val) => updateScanSession(activeSession.id, { includeBestPractices: val })}
                   assisted={activeSession.assisted}
-                  onAssistedChange={(val) => updateScanSession(activeSession.id, { assisted: val })}
                   scanPhase="failed"
                   scanError={activeSession.error}
                   onStartScan={() => retryScan(activeSession)}
@@ -601,7 +608,8 @@ export default function NewScanPage() {
                   includeBestPractices={composeBestPractices}
                   onBestPracticesChange={setComposeBestPractices}
                   assisted={composeAssisted}
-                  onAssistedChange={setComposeAssisted}
+                  login={scanLogin}
+                  onLoginChange={setScanLogin}
                   scanPhase="idle"
                   scanError=""
                   onStartScan={handleStartScan}
@@ -619,7 +627,8 @@ export default function NewScanPage() {
                   fullSite={fullSite}
                   onFullSiteChange={setFullSite}
                   assisted={crawlAssisted}
-                  onAssistedChange={setCrawlAssisted}
+                  login={crawlLogin}
+                  onLoginChange={setCrawlLogin}
                   notifyEmail={notifyEmail}
                   onNotifyEmailChange={setNotifyEmail}
                   crawlLoading={crawlLoading}

@@ -20,7 +20,7 @@ def _persist(job_id: str | None, **kwargs) -> None:
         logger.exception("Failed to persist job status for %s", job_id)
 
 
-def run_ada_scan(scan_url: str, metadata: dict | None = None, timeout: int = 300) -> dict:
+def run_ada_scan(scan_url: str, metadata: dict | None = None, timeout: int = 300, login: dict | None = None) -> dict:
     """
     RQ task: run an ADA accessibility scan and return the structured result.
     Persists running/completed/failed state to ScanJobs when DB is available.
@@ -54,6 +54,7 @@ def run_ada_scan(scan_url: str, metadata: dict | None = None, timeout: int = 300
             include_best_practices=include_best_practices,
             write_output=False,
             assisted=bool(metadata.get("assisted")),
+            login=login,
         )
         completed_at = _utcnow_iso()
 

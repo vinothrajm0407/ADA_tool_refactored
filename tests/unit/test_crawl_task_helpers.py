@@ -73,3 +73,40 @@ class TestDuration:
 
     def test_empty_strings_return_none(self):
         assert _duration("", "") is None
+
+
+# ── _shows_login_page ─────────────────────────────────────────────────────────
+
+class _FakePage:
+    def __init__(self, url, boxes):
+        self.url, self._boxes = url, boxes
+
+    def evaluate(self, _js):
+        return self._boxes
+
+
+@pytest.mark.unit
+class TestShowsLoginPage:
+    LOGIN = "https://site.test/login"
+    FORM = ["email||email|you@company.com", "password||password|Enter your password", "checkbox|||"]
+
+    def _shows(self, url, boxes):
+        from backend.services.crawl_task import _shows_login_page
+        return _shows_login_page(_FakePage(url, boxes), self.LOGIN, self.FORM)
+
+    def test_redirected_to_login_url(self):
+        assert self._shows("https://site.test/login?next=/account", [])
+
+    def test_login_form_drawn_in_place(self):  # SPA: address unchanged, login form shown
+        assert self._shows("https://site.test/dashboard", self.FORM + ["text||search|Search"])
+
+    def test_signup_form_is_not_the_login_form(self):
+        assert not self._shows("https://site.test/signup",
+                               ["text||name|Full name", "email||signup-email|", "password||signup-password|"])
+
+    def test_real_page_without_form(self):
+        assert not self._shows("https://site.test/dashboard", ["text||search|Search"])
+
+    def test_no_recorded_form_only_checks_url(self):
+        from backend.services.crawl_task import _shows_login_page
+        assert not _shows_login_page(_FakePage("https://site.test/dashboard", self.FORM), self.LOGIN, None)

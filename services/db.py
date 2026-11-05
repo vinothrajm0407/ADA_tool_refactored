@@ -384,6 +384,24 @@ def _ensure_table() -> None:
             ALTER TABLE dbo.CrawlPage ADD ResultPayload NVARCHAR(MAX) NULL
         """)
         conn.commit()
+        # ── CrawlPage.Via — label of the button that led to the page ──────────
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlPage') AND name = N'Via'
+            )
+            ALTER TABLE dbo.CrawlPage ADD Via NVARCHAR(200) NULL
+        """)
+        conn.commit()
+        # ── CrawlPage.Section — login crawls: 'before_login' / 'after_login' ──
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.CrawlPage') AND name = N'Section'
+            )
+            ALTER TABLE dbo.CrawlPage ADD Section NVARCHAR(20) NULL
+        """)
+        conn.commit()
         # ── Users ─────────────────────────────────────────────────────────────
         cur.execute("""
             IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'Users')
@@ -1692,6 +1710,10 @@ def get_crawl_job(crawl_id: str) -> dict | None:
             "site_score": meta.get("site_score"),
             "avg_pass_rate": meta.get("avg_pass_rate"),
             "total_violations": meta.get("total_violations"),
+            "login": meta.get("login"),  # login page + username for Re-crawl; never the password
+            "assisted": bool(meta.get("assisted")),
+            "pair": meta.get("pair"),  # the linked signed-out / logged-in crawl
+            "extra_urls": meta.get("extra_urls") or [],  # "Pages to include", for Re-crawl
         }
     finally:
         conn.close()
@@ -1704,6 +1726,7 @@ def save_crawl_page(
     parent_url: str | None,
     depth: int,
     status: str = "running",
+    via: str | None = None,
 ) -> int:
     """Insert a CrawlPage row and return its auto-increment Id (-1 if disabled)."""
     if not is_enabled() or _INIT_ERROR:
@@ -1715,13 +1738,13 @@ def save_crawl_page(
             cur.execute(
                 """
                 INSERT INTO dbo.CrawlPage
-                    (CrawlId, Url, NormalizedUrl, ParentUrl, Depth, Status, DiscoveredAt)
+                    (CrawlId, Url, NormalizedUrl, ParentUrl, Depth, Status, DiscoveredAt, Via)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (crawl_id, url[:2048], normalized_url[:2048],
                  parent_url[:2048] if parent_url else None,
-                 depth, status, discovered_at),
+                 depth, status, discovered_at, via[:200] if via else None),
             )
             row = cur.fetchone()
             page_id = int(row[0]) if row and row[0] is not None else -1
@@ -1741,6 +1764,7 @@ def update_crawl_page(
     scanned_at: str | None = None,
     failure_reason: str | None = None,
     result_payload: str | None = None,
+    section: str | None = None,
 ) -> None:
     if not is_enabled() or _INIT_ERROR or page_id < 0:
         return
@@ -1767,6 +1791,9 @@ def update_crawl_page(
     if result_payload is not None:
         updates.append("ResultPayload = ?")
         params.append(result_payload)
+    if section is not None:
+        updates.append("Section = ?")
+        params.append(section)
     params.append(page_id)
     conn = _conn()
     try:
@@ -1790,7 +1817,7 @@ def get_crawl_pages(crawl_id: str) -> list[dict]:
                 """
                 SELECT Id, CrawlId, Url, NormalizedUrl, ParentUrl, Depth, Status,
                        ScanHistoryId, Passes, Violations, PassRate,
-                       DiscoveredAt, ScannedAt, FailureReason
+                       DiscoveredAt, ScannedAt, FailureReason, Section, Via
                 FROM dbo.CrawlPage
                 WHERE CrawlId = ?
                 ORDER BY Id ASC
@@ -1814,6 +1841,8 @@ def get_crawl_pages(crawl_id: str) -> list[dict]:
                 "discovered_at": _ts(r.DiscoveredAt),
                 "scanned_at": _ts(r.ScannedAt),
                 "failure_reason": r.FailureReason,
+                "section": r.Section,
+                "via": r.Via,
             }
             for r in rows
         ]
@@ -1925,9 +1954,11 @@ def finalize_crawl_summary(crawl_id: str) -> dict:
                 "total_violations": total_violations,
                 "site_score": avg_pass_rate,
             }
+            cur.execute("SELECT Metadata FROM dbo.CrawlJob WHERE CrawlId = ?", (crawl_id,))
+            existing = _safe_json((cur.fetchone() or [None])[0]) or {}
             cur.execute(
                 "UPDATE dbo.CrawlJob SET Metadata = ? WHERE CrawlId = ?",
-                (json.dumps(summary), crawl_id),
+                (json.dumps({**existing, **summary}), crawl_id),
             )
         conn.commit()
     except Exception as exc:

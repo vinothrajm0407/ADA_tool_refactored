@@ -462,6 +462,28 @@ def _refuse_assisted_on_hosted_server(data):
     return None
 
 
+def _parse_login(data: dict):
+    """Pages behind a login: {url, username, password, usernameSelector?, passwordSelector?}.
+    Used for this run only — never stored or logged. Returns (login or None,
+    assisted, error response or None)."""
+    assisted = bool(data.get("assisted"))
+    raw_login = data.get("login") if isinstance(data.get("login"), dict) else {}
+    if not (raw_login.get("url") or "").strip():
+        return None, assisted, None
+    login = {
+        "url": raw_login["url"].strip(),
+        "username": (raw_login.get("username") or "").strip(),
+        "password": raw_login.get("password") or "",
+        "username_selector": (raw_login.get("usernameSelector") or "").strip() or None,
+        "password_selector": (raw_login.get("passwordSelector") or "").strip() or None,
+    }
+    if not login["password"]:
+        if Config.IS_PRODUCTION:
+            return None, assisted, (jsonify({"ok": False, "error": "Enter the login password"}), 400)
+        assisted = True  # no password: the person signs in in a window on this PC
+    return login, assisted, None
+
+
 @app.route("/api/scan", methods=["POST"])
 @require_auth
 def api_scan():
@@ -478,10 +500,12 @@ def api_scan():
         return jsonify({"ok": False, "error": "Invalid JSON body"}), 400
     url = (data.get("url") or "").strip()
     include_best_practices = bool(data.get("includeBestPractices"))
-    assisted = bool(data.get("assisted"))
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     if refused := _refuse_assisted_on_hosted_server(data):
+        return refused
+    login, assisted, refused = _parse_login(data)
+    if refused:
         return refused
 
     try:
@@ -489,7 +513,7 @@ def api_scan():
             "include_best_practices": include_best_practices,
             "assisted": assisted,
             "user_id": g.current_user_id,
-        })
+        }, login=login)
         return jsonify({"ok": True, "jobId": scan_job["job_id"], "status": scan_job["status"]}), 202
     except ValueError as e:
         logging.warning("Invalid scan request: %s", e)
@@ -869,6 +893,25 @@ def api_trends():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _extra_pages(root_url: str, raw) -> list[str]:
+    """"Pages to include" from the crawl form: full addresses or paths like
+    /account (taken relative to the root URL), one per line. Same site only."""
+    from urllib.parse import urljoin, urlsplit
+    lines = raw if isinstance(raw, list) else str(raw or "").splitlines()
+    host = urlsplit(root_url).hostname
+    out = []
+    for line in lines:
+        line = str(line).strip()
+        if not line:
+            continue
+        full = urljoin(root_url, line)
+        if urlsplit(full).hostname != host:
+            raise ValueError(f"Pages to include must be on {host}: {line}")
+        if full not in out:
+            out.append(full)
+    return out[:200]
+
+
 @app.route("/api/crawl", methods=["POST"])
 @require_auth
 def api_crawl_create():
@@ -883,11 +926,20 @@ def api_crawl_create():
     if not url:
         return jsonify({"ok": False, "error": "Missing or empty 'url'"}), 400
     logging.info("Crawl API received | keys=%s notifyEmail=%r", list(data.keys()), data.get("notifyEmail"))
-    assisted = bool(data.get("assisted"))
     if refused := _refuse_assisted_on_hosted_server(data):
         return refused
+    login, assisted, refused = _parse_login(data)
+    if refused:
+        return refused
+    try:
+        extra_urls = _extra_pages(url, data.get("extraPages"))
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     options = {
         "assisted": assisted,
+        "login": login,
+        "compare_signed_out": bool(login and data.get("compareSignedOut")),
+        "extra_urls": extra_urls,
         "max_depth": data.get("maxDepth"),
         "max_pages": data.get("maxPages"),
         "full_site": bool(data.get("fullSite", False)),

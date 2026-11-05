@@ -1,5 +1,6 @@
 import { ShieldCheck, ArrowRight, AlertTriangle, Upload, Lock } from 'lucide-react';
 import Toggle from './Toggle';
+import LoginPanel from './LoginPanel';
 
 function Divider() {
   return <div className="border-t border-gray-100"/>;
@@ -12,6 +13,8 @@ export default function SingleScanForm({
   onBestPracticesChange,
   assisted,
   onAssistedChange,
+  login,
+  onLoginChange,
   scanPhase,
   scanError,
   onStartScan,
@@ -80,6 +83,18 @@ export default function SingleScanForm({
               />
             </div>
           </div>
+        </section>
+      )}
+
+      {onLoginChange && (
+        <section className="pb-1">
+          <LoginPanel
+            id="scan-login"
+            login={login}
+            onChange={onLoginChange}
+            description="For a page that only shows after signing in. Signs in first, then audits this page as the
+              logged-in user. The password is used for this audit only and is never saved."
+          />
         </section>
       )}
 

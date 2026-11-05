@@ -1,18 +1,7 @@
 import { Play, AlertTriangle } from 'lucide-react';
 import GlowInput from '../ui/GlowInput';
 import Toggle from './Toggle';
-
-function Field({ label, hint, children }) {
-  return (
-    <div className="space-y-1.5">
-      <label className="block text-[11px] font-semibold uppercase tracking-widest text-body">
-        {label}
-        {hint && <span className="ml-1 normal-case font-normal text-body">{hint}</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
+import LoginPanel, { Field } from './LoginPanel';
 
 function Divider() {
   return <div className="border-t border-gray-100"/>;
@@ -29,6 +18,8 @@ export default function CrawlForm({
   onFullSiteChange,
   assisted,
   onAssistedChange,
+  login,
+  onLoginChange,
   notifyEmail,
   onNotifyEmailChange,
   crawlLoading,
@@ -92,7 +83,7 @@ export default function CrawlForm({
                   const digits = e.target.value.replace(/\D/g, '');
                   onMaxDepthChange(digits === '' ? '' : Number(digits));
                 }}
-                onBlur={() => onMaxDepthChange(Math.max(1, Math.min(10, Number(maxDepth) || 1)))}
+                onBlur={() => onMaxDepthChange(Math.max(1, Math.min(100, Number(maxDepth) || 1)))}
                 disabled={crawlLoading}
               />
             </Field>
@@ -141,6 +132,29 @@ export default function CrawlForm({
             </div>
           </div>
         )}
+
+        {onLoginChange && (
+          <LoginPanel
+            id="crawl-login"
+            login={login}
+            onChange={onLoginChange}
+            disabled={crawlLoading}
+            description="Signs in once, then crawls the pages behind the login. The password is used for this crawl only and
+              is never saved. If the site asks for something only a person can do (a robot check, OTP, or
+              Google/Microsoft sign-in), a browser window opens on this computer for you to finish it. You can also
+              leave the password empty and sign in yourself in that window."
+          >
+            <label className="col-span-2 flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" className="mt-1 w-4 h-4 accent-teal" checked={!!login.compare} disabled={crawlLoading}
+                onChange={e => onLoginChange({ ...login, compare: e.target.checked })} />
+              <span className="text-sm">
+                <span className="font-semibold text-ink">Also crawl signed out, to compare</span>
+                <span className="block text-body">Runs a second crawl as a visitor at the same time, then shows each page signed out vs logged in. About twice the work for the site.</span>
+              </span>
+            </label>
+          </LoginPanel>
+        )}
+
 
         {fullSite && (
           <div className="flex items-start gap-2.5 bg-amber/10 px-4 py-3 rounded-xl mt-3">
