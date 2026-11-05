@@ -17,8 +17,8 @@ from config import Config
 from services import db
 from services.crawler import get_root_domain, normalize_url, extract_internal_links
 from scripts.run_ada_check_python import (
-    BROWSER_ARGS, bot_challenge_reason, can_ask_person, page_title_and_html, scanner_user_agent,
-    wait_for_person_to_verify,
+    BROWSER_ARGS, bot_challenge_reason, can_ask_person, page_title_and_html, scanner_user_agent, settle,
+    wait_for_person_to_verify, watch_requests,
 )
 
 # Import in-memory helpers — no circular import because crawl_service only
@@ -233,11 +233,11 @@ def _fill_login_form(page, login):
     tried = []  # "Login" may only open a menu that holds the real "Sign Up / Login"
     while (len(tried) < 2 and not pass_box and not user_sel and not _first_username_box(page)
            and _click_role(page, _SIGN_IN, tried=tried)):
-        _settle(page)  # the form opens in a popup or on a new page
+        settle(page)  # the form opens in a popup or on a new page
         _click_role(page, _COOKIE_OK, roles=("button",))
         pass_box = find_pass()
     if not pass_box and not user_sel and not _first_username_box(page) and _click_role(page, _EMAIL_STEP):
-        _settle(page)  # e.g. "Continue with email" reveals the form
+        settle(page)  # e.g. "Continue with email" reveals the form
         pass_box = find_pass()
     if not pass_box and not user_sel and (_usable(page.get_by_role("button", name=_SSO))
                                           or _usable(page.get_by_role("link", name=_SSO))):
@@ -254,7 +254,7 @@ def _fill_login_form(page, login):
         _type(user_box, login.get("username") or "")
     if not pass_box:  # two-step: the password box shows after "Next"
         user_box.press("Enter")
-        _settle(page)
+        settle(page)
         pass_box = find_pass()
         if not pass_box:
             raise RuntimeError("Login failed: no password box found — set the password field selector")
@@ -322,7 +322,7 @@ def _log_in(login: dict, root_domain: str, assisted: bool, crawl_id: str = "logi
                 response = page.goto(login_url, wait_until="domcontentloaded", timeout=45000)
             except Exception:  # slow site: carry on with what has loaded rather than give up
                 response = None
-            _settle(page)
+            settle(page)
             blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
             if blocked and not (assisted and wait_for_person_to_verify(page)):
                 raise RuntimeError(f"Login page: {blocked}")
@@ -466,6 +466,12 @@ class _CrawlState:
                         self.queue.append((link, parent_url, depth))
             self.more_work.notify_all()
 
+    def has_enough_pages(self) -> bool:
+        """Pages found from now on would be past the page budget, never scanned.
+        A login crawl keeps looking: members pages it finds jump the queue."""
+        with self.lock:
+            return not self.session and len(self.visited) >= self.max_pages
+
     def finish_page(self, ok: bool):
         with self.lock:
             self.active -= 1
@@ -502,6 +508,7 @@ def _crawl_worker(c: _CrawlState) -> None:
             )
             add_session_storage(context, c.session)
             pw_page = context.new_page()
+            watch_requests(pw_page)
             # Login crawl: a second, signed-out tab tells pages that need the
             # login apart from public ones ("before login" / "after login").
             anon_page = browser.new_context(
@@ -518,32 +525,6 @@ def _crawl_worker(c: _CrawlState) -> None:
         with c.lock:
             c.error = c.error or exc
             c.more_work.notify_all()
-
-
-_NODE_COUNT = "() => document.getElementsByTagName('*').length"
-
-
-def _settle(pw_page) -> None:
-    """Let JavaScript-rendered content appear before axe runs: wait for the
-    load event (max 5s), then keep waiting in 1s steps (max 4) while the page
-    is still growing. Replaced a fixed 3s wait — tested 2026-10-26 on 17 pages
-    of heavy sites: 1.9x faster (94s vs 174s); every result difference was
-    within the old method's own run-to-run variation (booking.com found 5,
-    then 0, then 0 issues with the fixed 3s wait)."""
-    try:
-        pw_page.wait_for_load_state("load", timeout=5000)
-    except Exception:
-        pass
-    prev = None
-    for _ in range(5):
-        try:
-            now = pw_page.evaluate(_NODE_COUNT)
-        except Exception:  # navigating (e.g. a redirect): give it a moment, then re-measure
-            now = None
-        if prev is not None and now is not None and now <= prev * 1.01 + 5:
-            return  # stopped growing
-        prev = now if now is not None else prev
-        pw_page.wait_for_timeout(1000)
 
 
 # Pages reached by buttons instead of links (shopkart11.in's whole menu and its
@@ -634,7 +615,7 @@ def _discover_by_clicking(c: "_CrawlState", page, url: str, depth: int) -> None:
     labels = page.evaluate(_MARK_CLICKABLES)
     clicks = reloads = 0
     for label in dict.fromkeys(labels):  # each label once, in page order
-        if clicks >= _CLICKS_PER_PAGE or c.cancelled:
+        if clicks >= _CLICKS_PER_PAGE or c.cancelled or c.has_enough_pages():
             break
         if not _claim(c, label):
             continue
@@ -654,7 +635,9 @@ def _discover_by_clicking(c: "_CrawlState", page, url: str, depth: int) -> None:
         items, menu_links = page.evaluate(_OPEN_MENU, [before, label])
         c.add_links([u for u in menu_links if get_root_domain(u) == c.root_domain], url, depth + 1, via=label)
         for item in items[:10]:
-            if c.cancelled or not _claim(c, item):
+            if c.cancelled or c.has_enough_pages():
+                break
+            if not _claim(c, item):
                 continue
             _back_to(page, url, reload=True)  # menu closed: a toggle click on an open one shuts it
             shown = _click_label(page, label, wait=5)  # reopen the menu
@@ -676,7 +659,7 @@ def _back_to(page, url: str, reload: bool = False) -> None:
     if reload or normalize_url(page.url) != normalize_url(url):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            _settle(page)
+            settle(page)
         except Exception:
             pass
 
@@ -734,7 +717,7 @@ def _went_elsewhere(c: "_CrawlState", page, url: str, depth: int, via: str) -> b
         pass
     if normalize_url(page.url) != normalize_url(url):
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    _settle(page)
+    settle(page)
     return True
 
 
@@ -832,21 +815,13 @@ def _scan_one_page(c: _CrawlState, pw_page, axe, PWTimeout, url, parent_url, dep
 
     try:
         try:
-            # domcontentloaded + a short settle, not networkidle —
-            # networkidle waits for 500ms of zero network activity,
-            # which real sites with analytics beacons, ad trackers,
-            # or polling never actually reach, so it was routinely
-            # burning most of the 60s timeout on every single page.
-            # Matches the single-page scan path's own approach.
-            # A "poll until the DOM stops growing" variant was
-            # tried and reverted here too (see that file's comment)
-            # — unreliable on pages with continuous third-party
-            # script churn that never actually goes quiet.
+            # domcontentloaded + settle(), not networkidle: analytics
+            # beacons and polling mean real sites never go network-idle.
             for attempt in range(1, 4):
                 c.wait_turn()
                 try:
                     response = pw_page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                    _settle(pw_page)
+                    settle(pw_page)
                 except PWTimeout:
                     response = None  # proceed with what loaded
                 if not (response and response.status == 429):

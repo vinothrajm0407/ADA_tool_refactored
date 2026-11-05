@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from backend.services import crawl_task
 from backend.services.crawl_task import _CrawlState
+from scripts.run_ada_check_python import settle
 
 
 def _state(max_pages=3):
@@ -48,18 +49,36 @@ def test_cancel_and_finish(db):
         assert c2.next_page() is None                             # nothing queued, nobody busy -> done
 
 
-def test_settle_stops_once_the_page_stops_growing():
+def _page(*sizes, pending=(), last_request_at=0.0):
     from unittest.mock import MagicMock
     page = MagicMock()
-    page.evaluate.side_effect = [500, 900, 905]          # grew, then stable
-    crawl_task._settle(page)
+    page._ada_requests = {"pending": set(pending), "at": last_request_at}
+    page.evaluate.side_effect = list(sizes)
+    return page
+
+
+def test_settle_stops_once_the_page_stops_growing():
+    page = _page(500, 900, 905, 905)                    # grew, then stable for 1s
+    settle(page)
     page.wait_for_load_state.assert_called_once_with("load", timeout=5000)
-    assert page.wait_for_timeout.call_count == 2        # 1s after first count, 1s after growth
+    assert page.wait_for_timeout.call_count == 3
+
+
+def test_settle_waits_while_data_is_downloading():
+    page = _page(*[1500] * 8, pending=["products.json"])  # still, but the products are on their way
+    page.wait_for_timeout.side_effect = lambda ms: page.wait_for_timeout.call_count == 4 and page._ada_requests["pending"].clear()
+    settle(page)
+    assert page.wait_for_timeout.call_count == 4         # not before the download finished
+
+
+def test_settle_waits_out_the_gap_between_two_downloads():
+    import time
+    page = _page(*[1500] * 20, last_request_at=time.monotonic() + 60)  # one ended just now: the next may follow
+    settle(page)
+    assert page.wait_for_timeout.call_count == 16
 
 
 def test_settle_is_capped_and_survives_a_redirect():
-    from unittest.mock import MagicMock
-    page = MagicMock()
-    page.evaluate.side_effect = [100, RuntimeError("Execution context was destroyed"), 300, 600, 1200]  # keeps growing
-    crawl_task._settle(page)
-    assert page.wait_for_timeout.call_count == 5        # hard cap: at most 5s after load
+    page = _page(100, RuntimeError("Execution context was destroyed"), *range(300, 30000, 300))  # keeps growing
+    settle(page)
+    assert page.wait_for_timeout.call_count == 16        # hard cap: 8s after load

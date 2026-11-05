@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -96,6 +97,55 @@ _CHALLENGE_PAGES = (("/errors/validatecaptcha", "Amazon"),)
 # notifications, location...): no scan needs them, and a visible one blocked
 # the page (amazon.in asked for local network access, 2026-10-28).
 BROWSER_ARGS = ["--deny-permission-prompts"]
+
+_NODE_COUNT = "() => document.getElementsByTagName('*').length"
+_RENDER_INPUTS = ("fetch", "xhr", "script")  # what a page's script draws its content from
+
+
+def watch_requests(page) -> dict:
+    """The page's in-flight data and script downloads ("pending") and when one
+    last started or ended ("at"), tracked from the first call on (call it right
+    after creating the page, before goto)."""
+    if not hasattr(page, "_ada_requests"):
+        w = page._ada_requests = {"pending": set(), "at": 0.0}
+
+        def seen(request, started):
+            if request.resource_type in _RENDER_INPUTS:
+                (w["pending"].add if started else w["pending"].discard)(request)
+                w["at"] = time.monotonic()
+        page.on("request", lambda r: seen(r, True))
+        page.on("requestfinished", lambda r: seen(r, False))
+        page.on("requestfailed", lambda r: seen(r, False))
+    return page._ada_requests
+
+
+def settle(page, steps: int = 16) -> None:
+    """Let JavaScript-rendered content appear before axe runs: wait for the load
+    event (max 5s), then until no data/script download has been in flight for 1s
+    and the page has not grown for 1s (checked every 0.5s, max `steps` checks).
+    Used by both Run Audit and the crawl so the same page gets the same result.
+    Replaced a fixed 3s wait (Run Audit) and a grow-only check (crawl): shopkart11.in
+    sits still at 1.5k elements while its products download, then grows to 11.8k,
+    so both caught it half drawn (196 issues one run, 1676 the next, 2026-11-05).
+    "For 1s", not "right now": its category pages fetch products in batches, one
+    after another, and a busy crawl stopped in the gap between two (128 vs 144)."""
+    w = watch_requests(page)
+    try:
+        page.wait_for_load_state("load", timeout=5000)
+    except Exception:
+        pass
+    sizes = []
+    for _ in range(steps):
+        try:
+            sizes.append(page.evaluate(_NODE_COUNT))
+        except Exception:  # navigating (e.g. a redirect): measure again after it
+            sizes.append(None)
+        last = sizes[-3:]
+        quiet = not w["pending"] and time.monotonic() - w["at"] >= 1
+        if quiet and len(last) == 3 and None not in last and last[2] <= last[0] * 1.01 + 5:
+            return
+        # ponytail: a page that keeps a request open (long-poll) waits the full cap
+        page.wait_for_timeout(500)
 
 
 class BotBlocked(RuntimeError):
@@ -243,6 +293,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
             from backend.services.crawl_task import add_session_storage
             add_session_storage(context, session)
         page = context.new_page()
+        watch_requests(page)
         # Chromium's HTTP disk cache persists across separate launch() calls
         # on this machine (confirmed live 2026-10-05: a test-app URL scanned
         # repeatedly while its content was being iterated on kept returning
@@ -257,27 +308,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
             response = page.goto(url, wait_until="domcontentloaded", timeout=60000)
         except PlaywrightTimeoutError:
             pass
-        # Allow JS-rendered content (SPAs, lazy-loaded regions) to settle before axe runs.
-        # Was 1000ms — confirmed live 2026-10-07 that heavy, carousel-filled sites
-        # (e.g. a commerce homepage with a Swiper carousel per product category)
-        # were still actively mounting sections at the 1s mark, so the exact same
-        # URL scanned seconds apart swung from 0 violations (almost nothing mounted
-        # yet) to 40 (most of it mounted) — axe DevTools doesn't have this problem
-        # because it scans a tab a person already has sitting open and settled, not
-        # a fresh page load. 3000ms gets our fresh-load scan much closer to that
-        # same "already settled" state without reintroducing the old 5s-per-shot
-        # screenshot slowness this was never about.
-        #
-        # Tried (2026-10-09): polling the DOM's size until it stops growing,
-        # instead of a fixed wait, hoping to adapt to each page's real load
-        # time. Made this specific page WORSE (0, 0, 6 across three runs,
-        # vs. the fixed wait's 6-38) — some third-party scripts (ad/analytics
-        # beacons) keep mutating the DOM continuously and never let it go
-        # quiet, so the poll just timed out early with less loaded than the
-        # plain fixed wait caught. Reverted — a fixed wait is a known,
-        # predictable quantity; "wait for quiet" isn't reliable on a page
-        # that's never actually quiet.
-        page.wait_for_timeout(3000)
+        settle(page)  # JS-rendered content (SPAs, lazy-loaded regions) — see settle()
         blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
         if blocked and assisted:
             blocked = None if wait_for_person_to_verify(page) else (
