@@ -113,7 +113,7 @@ jobs:
 ```
 
 The ADA server must be reachable from GitHub, and the pages from the ADA server. Create the
-API key with `POST /api/api-keys` (`{"label": "github"}`) while signed in; it is shown once.
+API key in **Settings → API keys** (shown once) and save it as the repository secret `ADA_API_KEY`.
 
 ---
 

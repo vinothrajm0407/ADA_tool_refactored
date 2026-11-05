@@ -1860,11 +1860,21 @@ def api_keys_list():
     return jsonify({"ok": True, "keys": keys})
 
 
+def _signed_in_with_api_key():
+    """Keys are managed by a signed-in person only: a leaked CI key can't mint
+    more keys or revoke the owner's. (An API key login has no email.)"""
+    if g.current_user_email is None:
+        return jsonify({"ok": False, "error": "Sign in to manage API keys"}), 403
+    return None
+
+
 @app.route("/api/api-keys", methods=["POST"])
 @require_auth
 def api_keys_create():
+    if refused := _signed_in_with_api_key():
+        return refused
     data = request.get_json(silent=True) or {}
-    label = (data.get("label") or "").strip()
+    label = (data.get("label") or "").strip()[:200]
     if not label:
         return jsonify({"ok": False, "error": "label is required"}), 400
     key = db.create_api_key(g.current_user_id, label)
@@ -1875,6 +1885,8 @@ def api_keys_create():
 @app.route("/api/api-keys/<int:key_id>", methods=["DELETE"])
 @require_auth
 def api_keys_revoke(key_id):
+    if refused := _signed_in_with_api_key():
+        return refused
     ok = db.revoke_api_key(g.current_user_id, key_id)
     if not ok:
         return jsonify({"ok": False, "error": "Key not found"}), 404

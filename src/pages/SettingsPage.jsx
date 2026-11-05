@@ -1,14 +1,184 @@
-import { useState } from 'react';
-import { User, Palette, ShieldCheck, Trash2, Mail, CheckCircle2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { User, Palette, ShieldCheck, Trash2, Mail, CheckCircle2, KeyRound, Copy } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import PageHeader from '../components/ui/PageHeader';
 import Toggle from '../components/ui/Toggle';
+import { apiFetch } from '../utils/api';
 
 const TABS = [
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'security', label: 'Security', icon: ShieldCheck },
+  { id: 'api-keys', label: 'API keys', icon: KeyRound },
 ];
+
+const shortDate = (value) => (value ? new Date(value).toLocaleDateString() : 'Never');
+
+function ApiKeysTab() {
+  const [keys, setKeys] = useState(null);
+  const [label, setLabel] = useState('');
+  const [created, setCreated] = useState(null); // the full key, shown once
+  const [copied, setCopied] = useState(false);
+  const [confirmId, setConfirmId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function call(url, opts) {
+    const res = await apiFetch(url, opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Request failed. Please try again.');
+    return data;
+  }
+
+  async function load() {
+    try {
+      setKeys((await call('/api/api-keys')).keys);
+    } catch (e) {
+      setError(e.message);
+      setKeys([]);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!label.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const { key } = await call('/api/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: label.trim() }),
+      });
+      setCreated(key);
+      setCopied(false);
+      setLabel('');
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRevoke(id) {
+    if (confirmId !== id) {
+      setConfirmId(id);
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await call(`/api/api-keys/${id}`, { method: 'DELETE' });
+      setConfirmId(null);
+      if (created?.id === id) setCreated(null);
+      await load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCopy() {
+    navigator.clipboard?.writeText(created.key).then(() => setCopied(true), () => {});
+  }
+
+  return (
+    <div className="card p-6 space-y-5">
+      <div>
+        <h2 className="font-heading font-semibold text-lg text-ink">API keys</h2>
+        <p className="text-sm text-body mt-0.5">
+          For scripts and CI, such as the ADA GitHub Action. A key acts as you, so keep it in a secret
+          store (for GitHub: a repository secret named <code className="font-mono">ADA_API_KEY</code>).
+        </p>
+      </div>
+
+      <form onSubmit={handleCreate} className="flex items-end gap-3 flex-wrap">
+        <div className="flex-1 min-w-[200px]">
+          <label htmlFor="api-key-label" className="block text-xs font-semibold text-body mb-1.5">Key name</label>
+          <input
+            id="api-key-label"
+            className="input-base"
+            value={label}
+            maxLength={200}
+            placeholder="e.g. GitHub – marketing site"
+            onChange={(e) => setLabel(e.target.value)}
+            disabled={busy}
+          />
+        </div>
+        <button type="submit" className="btn-primary text-sm" disabled={busy || !label.trim()}>
+          Create key
+        </button>
+      </form>
+
+      {created && (
+        <div className="rounded-xl border border-sage/40 bg-sage/10 p-4 space-y-2" role="status">
+          <p className="text-sm font-medium text-ink">
+            Copy “{created.label}” now. You won’t be able to see it again.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="input-base bg-white font-mono text-xs break-all flex-1" aria-label="New API key">
+              {created.key}
+            </code>
+            <button type="button" onClick={handleCopy} className="btn-secondary text-sm flex items-center gap-2 shrink-0">
+              {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-coral" role="alert">{error}</p>}
+
+      {keys === null ? (
+        <p className="text-sm text-body">Loading…</p>
+      ) : keys.length === 0 ? (
+        <p className="text-sm text-body">No API keys yet.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-body">
+              <th className="font-semibold pb-2">Name</th>
+              <th className="font-semibold pb-2">Key</th>
+              <th className="font-semibold pb-2">Created</th>
+              <th className="font-semibold pb-2">Last used</th>
+              <th className="pb-2"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
+              <tr key={k.id} className="border-t border-gray-100">
+                <td className="py-2.5 text-ink">{k.label}</td>
+                <td className="py-2.5 font-mono text-xs text-body">{k.key_prefix}…</td>
+                <td className="py-2.5 text-body">{shortDate(k.created_at)}</td>
+                <td className="py-2.5 text-body">{shortDate(k.last_used_at)}</td>
+                <td className="py-2.5 text-right">
+                  {confirmId === k.id && (
+                    <button type="button" className="btn-ghost text-xs px-2 py-1 mr-1" onClick={() => setConfirmId(null)}>
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleRevoke(k.id)}
+                    disabled={busy}
+                    aria-label={confirmId === k.id ? `Confirm revoking ${k.label}` : `Revoke ${k.label}`}
+                    className="btn-secondary text-xs px-3 py-1 border-coral/40 text-coral hover:bg-coral/10"
+                  >
+                    {confirmId === k.id ? 'Confirm revoke' : 'Revoke'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 function ProfileTab({ user }) {
   return (
@@ -162,6 +332,7 @@ export default function SettingsPage() {
               <AppearanceTab reducedMotion={reducedMotion} setReducedMotion={setReducedMotion} />
             )}
             {activeTab === 'security' && <SecurityTab user={user} />}
+            {activeTab === 'api-keys' && <ApiKeysTab />}
           </div>
         </div>
 

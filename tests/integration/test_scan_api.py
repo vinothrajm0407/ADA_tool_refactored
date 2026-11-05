@@ -23,7 +23,7 @@ def _make_scan_job(status="queued"):
     return {"job_id": FAKE_JOB_ID, "status": status, "url": "https://example.com"}
 
 
-def _mock_create_scan(url, opts):
+def _mock_create_scan(url, opts, login=None):
     return _make_scan_job()
 
 
