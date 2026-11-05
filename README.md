@@ -88,6 +88,35 @@ If those are not configured, the app still starts and scanning still works. Only
 
 ---
 
+## GitHub Action (pull request check)
+
+`action.yml` scans pages on every pull request, posts one "ADA Accessibility Review" comment
+(updated on each run), and fails the check on violations at `fail-on` or above.
+
+```yaml
+# .github/workflows/accessibility.yml in the repo to check
+on: pull_request
+permissions:
+  pull-requests: write
+jobs:
+  ada:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: vinothrajm0407/ADA_tool_refactored@main
+        with:
+          api-url: https://your-ada-server
+          api-key: ${{ secrets.ADA_API_KEY }}
+          urls: |
+            https://staging.example.com/
+            https://staging.example.com/login
+          fail-on: serious   # critical | serious | moderate | minor | none
+```
+
+The ADA server must be reachable from GitHub, and the pages from the ADA server. Create the
+API key with `POST /api/api-keys` (`{"label": "github"}`) while signed in; it is shown once.
+
+---
+
 ## Local Development Notes
 
 ### Frontend dev server

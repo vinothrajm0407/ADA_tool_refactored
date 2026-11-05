@@ -1,0 +1,38 @@
+name: ADA Accessibility Check
+description: Scan pages with the ADA Tool, comment the issues on the pull request, and fail on serious ones.
+branding:
+  icon: eye
+  color: blue
+
+inputs:
+  api-url:
+    description: Address of the ADA Tool backend, e.g. https://ada.example.com
+    required: true
+  api-key:
+    description: ADA API key (starts with ada_). Keep it in a repository secret.
+    required: true
+  urls:
+    description: Pages to scan, one per line (or comma separated). Must be reachable from the ADA server.
+    required: true
+  fail-on:
+    description: Fail the check on violations at this impact or above — critical, serious, moderate, minor, or none.
+    default: serious
+  include-best-practices:
+    description: Also report axe best-practice rules (true/false).
+    default: "false"
+  github-token:
+    description: Token used to comment on the pull request (needs pull-requests write).
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: python3 "${{ github.action_path }}/scripts/ada_pr_review.py"
+      env:
+        ADA_API_URL: ${{ inputs.api-url }}
+        ADA_API_KEY: ${{ inputs.api-key }}
+        ADA_URLS: ${{ inputs.urls }}
+        ADA_FAIL_ON: ${{ inputs.fail-on }}
+        ADA_INCLUDE_BEST_PRACTICES: ${{ inputs.include-best-practices }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}

@@ -75,14 +75,14 @@ const FEATURES = [
 ];
 
 const INTEGRATIONS = [
-  { icon: Terminal,  label: 'CLI Tool',        desc: 'Scan from any shell or script',        available: true  },
   { icon: Code,      label: 'REST API',         desc: 'Programmatic access to all scan data', available: true  },
-  { icon: Mail,      label: 'Email Reports',    desc: 'Scheduled reports to your inbox',      available: true  },
-  { icon: Zap,       label: 'Webhook Events',   desc: 'Real-time scan completion events',     available: true  },
-  { icon: GitBranch, label: 'GitHub Actions',   desc: 'Automated PR accessibility checks',    available: false },
+  { icon: GitBranch, label: 'GitHub Actions',   desc: 'Automated PR accessibility checks',    available: true  },
+  { icon: Clock,     label: 'Scheduled Scans',  desc: 'Daily and weekly auto-monitoring',     available: true  },
+  { icon: Mail,      label: 'Email Reports',    desc: 'Crawl reports and alerts by email',    available: true  },
+  { icon: Zap,       label: 'Slack & Teams',    desc: 'Scan reports posted to your channels', available: true  },
+  { icon: Terminal,  label: 'CLI Tool',         desc: 'Scan from any shell or script',        available: false },
   { icon: FileCode,  label: 'SARIF Export',     desc: 'Upload results to GitHub Security',    available: false },
   { icon: Monitor,   label: 'Multi-viewport',   desc: 'Mobile, tablet, and desktop testing',  available: false },
-  { icon: Clock,     label: 'Scheduled Scans',  desc: 'Daily and weekly auto-monitoring',     available: false },
 ];
 
 
@@ -414,7 +414,7 @@ export default function LandingPage({ onOpenApp, dark, toggleDark }) {
                 <div>
                   <h3 className="font-heading font-bold text-lg mb-2 text-white">Developer First</h3>
                   <p className="text-teal-100 text-sm leading-relaxed">
-                    Paste a URL, get results in minutes. Webhooks, SARIF export, and CI/CD integration let your team run ADA inside existing workflows — no context switching required.
+                    Paste a URL, get results in minutes. A GitHub Action, Slack and Teams reports, and a REST API let your team run ADA inside existing workflows — no context switching required.
                   </p>
                 </div>
               </div>
