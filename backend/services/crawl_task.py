@@ -85,6 +85,8 @@ def _duration(started: str, ended: str) -> float | None:
         return None
 
 
+BLOCKED_PAGES_TO_STOP = 3  # see _CrawlState.page_blocked
+
 # Following one of these would end the logged-in session mid-crawl.
 _LOGOUT_LINK = re.compile(r"log[-_]?out|sign[-_]?out|log[-_]?off|sign[-_]?off", re.I)
 # Paths that usually sit behind a login. On a login crawl they are scanned
@@ -406,6 +408,7 @@ class _CrawlState:
         self.queue: deque[tuple[str, str | None, int]] = deque([(root_url, None, 0)])
         self.visited: set[str] = {normalize_url(root_url)}
         self.claimed = self.scanned = self.failed = self.active = 0
+        self.blocked_in_a_row = 0
         self.cancelled = False
         self.error: Exception | None = None
         self.lock = threading.Lock()
@@ -472,10 +475,24 @@ class _CrawlState:
         with self.lock:
             return not self.session and len(self.visited) >= self.max_pages
 
+    def page_blocked(self, reason: str):
+        """The site's bot protection blocked this page. After BLOCKED_PAGES_TO_STOP
+        in a row the rest will be blocked too: stop, keeping the pages scanned so
+        far. A Cloudflare-protected site blocked 27 pages, each waiting 2 minutes for a person
+        to pass the check, before the crawl gave up (54 min, 2026-11-10)."""
+        with self.lock:
+            self.blocked_in_a_row += 1
+            if self.blocked_in_a_row >= BLOCKED_PAGES_TO_STOP and not self.error:
+                self.error = RuntimeError(
+                    f"Stopped: {BLOCKED_PAGES_TO_STOP} pages in a row were blocked by the site's bot protection, "
+                    f"so the rest of the site can't be checked. {self.scanned} page(s) scanned before that are kept. "
+                    f"Last reason: {reason}")
+
     def finish_page(self, ok: bool):
         with self.lock:
             self.active -= 1
             if ok:
+                self.blocked_in_a_row = 0
                 self.scanned += 1
             else:
                 self.failed += 1
@@ -836,6 +853,7 @@ def _scan_one_page(c: _CrawlState, pw_page, axe, PWTimeout, url, parent_url, dep
         if blocked and c.assisted and wait_for_person_to_verify(pw_page):
             blocked = None
         if blocked:
+            c.page_blocked(blocked)
             raise RuntimeError(blocked)
         # Scoring the login form under this page's address would be a wrong
         # result that looks right; fail it with the reason instead.

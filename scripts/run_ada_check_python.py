@@ -12,6 +12,7 @@ Usage: python scripts/run_ada_check_python.py <url>
 import base64
 import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -183,16 +184,32 @@ def bot_challenge_reason(status: int | None, title: str, html: str) -> str | Non
     site (e.g. Cloudflare's "Just a moment..."), else None. Scanning that page gives
     a meaningless near-perfect score — confirmed 2026-10-22 on a Cloudflare-protected
     store: 1 violation and "Grade A" for the challenge page, while the real page had
-    real issues. A known challenge title, or a blocking status plus a vendor marker,
-    counts; a vendor script alone doesn't (protected sites embed it on normal pages)."""
+    real issues. A known challenge title, a 401/403 for the page itself, or a
+    blocking status plus a vendor marker counts; a vendor script alone doesn't
+    (protected sites embed it on normal pages). 401/403 without a vendor name:
+    a QA site's "Restricted Site" and eBay's "Error Page" both scored as real pages
+    (2026-11-10). A loaded page with nothing to audit (no text, link or image)
+    counts too: amazon.com sent the scanner a blank page that scored 100."""
     t, h = (title or "").strip().lower(), (html or "").lower()
     page_marker = next((name for marker, name in _CHALLENGE_PAGES if marker in h), None)
     vendor = page_marker or next((name for marker, name in _CHALLENGE_VENDORS if marker in h), None)
-    if not (page_marker or any(t.startswith(x) for x in _CHALLENGE_TITLES) or (status in (403, 429, 503) and vendor)):
+    if status is not None and status < 400 and _nothing_to_audit(h):
+        return ("The site sent the scanner an empty page (no text, links or images), so there was nothing "
+                "to check. The site may be blocking automated browsers: ask the site owner to allowlist the "
+                "scanner, then scan again.")
+    if not (page_marker or any(t.startswith(x) for x in _CHALLENGE_TITLES) or status in (401, 403)
+            or (status in (429, 503) and vendor)):
         return None
     return (f"Blocked by the site's bot protection ({vendor or 'security check'}"
             f"{f', HTTP {status}' if status else ''}): the scanner was shown a verification page, "
             "not the site, so no valid results. Ask the site owner to allowlist the scanner, then scan again.")
+
+
+def _nothing_to_audit(html: str) -> bool:
+    if re.search(r"<(a|img|svg|input|button|iframe|video|canvas)\b", html):
+        return False
+    body = re.sub(r"<(script|style|noscript|template)\b.*?</\1>", " ", html, flags=re.S)
+    return not re.sub(r"<[^>]*>|&nbsp;|\s", "", body)
 
 
 def page_title_and_html(page) -> tuple[str, str]:

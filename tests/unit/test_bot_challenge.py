@@ -18,6 +18,32 @@ def test_normal_page_with_vendor_script_is_not_a_challenge():
     assert bot_challenge_reason(None, "Home", "<html></html>") is None
 
 
+def test_forbidden_page_without_vendor_name_is_blocked():
+    # A QA site's "Restricted Site" and eBay's "Error Page" (both HTTP 403) scored as real pages.
+    assert bot_challenge_reason(403, "Restricted Site", "<body><h1>Access Restricted</h1><a href='/x'>Contact</a></body>")
+    assert bot_challenge_reason(403, "Error Page | eBay", "<body>SORRY Something went wrong</body>")
+
+
+def test_empty_page_is_blocked_but_a_real_page_is_not():
+    blank = "<html><head><script>var x=1</script><style>p{}</style></head><body> <div>&nbsp;</div></body></html>"
+    assert "empty page" in bot_challenge_reason(202, "Amazon.com", blank)
+    assert bot_challenge_reason(200, "Home", "<body><p>Welcome</p></body>") is None
+    assert bot_challenge_reason(200, "Home", "<body><img src='hero.jpg'></body>") is None
+
+
+def test_crawl_stops_after_three_blocked_pages_in_a_row(monkeypatch):
+    from backend.services import crawl_task
+    monkeypatch.setattr(crawl_task.db, "update_crawl_job_progress", lambda *a, **k: None)
+    monkeypatch.setattr(crawl_task, "inmemory_update_crawl", lambda *a, **k: None)
+    c = crawl_task._CrawlState("C1", "https://x.test/", "x.test", 3, 50, False)
+    c.page_blocked("403"); c.page_blocked("403")
+    c.active = 1; c.finish_page(True)  # a scanned page in between resets the count
+    c.page_blocked("403"); c.page_blocked("403")
+    assert c.error is None
+    c.page_blocked("403")
+    assert "3 pages in a row" in str(c.error) and "1 page(s) scanned" in str(c.error)
+
+
 def test_scanner_user_agent_keeps_browser_ua_and_adds_tag():
     from types import SimpleNamespace
     from scripts.run_ada_check_python import scanner_user_agent
