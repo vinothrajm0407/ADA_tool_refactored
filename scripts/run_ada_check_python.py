@@ -92,7 +92,8 @@ _CHALLENGE_TITLES = ("just a moment", "attention required", "access denied", "se
                      "authentication required")
 # Markers only a challenge page has, whatever its title or status. Amazon's
 # "are you a robot" page keeps the normal "Amazon.in" title and HTTP 200.
-_CHALLENGE_PAGES = (("/errors/validatecaptcha", "Amazon"),)
+# Its "Continue shopping" gate posts to /errors_page/validateCaptcha (2026-11-11).
+_CHALLENGE_PAGES = (("validatecaptcha", "Amazon"),)
 
 # Every scanner browser refuses permission prompts (local network access,
 # notifications, location...): no scan needs them, and a visible one blocked
@@ -177,6 +178,12 @@ def with_person_fallback(run, assisted: bool = False):
 _CHALLENGE_VENDORS = (("captcha-delivery.com", "DataDome"), ("_incapsula_resource", "Imperva"),
                       ("px-captcha", "PerimeterX"), ("cf-chl", "Cloudflare"), ("cloudflare", "Cloudflare"),
                       ("akamai", "Akamai"))
+# Only ever on a challenge page (not on normal pages the vendor protects).
+_CHALLENGE_ONLY = tuple(m for m, _ in _CHALLENGE_VENDORS[:4])
+
+
+def _challenge_only(h: str) -> bool:
+    return any(m in h for m in _CHALLENGE_ONLY)
 
 
 def bot_challenge_reason(status: int | None, title: str, html: str) -> str | None:
@@ -184,9 +191,11 @@ def bot_challenge_reason(status: int | None, title: str, html: str) -> str | Non
     site (e.g. Cloudflare's "Just a moment..."), else None. Scanning that page gives
     a meaningless near-perfect score — confirmed 2026-10-22 on a Cloudflare-protected
     store: 1 violation and "Grade A" for the challenge page, while the real page had
-    real issues. A known challenge title, a 401/403 for the page itself, or a
-    blocking status plus a vendor marker counts; a vendor script alone doesn't
-    (protected sites embed it on normal pages). 401/403 without a vendor name:
+    real issues. A known challenge title, a 401/403/429 for the page itself, or a
+    vendor marker on a 503, or a challenge-only marker on a page without a single
+    link, counts; a vendor script on a normal page doesn't (protected sites embed it everywhere).
+    DataDome's slider page came back as HTTP 200 on two news sites, and a plain
+    429 "Too Many Requests" page scored as real (2026-11-11). 401/403 without a vendor name:
     a QA site's "Restricted Site" and eBay's "Error Page" both scored as real pages
     (2026-11-10). A loaded page with nothing to audit (no text, link or image)
     counts too: amazon.com sent the scanner a blank page that scored 100."""
@@ -197,8 +206,8 @@ def bot_challenge_reason(status: int | None, title: str, html: str) -> str | Non
         return ("The site sent the scanner an empty page (no text, links or images), so there was nothing "
                 "to check. The site may be blocking automated browsers: ask the site owner to allowlist the "
                 "scanner, then scan again.")
-    if not (page_marker or any(t.startswith(x) for x in _CHALLENGE_TITLES) or status in (401, 403)
-            or (status in (429, 503) and vendor)):
+    if not (page_marker or any(t.startswith(x) for x in _CHALLENGE_TITLES) or status in (401, 403, 429)
+            or (status == 503 and vendor) or (_challenge_only(h) and "<a " not in h)):
         return None
     return (f"Blocked by the site's bot protection ({vendor or 'security check'}"
             f"{f', HTTP {status}' if status else ''}): the scanner was shown a verification page, "
@@ -234,14 +243,16 @@ ASSISTED_VERIFY_SECONDS = 120
 def wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> bool:
     """Assisted scan: the window is visible on the user's own screen, so the
     user can complete the site's "verify you are human" check themselves.
-    Poll until the challenge page is gone. True once the real page shows."""
-    import time
+    Poll until the challenge page is gone. True once the real page shows:
+    the gate gone is not enough, amazon.com was blank for a moment after its
+    "Continue shopping" gate and that blank page got scanned (2026-11-11)."""
     page.bring_to_front()
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         page.wait_for_timeout(2000)
-        if not bot_challenge_reason(None, *page_title_and_html(page)):
-            page.wait_for_timeout(3000)  # let the real page settle before axe runs
+        title, html = page_title_and_html(page)
+        if not bot_challenge_reason(None, title, html) and not _nothing_to_audit(html.lower()):
+            settle(page)  # let the real page finish drawing before axe runs
             return True
     return False
 

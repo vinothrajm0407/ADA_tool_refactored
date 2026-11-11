@@ -24,6 +24,39 @@ def test_forbidden_page_without_vendor_name_is_blocked():
     assert bot_challenge_reason(403, "Error Page | eBay", "<body>SORRY Something went wrong</body>")
 
 
+def test_amazon_continue_shopping_gate_is_blocked():
+    gate = '<h4>Click the button below to continue shopping</h4><form method="get" action="/errors_page/validateCaptcha">'
+    assert "Amazon" in bot_challenge_reason(200, "Amazon.com", gate)
+
+
+def test_person_check_waits_for_real_content_not_just_the_gate_going_away():
+    from scripts import run_ada_check_python as m
+    pages = iter([("Amazon.com", '<form action="/errors_page/validateCaptcha">'),  # gate
+                  ("", "<html><body></body></html>"),                              # gate gone, still blank
+                  ("Amazon.com", '<body><a href="/deals">Deals</a></body>')])      # real store
+    calls = []
+
+    class Page:
+        def bring_to_front(self): pass
+        def wait_for_timeout(self, ms): calls.append(ms)
+    m_page = Page()
+    orig = (m.page_title_and_html, m.settle)
+    m.page_title_and_html, m.settle = (lambda p: next(pages)), (lambda p: calls.append("settled"))
+    try:
+        assert m.wait_for_person_to_verify(m_page, seconds=60)
+    finally:
+        m.page_title_and_html, m.settle = orig
+    assert calls == [2000, 2000, 2000, "settled"]
+
+
+def test_vendor_challenge_with_ok_status_and_too_many_requests_are_blocked():
+    datadome = '<html><body><iframe src="https://geo.captcha-delivery.com/captcha/?x=1"></iframe></body></html>'
+    assert bot_challenge_reason(200, "reuters.com", datadome)
+    assert bot_challenge_reason(429, "Too Many Requests", "<body>Too Many Requests</body>")
+    # a normal page that embeds the vendor's script still passes
+    assert bot_challenge_reason(200, "News", '<script src="https://js.datadome.co/tags.js"></script><a href="/world">World</a>') is None
+
+
 def test_empty_page_is_blocked_but_a_real_page_is_not():
     blank = "<html><head><script>var x=1</script><style>p{}</style></head><body> <div>&nbsp;</div></body></html>"
     assert "empty page" in bot_challenge_reason(202, "Amazon.com", blank)
