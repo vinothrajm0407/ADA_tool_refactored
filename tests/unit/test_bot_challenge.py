@@ -49,6 +49,17 @@ def test_person_check_waits_for_real_content_not_just_the_gate_going_away():
     assert calls == [2000, 2000, 2000, "settled"]
 
 
+def test_person_closing_the_verify_window_means_not_verified():
+    # Closing the window used to crash the scan and show "page took too long".
+    from playwright.sync_api import Error
+    from scripts import run_ada_check_python as m
+
+    class Page:
+        def bring_to_front(self): pass
+        def wait_for_timeout(self, ms): raise Error("Target page, context or browser has been closed")
+    assert m.wait_for_person_to_verify(Page(), seconds=60) is False
+
+
 def test_vendor_challenge_with_ok_status_and_too_many_requests_are_blocked():
     datadome = '<html><body><iframe src="https://geo.captcha-delivery.com/captcha/?x=1"></iframe></body></html>'
     assert bot_challenge_reason(200, "reuters.com", datadome)

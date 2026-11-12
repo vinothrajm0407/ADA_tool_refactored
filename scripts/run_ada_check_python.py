@@ -246,11 +246,15 @@ def wait_for_person_to_verify(page, seconds: int = ASSISTED_VERIFY_SECONDS) -> b
     Poll until the challenge page is gone. True once the real page shows:
     the gate gone is not enough, amazon.com was blank for a moment after its
     "Continue shopping" gate and that blank page got scanned (2026-11-11)."""
+    from playwright.sync_api import Error as PlaywrightError
     page.bring_to_front()
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        page.wait_for_timeout(2000)
-        title, html = page_title_and_html(page)
+        try:
+            page.wait_for_timeout(2000)
+            title, html = page_title_and_html(page)
+        except PlaywrightError:  # the person closed the window: not verified, not "too slow"
+            return False
         if not bot_challenge_reason(None, title, html) and not _nothing_to_audit(html.lower()):
             settle(page)  # let the real page finish drawing before axe runs
             return True
@@ -340,8 +344,8 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
         blocked = bot_challenge_reason(response.status if response else None, *page_title_and_html(page))
         if blocked and assisted:
             blocked = None if wait_for_person_to_verify(page) else (
-                f"The site's verification wasn't completed in the browser window within "
-                f"{ASSISTED_VERIFY_SECONDS // 60} minutes, so the scan stopped. Run it again and complete "
+                f"The site's verification wasn't completed in the browser window (it was closed, or "
+                f"{ASSISTED_VERIFY_SECONDS // 60} minutes passed), so the scan stopped. Run it again and complete "
                 "the check in the window that opens.")
         if blocked:
             raise BotBlocked(blocked)

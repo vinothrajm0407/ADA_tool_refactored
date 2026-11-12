@@ -130,14 +130,14 @@ function ScanComparison({ currentScore, currentTotal, scanUrl, prevScan }) {
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-2">Previous</p>
           <p className="text-2xl font-heading font-bold text-body">{prevScan.totalViolations}</p>
-          <p className="text-[11px] text-body mt-0.5">violations</p>
+          <p className="text-[11px] text-body mt-0.5">rules failed</p>
           <p className="text-xs font-semibold text-body mt-1">{prevScan.score}/100</p>
         </div>
         <div className="flex flex-col items-center justify-center gap-1">
           <p className={`text-2xl font-heading font-bold ${violDiff < 0 ?'text-sage': violDiff > 0 ?'text-coral':'text-body'}`}>
             {violDiff > 0 ? '+' : ''}{violDiff}
           </p>
-          <p className="text-[10px] text-body">violations</p>
+          <p className="text-[10px] text-body">rules failed</p>
           <p className={`text-xs font-semibold ${scoreDiff > 0 ?'text-teal': scoreDiff < 0 ?'text-coral':'text-body'}`}>
             {scoreDiff !== 0 ? `${scoreDiff > 0 ? '+' : ''}${scoreDiff} score` : 'No change'}
           </p>
@@ -145,7 +145,7 @@ function ScanComparison({ currentScore, currentTotal, scanUrl, prevScan }) {
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-body mb-2">Current</p>
           <p className="text-2xl font-heading font-bold text-ink">{currentTotal}</p>
-          <p className="text-[11px] text-body mt-0.5">violations</p>
+          <p className="text-[11px] text-body mt-0.5">rules failed</p>
           <p className="text-xs font-semibold text-body mt-1">{currentScore}/100</p>
         </div>
       </div>
@@ -153,7 +153,7 @@ function ScanComparison({ currentScore, currentTotal, scanUrl, prevScan }) {
         <div className="mt-4 flex items-center gap-2 bg-teal/5 border border-teal/15 rounded-xl px-4 py-2.5">
           <span className="text-teal font-bold text-sm">↑</span>
           <p className="text-sm text-teal font-medium">
-            {Math.abs(violDiff)} fewer violation{Math.abs(violDiff) !== 1 ? 's' : ''} since last scan
+            {Math.abs(violDiff)} fewer failed rule{Math.abs(violDiff) !== 1 ? 's' : ''} since last scan
           </p>
         </div>
       )}
@@ -161,7 +161,7 @@ function ScanComparison({ currentScore, currentTotal, scanUrl, prevScan }) {
         <div className="mt-4 flex items-center gap-2 bg-coral/5 border border-coral/15 rounded-xl px-4 py-2.5">
           <span className="text-coral font-bold text-sm">↓</span>
           <p className="text-sm text-coral font-medium">
-            {violDiff} more violation{violDiff !== 1 ? 's' : ''} than last scan — review recent changes
+            {violDiff} more failed rule{violDiff !== 1 ? 's' : ''} than last scan — review recent changes
           </p>
         </div>
       )}
