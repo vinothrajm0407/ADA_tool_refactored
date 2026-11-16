@@ -110,3 +110,20 @@ class TestShowsLoginPage:
     def test_no_recorded_form_only_checks_url(self):
         from backend.services.crawl_task import _shows_login_page
         assert not _shows_login_page(_FakePage("https://site.test/dashboard", self.FORM), self.LOGIN, None)
+
+
+@pytest.mark.unit
+def test_wrong_password_fails_at_once_without_a_visible_window(monkeypatch):
+    """The site rejecting the password must not open a window and wait 5 minutes."""
+    import backend.services.crawl_task as ct
+    calls = []
+
+    def fake_log_in(login, root_domain, assisted, crawl_id):
+        calls.append(assisted)
+        raise ct.LoginRejected('Login failed: the site says: "Your password is invalid!"')
+
+    monkeypatch.setattr(ct, "_log_in", fake_log_in)
+    monkeypatch.setattr(ct, "can_ask_person", lambda: True)
+    with pytest.raises(ct.LoginRejected, match="password is invalid"):
+        ct.sign_in({"url": "https://example.com/login"}, "example.com", False)
+    assert calls == [False]  # tried once, headless; no visible-window retry

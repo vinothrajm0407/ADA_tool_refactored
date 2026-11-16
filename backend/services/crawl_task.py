@@ -205,6 +205,14 @@ def _first_username_box(page):
     return None
 
 
+class LoginRejected(RuntimeError):
+    """The site turned down the username/password. A person in a visible
+    window can't fix that by waiting, so the crawl fails right away."""
+
+
+_ROBOT_CHECK = re.compile(r"captcha|robot|human|verif", re.I)
+
+
 def _wait_for_person_to_log_in(page, login_url, root_domain):
     """Done once the person is back on the site, off the login page, with no
     password box showing. 5 minutes to finish."""
@@ -273,6 +281,9 @@ def _fill_login_form(page, login):
                 pass  # the form went away meanwhile
     if not _login_form_gone(page, 15):
         said = _page_message(page)
+        if said and not _ROBOT_CHECK.search(said):  # e.g. "Your password is invalid!"
+            said = said.splitlines()[0].strip()  # drop an alert's "×" close button
+            raise LoginRejected(f'Login failed: the site says: "{said}" — check the username and password')
         raise RuntimeError("Login failed: still on the login page — "
                            + (f'the site says: "{said}"' if said else "check the username and password"))
     # Only a form whose password box was in the page itself (not a frame) can be recognised later.
@@ -372,7 +383,7 @@ def sign_in(login: dict, root_domain: str, assisted: bool, crawl_id: str = "logi
     try:
         return (*_log_in(login, root_domain, assisted, crawl_id), assisted)
     except RuntimeError as exc:
-        if assisted or not can_ask_person():
+        if assisted or not can_ask_person() or isinstance(exc, LoginRejected):
             raise
         logger.info("Login needs a person, using a visible browser | crawl_id=%s reason=%s", crawl_id, exc)
         return (*_log_in(login, root_domain, True, crawl_id), True)
