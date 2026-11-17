@@ -1131,6 +1131,11 @@ def api_crawl_schedules_create():
     cron_expression = (data.get("cronExpression") or "").strip() or None
     if not url:
         return jsonify({"ok": False, "error": "Missing 'url'"}), 400
+    from services.url_validation import validate_url_for_scan
+    try:  # refuse now, not on every scheduled run
+        validate_url_for_scan(url)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
     if schedule_type not in ("simple", "cron"):
         schedule_type = "simple"
     if schedule_type == "cron":

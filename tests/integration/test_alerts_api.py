@@ -131,6 +131,14 @@ class TestCrawlSchedules:
                            headers=authed_headers)
         assert resp.status_code == 400
 
+    def test_create_schedule_internal_address_400(self, client, db_mock, authed_headers):
+        db_mock.create_crawl_schedule.reset_mock()
+        resp = client.post("/api/crawl-schedules",
+                           json={"url": "http://127.0.0.1/", "frequency": "weekly"},
+                           headers=authed_headers)
+        assert resp.status_code == 400
+        db_mock.create_crawl_schedule.assert_not_called()
+
     def test_invalid_frequency_defaults_to_weekly(self, client, db_mock, authed_headers):
         db_mock.create_crawl_schedule.return_value = {
             "id": 1, "url": "https://example.com", "frequency": "weekly"
