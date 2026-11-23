@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Shield, Users, Clock, ExternalLink, Sparkles, Wand2, Loader2, CheckCircle2, XCircle, GitBranch, Info } from 'lucide-react';
 import {
   getRuleFixTips, getRuleWhyMatters,
@@ -637,6 +637,18 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
   const [copiedNode, setCopiedNode] = useState(null);
   const [screenshotOpen, setScreenshotOpen] = useState(false);
   const [showAllNodes, setShowAllNodes] = useState(false);
+  const rowRef = useRef(null);
+
+  // "How to fix" in the Fix all bar: open this issue and bring it into view.
+  useEffect(() => {
+    const open = e => {
+      if (e.detail !== violation.id) return;
+      setExpanded(true);
+      setTimeout(() => rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+    window.addEventListener('ns-open-rule', open);
+    return () => window.removeEventListener('ns-open-rule', open);
+  }, [violation.id]);
 
   const impact = (violation.impact ?? 'minor').toLowerCase();
   const impactConfig = {
@@ -660,7 +672,7 @@ export default function ViolationRow({ violation, pageUrl, sessionId }) {
   };
 
   return (
-    <div className="border border-solid border-gray-200 rounded-xl overflow-hidden bg-white hover:border-teal/40 hover:shadow-soft transition-all">
+    <div ref={rowRef} className="border border-solid border-gray-200 rounded-xl overflow-hidden bg-white hover:border-teal/40 hover:shadow-soft transition-all">
 
       {/* Header (always visible) — two sibling buttons, not nested: the left
           one toggles expand, the right one (when collapsed) is the compact

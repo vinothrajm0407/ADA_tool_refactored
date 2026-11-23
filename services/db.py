@@ -3791,7 +3791,8 @@ def get_fixes(user_id: int | None, limit: int = 50) -> list[dict]:
                    JSON_QUERY(f.Proof, '$.wcag') AS Wcag,
                    JSON_VALUE(f.Proof, '$.root_cause.page_count') AS SourcePages,
                    JSON_VALUE(f.Proof, '$.root_cause.pages_clean') AS SourcePagesClean,
-                   JSON_VALUE(f.Proof, '$.root_cause.pages_checked') AS SourcePagesChecked
+                   JSON_VALUE(f.Proof, '$.root_cause.pages_checked') AS SourcePagesChecked,
+                   JSON_VALUE(f.Proof, '$.page_fix.issues') AS PageFixIssues
             FROM dbo.Fix f
             LEFT JOIN dbo.Users u ON u.Id = f.UserId
             LEFT JOIN dbo.Users rv ON rv.Id = f.ReviewedBy
@@ -3838,6 +3839,7 @@ def get_fixes(user_id: int | None, limit: int = 50) -> list[dict]:
             "source_pages": int(r.SourcePages) if r.SourcePages else None,
             "source_pages_clean": int(r.SourcePagesClean) if r.SourcePagesClean else None,
             "source_pages_checked": int(r.SourcePagesChecked) if r.SourcePagesChecked else None,
+            "page_fix_issues": int(r.PageFixIssues) if r.PageFixIssues else None,  # part of a "Fix all" PR
         })
     return out
 

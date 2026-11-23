@@ -3058,6 +3058,55 @@ Generated and verified by ADA Auto-Fix: each patch was applied in the same isola
 """
 
 
+def _pr_body_page(page_url: str, applied: list[dict], skipped: list[dict]) -> str:
+    """Whole-page fix: one section per rule, then what was left for a person."""
+    by_rule: dict[str, list[dict]] = {}
+    for a in applied:
+        by_rule.setdefault(a["rule"].get("id", ""), []).append(a)
+    sections = []
+    for i, (rule_id, entries) in enumerate(by_rule.items(), 1):
+        rule = entries[0]["rule"]
+        changes = "\n\n".join(
+            f"`{a['file_path']}:{a['line_no']}`\n```jsx\n{a['patch']['before']}\n```\n→\n```jsx\n{a['patch']['after']}\n```"
+            for a in entries)
+        sections.append(f"#### {i}. {rule.get('help', rule_id)} — `{rule_id}` ({len(entries)} element{'s' if len(entries) != 1 else ''})\n\n{changes}")
+    left = ""
+    if skipped:
+        left = "\n\n### Not fixed automatically\n" + "\n".join(
+            f"- `{x['rule_id']}`: {x['error']}" for x in skipped)
+    return (f"### Accessibility fixes for {page_url}\n\n"
+            f"{len(by_rule)} issue{'s' if len(by_rule) != 1 else ''} fixed in one pull request.\n\n"
+            + "\n\n".join(sections) + left +
+            "\n\n---\nGenerated and verified by ADA Auto-Fix: every patch was applied in one isolated sandbox, built "
+            "once, and the page re-scanned before this branch was pushed. Review before merging.\n")
+
+
+def rules_remaining(preview_url: str, rule_ids: set[str]) -> set[str]:
+    """One re-scan: which of these rules are still reported on the page."""
+    from services.url_processor import process_url
+    result = process_url(preview_url, write_output=False)
+    return {v.get("id") for v in result.get("axeResult", {}).get("violations", [])} & set(rule_ids)
+
+
+MAX_PAGE_PROOFS = 8  # ponytail: proof for the first element of up to 8 rules per whole-page PR
+
+
+def _first_per_rule(applied: list[dict]) -> list[dict]:
+    seen, out = set(), []
+    for e in applied:
+        rid = e["rule"].get("id")
+        if rid not in seen:
+            seen.add(rid)
+            out.append(e)
+    return out
+
+
+def run_auto_fix_page(link: dict, page_url: str, items: list[tuple[dict, list[dict]]], find_duplicate=None) -> dict:
+    """Fix all: every element of every given rule on one page in a single
+    clone/build/re-scan, opening ONE pull request. items: [(rule, nodes)]."""
+    return _run_batch(link, page_url, [(rule, node) for rule, nodes in items for node in nodes], find_duplicate)
+
+
 def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict], find_duplicate=None,
                        root_cause: dict | None = None) -> dict:
     """Same pipeline as run_auto_fix, but for every element flagged by one
@@ -3080,6 +3129,15 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
     re-check], "page_count"} — after the build, those pages are re-scanned too
     and the PR says on how many of them the shared markup is gone.
     """
+    return _run_batch(link, page_url, [(rule, node) for node in nodes], find_duplicate, root_cause)
+
+
+def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_duplicate=None,
+               root_cause: dict | None = None) -> dict:
+    """Shared core of run_auto_fix_batch (one rule) and run_auto_fix_page (every
+    rule on the page): pairs are (rule, element). Each result carries its rule_id."""
+    rules = list({r.get("id", "fix"): r for r, _ in pairs}.values())
+    single = len(rules) == 1
     steps: list[dict] = []
 
     def step(name: str, ok: bool, detail: str = ""):
@@ -3095,20 +3153,20 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
         repo_dir = _clone_repo(link["repo_url"], access_token, link["default_branch"], provider)
         step("Clone repo", True)
 
-        rule_id = rule.get("id", "fix")
         node_results: list[dict] = []
         applied: list[dict] = []
         duplicate_of = None
 
-        for node in nodes:
+        for rule, node in pairs:
+            rule_id = rule.get("id", "fix")
             node_html = (node or {}).get("html", "").strip()
             if not node_html:
-                node_results.append({"status": "failed", "error": "Page-wide violations aren't supported in a batch fix"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Page-wide violations aren't supported in a batch fix"})
                 continue
 
             located = locate_source(repo_dir, node_html, rule_id, (node or {}).get("target"), page_url, node)
             if not located:
-                node_results.append({"status": "failed", "error": "Could not uniquely match this violation to a source file"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Could not uniquely match this violation to a source file"})
                 continue
             file_path, line_no = located
 
@@ -3117,7 +3175,7 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             patch = generate_patch(rule, node, file_content, line_no, file_path)
 
             if patch is ALREADY_FIXED:
-                node_results.append({"status": "already_fixed", "file_path": file_path, "line_no": line_no})
+                node_results.append({"rule_id": rule_id, "status": "already_fixed", "file_path": file_path, "line_no": line_no})
                 continue
             if not patch:
                 if rule_id in RULES_WITH_FALLBACK:
@@ -3126,10 +3184,10 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
                     detail = "No GEMINI_API_KEY configured — this rule has no built-in fallback fix without one"
                 else:
                     detail = "Gemini did not return a usable patch for this violation"
-                node_results.append({"status": "failed", "error": detail})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": detail})
                 continue
             if not validate_patch(file_content, patch["before"], patch["after"]):
-                node_results.append({"status": "failed", "error": "Patch did not validate against the source file"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Patch did not validate against the source file"})
                 continue
 
             # Different elements can share one root cause (e.g. several links styled by
@@ -3138,14 +3196,14 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             existing = find_duplicate(patch_signature) if find_duplicate else None
             if existing:
                 duplicate_of = existing
-                node_results.append({"status": "already_fixed", "duplicate": True, "file_path": file_path, "line_no": line_no})
+                node_results.append({"rule_id": rule_id, "status": "already_fixed", "duplicate": True, "file_path": file_path, "line_no": line_no})
                 continue
 
             full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
-            node_results.append({"status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
-            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch, "node": node, "result": node_results[-1]})
+            node_results.append({"rule_id": rule_id, "status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
+            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch, "node": node, "rule": rule, "result": node_results[-1]})
 
-        step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(nodes)} elements patched")
+        step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(pairs)} elements patched")
         if not applied and duplicate_of:
             return {"status": "verified", "duplicate": True, "merged": False, "steps": steps, "results": node_results,
                     "pr_url": duplicate_of["pr_url"], "branch_url": duplicate_of["branch_url"]}
@@ -3177,14 +3235,22 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             with build_and_preview(repo_dir) as preview_url:
                 step("Build", True)
                 page_preview = preview_page_url(preview_url, page_url, link.get("path_prefix"))
-                verified = rescan_and_verify(page_preview, rule_id)
+                rule_id = rules[0].get("id", "fix")
+                remaining: set[str] = set()
+                if single:
+                    verified = rescan_and_verify(page_preview, rule_id)
+                else:
+                    remaining = rules_remaining(page_preview, {e["rule"].get("id") for e in applied})
+                    verified = not remaining
                 pages_checked = (verify_other_pages(preview_url, root_cause["pages"], rule_id, root_cause["key"],
                                                     link.get("path_prefix")) if root_cause else None)
                 if root_cause:
                     # the sample page counts as verified when its own copy of the markup is gone
                     verified = verified or not markup_still_flagged(page_preview, rule_id, root_cause["key"])
-                for entry in applied[:MAX_BATCH_PROOFS]:
-                    proof = capture_proof(page_url, page_preview, rule, entry["node"])
+                # proof: first elements for one rule; first element of each rule for a whole page
+                proof_targets = applied[:MAX_BATCH_PROOFS] if single else _first_per_rule(applied)[:MAX_PAGE_PROOFS]
+                for entry in proof_targets:
+                    proof = capture_proof(page_url, page_preview, entry["rule"], entry["node"])
                     if proof:
                         proof.update(file=f"{entry['file_path']}:{entry['line_no']}",
                                      code_before=entry["patch"]["before"], code_after=entry["patch"]["after"])
@@ -3196,21 +3262,32 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             step("Build", False, str(e))
             return {"status": "failed", "steps": steps, "error": "Build or re-scan failed", "results": node_results}
 
-        step("Re-scan", verified, "all violations resolved" if verified else "some violations remain (only elements that couldn't be patched)")
+        step("Re-scan", verified, "all violations resolved" if verified else
+             (f"still reported: {', '.join(sorted(remaining))}" if remaining else "some violations remain (only elements that couldn't be patched)"))
         if pages_checked is not None:
             checked = [r for r in pages_checked if r["fixed"] is not None]
             fixed_n = sum(1 for r in checked if r["fixed"])
             step("Other pages", bool(checked) and fixed_n == len(checked),
                  f"{fixed_n} of {len(checked)} other affected pages clean" if checked else "no other page could be re-scanned in the preview")
-        proofs = [e["result"].get("proof") for e in applied[:MAX_BATCH_PROOFS] if e["result"].get("proof")]
+        proofs = [e["result"].get("proof") for e in proof_targets if e["result"].get("proof")]
         step("Proof", bool(proofs), f"before/after captured for {len(proofs)} element(s)" if proofs
              else "Could not capture screenshots — the fix itself is verified")
 
         n = len(applied)
-        scope = (f"fixed at the source — {root_cause.get('page_count')} pages" if root_cause
-                 else f"{n} element{'s' if n != 1 else ''}")
-        title = f"{_fix_label(rule)}: {rule.get('help', rule_id)} ({scope})"
-        branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
+        if single:
+            rule = rules[0]
+            scope = (f"fixed at the source — {root_cause.get('page_count')} pages" if root_cause
+                     else f"{n} element{'s' if n != 1 else ''}")
+            title = f"{_fix_label(rule)}: {rule.get('help', rule_id)} ({scope})"
+            branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
+            body = _pr_body_batch(rule, applied)
+        else:
+            fixed_rules = {e["rule"].get("id") for e in applied}
+            path = urllib.parse.urlsplit(page_url).path or "/"
+            title = f"ADA Auto-Fix: fix all — {len(fixed_rules)} issues on {path}"
+            branch_name = f"ada/fix/page-{uuid.uuid4().hex[:8]}"
+            skipped = [r for r in node_results if r["status"] == "failed"]
+            body = _pr_body_page(page_url, applied, list({r["rule_id"]: r for r in skipped}.values()))
         branch_url = push_branch(
             repo_dir, branch_name, access_token, title, link["repo_url"], provider,
             proofs=proofs,
@@ -3220,7 +3297,7 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
         pr = create_pull_request(
             link["repo_url"], access_token, branch_name, link["default_branch"],
             title,
-            _with_proof(_pr_body_batch(rule, applied)
+            _with_proof(body
                         + (("\n" + pages_verified_markdown(pages_checked, root_cause.get("page_count") or len(pages_checked) + 1))
                            if pages_checked is not None else ""), proofs), provider,
         )
@@ -3237,7 +3314,7 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             # Only auto-merge when every targeted element actually got fixed —
             # a partial batch (some elements unlocatable) always needs a human
             # to decide whether the leftovers are worth merging around.
-            if verified and is_auto_merge_eligible(rule_id):
+            if verified and single and is_auto_merge_eligible(rule_id):
                 merged = merge_pull_request(link["repo_url"], access_token, pr["number"], provider)
                 step("Auto-merge", merged, "merged into " + link["default_branch"] if merged else "Merge failed — merge it manually")
                 result["merged"] = merged

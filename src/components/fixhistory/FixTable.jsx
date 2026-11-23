@@ -72,6 +72,7 @@ function Rows({ fixes, onOpen, selectedId, showFixedBy, picked }) {
         </button>
         {f.has_proof && <Image size={11} className="inline ml-1.5 text-teal" aria-label="has before/after proof" />}
         {f.source_pages && <p className="text-[10.5px] font-semibold text-teal whitespace-nowrap">At the source · {f.source_pages} pages</p>}
+        {f.page_fix_issues > 1 && <p className="text-[10.5px] font-semibold text-teal whitespace-nowrap">Fix all · {f.page_fix_issues} issues, one PR</p>}
       </td>
       <td className="px-3 py-2.5 max-w-[220px]">
         <p className="text-[12px] text-ink truncate" title={f.page_url}>{pagePath(f.page_url)}</p>

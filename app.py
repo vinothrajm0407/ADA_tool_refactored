@@ -1689,6 +1689,95 @@ def api_auto_fix_batch():
     return jsonify({"ok": True, **result})
 
 
+MAX_PAGE_FIX_RULES = 50  # ponytail: rules per "Fix all" request; a page rarely has more distinct issues
+
+
+@app.route("/api/auto-fix-page", methods=["POST"])
+@require_auth
+def api_auto_fix_page():
+    """Fix all: every auto-fixable issue on one page in a single clone/build/
+    re-scan and ONE pull request. Body: {page_url, violations: [{rule, nodes}]}.
+    Elements that already have an open PR are skipped. Fix History gets one
+    row per issue, all sharing the PR, so the audit trail stays per issue and
+    one Approver decision covers them all."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "Content-Type must be application/json"}), 400
+    import hashlib
+    from backend.services import fix_notify
+    from backend.services.auto_fix_service import run_auto_fix_page
+    body = request.get_json(silent=True) or {}
+    page_url = (body.get("page_url") or "").strip()
+    violations = body.get("violations") or []
+    if not page_url or not isinstance(violations, list) or not violations:
+        return jsonify({"ok": False, "error": "page_url and violations are required"}), 400
+    link = db.get_repo_link_for_url(page_url, g.current_user_id)
+    if not link:
+        return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
+
+    def sig(node):
+        return hashlib.sha256((node.get("html") or "").encode()).hexdigest()[:32]
+
+    # every element with markup, per rule; open[i] = that element already has an open PR
+    items, already_open, sent = [], [], {}
+    for v in violations[:MAX_PAGE_FIX_RULES]:
+        rule = (v or {}).get("rule") or {}
+        rule_id = rule.get("id")
+        nodes = [n for n in (v.get("nodes") or []) if isinstance(n, dict) and (n.get("html") or "").strip()]
+        if not rule_id or not nodes:
+            continue
+        is_open = [bool(_open_fix(lambda skip, s_=sig(n): db.get_open_fix(g.current_user_id, page_url, rule_id, s_, skip), link))
+                   for n in nodes]
+        sent[rule_id] = is_open
+        fresh = [n for n, o in zip(nodes, is_open) if not o]
+        if fresh:
+            items.append((rule, fresh))
+        else:
+            already_open.append(rule_id)
+    if not items:
+        return jsonify({"ok": True, "status": "verified", "duplicate": True, "already_open": already_open,
+                        "by_rule": {r: [{"rule_id": r, "status": "already_fixed", "duplicate": True}] * len(o) for r, o in sent.items()},
+                        "steps": [{"name": "Existing fixes", "ok": True, "detail": "Every issue already has an open PR"}]})
+
+    result = run_auto_fix_page(link, page_url, items, find_duplicate=_patch_dedup(link, page_url))
+
+    # results come back in (rule, node) order — split them per rule
+    flat, by_rule, i = result.get("results") or [], {}, 0
+    for rule, nodes in items:
+        by_rule[rule["id"]] = flat[i:i + len(nodes)]
+        i += len(nodes)
+    saved = 0
+    if not result.get("duplicate"):
+        for rule, nodes in items:
+            rows = by_rule[rule["id"]]
+            patched = [r for r in rows if r.get("status") == "patched"]
+            if not patched and not any(r.get("status") == "failed" for r in rows):
+                continue  # every element was already fixed / covered by another PR
+            first = patched[0] if patched else {}
+            proof = dict(next((r["proof"] for r in patched if r.get("proof")), None) or {})
+            proof["page_fix"] = {"issues": len(items)}
+            failed = next((r.get("error") for r in rows if r.get("status") == "failed"), None)
+            db.save_fix(
+                g.current_user_id, page_url, rule["id"],
+                result.get("status", "failed") if patched else "failed",
+                result.get("branch_url") if patched else None,
+                None if patched else (failed or result.get("error")),
+                result.get("pr_url") if patched else None,
+                result.get("merged", False) if patched else False,
+                sig(nodes[0]), first.get("patch_signature"), proof if patched else None,
+            )
+            saved += 1
+        if result.get("pr_url") and not result.get("merged"):
+            fix_notify.new_fix(g.current_user_id, page_url, f"all {len(items)} issues on this page", 1, result["pr_url"])
+    # line results up with every element the page sent (open-PR ones marked as covered)
+    aligned = {}
+    for rule_id, is_open in sent.items():
+        it = iter(by_rule.get(rule_id, []))
+        aligned[rule_id] = [{"rule_id": rule_id, "status": "already_fixed", "duplicate": True} if o
+                            else next(it, {"rule_id": rule_id, "status": "failed", "error": result.get("error") or "Auto-Fix failed"})
+                            for o in is_open]
+    return jsonify({"ok": True, **result, "by_rule": aligned, "already_open": already_open, "issues_saved": saved})
+
+
 _PR_NUMBER_RE = re.compile(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$")
 
 
