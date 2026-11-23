@@ -9,6 +9,8 @@ pipeline then locates and patches that markup once.
 import hashlib
 import re
 
+from services.crawler import normalize_url
+
 _WS = re.compile(r"\s+")
 # Markup that changes per page but not per component: ids a framework
 # generates at render time (ember123, react-aria-5, :r3:, radix-…, mui-12,
@@ -69,14 +71,15 @@ def group_root_causes(rows, min_pages: int = 2) -> list[dict]:
                         "sample": {"page_url": page_url, "node": node},
                     }
                 g["occurrences"] += 1
-                g["_pages"].setdefault(page_url, node_signature(html))
+                # one page, one entry — /docs/ and /docs/index.html (older crawls stored both)
+                g["_pages"].setdefault(normalize_url(page_url), (page_url, node_signature(html)))
     out = []
     for g in groups.values():
-        pages = g.pop("_pages")
+        pages = list(g.pop("_pages").values())
         if len(pages) < min_pages:
             continue
         g["page_count"] = len(pages)
-        g["pages"] = [{"url": u, "signature": s} for u, s in list(pages.items())[:MAX_PAGES_STORED]]
+        g["pages"] = [{"url": u, "signature": s} for u, s in pages[:MAX_PAGES_STORED]]
         out.append(g)
     impact_rank = {"critical": 0, "serious": 1, "moderate": 2, "minor": 3}
     out.sort(key=lambda g: (-g["page_count"], impact_rank.get(g["impact"] or "minor", 4), -g["occurrences"]))

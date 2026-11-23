@@ -2,6 +2,7 @@
 URL normalization, link extraction, and domain-safety utilities for the crawler.
 All functions are pure / stateless — no Playwright or DB imports at module level.
 """
+import re
 from pathlib import PurePosixPath
 from urllib.parse import urlparse, urlunparse, urljoin
 
@@ -22,19 +23,24 @@ def get_root_domain(url: str) -> str:
     return urlparse(url.strip()).netloc.lower()
 
 
+_INDEX_PAGE = re.compile(r"/index\.html?$", re.I)
+
+
 def normalize_url(url: str) -> str:
     """
     Normalize a URL for deduplication.
     - Lowercases scheme and host
     - Removes the fragment (#section) — fragments are client-side only
     - Strips trailing slash from path (except bare root path '/')
+    - Drops a trailing index.html / index.htm: /docs/ and /docs/index.html are
+      the same page on static hosts, and counting both doubled the page
     - Preserves query string — ?page=1 and ?page=2 are distinct pages
     """
     url = url.strip()
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
-    path = parsed.path.rstrip("/") or "/"
+    path = _INDEX_PAGE.sub("", parsed.path).rstrip("/") or "/"
     # Reconstruct without fragment
     return urlunparse((scheme, netloc, path, parsed.params, parsed.query, ""))
 

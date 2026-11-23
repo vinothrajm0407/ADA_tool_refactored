@@ -3982,7 +3982,7 @@ def get_fix_states(user_id: int | None, signatures: list[str]) -> dict:
     try:
         cur = conn.cursor()
         cur.execute(f"""
-            SELECT Id, RuleId, NodeSignature, Status, PrUrl, PrState, Merged, ApprovalStatus, CreatedAt
+            SELECT Id, RuleId, NodeSignature, Status, PrUrl, PrState, Merged, ApprovalStatus, CreatedAt, MergedAt
             FROM dbo.Fix
             WHERE (? IS NULL OR UserId = ?) AND NodeSignature IN ({",".join("?" * len(sigs))})
             ORDER BY CreatedAt ASC
@@ -3995,6 +3995,7 @@ def get_fix_states(user_id: int | None, signatures: list[str]) -> dict:
         out[(r.RuleId, r.NodeSignature)] = {
             "fix_id": r.Id, "status": r.Status, "pr_url": r.PrUrl, "approval_status": r.ApprovalStatus,
             "pr_state": r.PrState or ("merged" if r.Merged else ("open" if r.PrUrl else None)),
+            "merged_at": r.MergedAt,
         }
     return out
 

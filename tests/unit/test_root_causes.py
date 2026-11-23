@@ -26,6 +26,13 @@ def test_same_markup_on_many_pages_is_one_root_cause():
     assert g["pages"][0]["signature"] == rc.node_signature(BTN)
 
 
+def test_folder_and_its_index_html_are_one_page():
+    rows = [_page("https://s/docs/", _v("label", "<input>")), _page("https://s/docs/index.html", _v("label", "<input>"))]
+    assert rc.group_root_causes(rows) == []          # one page, so nothing repeats across pages
+    rows.append(_page("https://s/about.html", _v("label", "<input>")))
+    assert rc.group_root_causes(rows)[0]["page_count"] == 2
+
+
 def test_generated_ids_and_whitespace_do_not_split_a_component():
     a = '<input id="ember12" class="search">'
     b = '<input  id="ember977"\n class="search">'

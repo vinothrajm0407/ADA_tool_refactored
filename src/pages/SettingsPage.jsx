@@ -25,7 +25,7 @@ function TeamTab() {
     try {
       const res = await apiFetch('/api/users');
       const data = await res.json();
-      setState(res.status === 403 ? { denied: true } : { users: data.users || [], me: data.me });
+      setState(res.status === 403 || data.role === 'developer' ? { denied: true } : { users: data.users || [], me: data.me });
     } catch { setState({ error: true }); }
   }
   useEffect(() => { load(); }, []);

@@ -11,13 +11,15 @@ function pathOf(url) {
 
 function FixState({ fix }) {
   if (!fix) return null;
-  const [label, cls] = fix.pr_state === 'merged' ? ['Fixed — merged', 'text-sage bg-sage/10']
+  const [label, cls] = fix.pr_state === 'merged' && fix.still_live ? ['Merged, but still on the live site', 'text-amber bg-amber/10']
+    : fix.pr_state === 'merged' ? ['Fixed — merged', 'text-sage bg-sage/10']
     : fix.pr_state === 'open' ? [fix.approval_status === 'changes_requested' ? 'Changes requested' : 'PR awaiting approval', 'text-amber bg-amber/10']
     : fix.pr_state === 'closed' ? ['PR closed', 'text-body bg-gray-100']
     : fix.status === 'failed' ? ['Last fix failed', 'text-coral bg-coral/10'] : [null, null];
   if (!label) return null;
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${cls}`}>
+    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${cls}`}
+      title={fix.still_live ? 'This crawl ran after the merge and still found the problem — the fix was merged into a branch the live site is not built from yet (for example a QA branch), or it is not deployed.' : undefined}>
       {label}
       {fix.pr_url && <a href={fix.pr_url} target="_blank" rel="noopener noreferrer" className="hover:underline inline-flex items-center gap-0.5"
         onClick={e => e.stopPropagation()}>#{fix.pr_url.split('/').pop()}<ExternalLink size={9} /></a>}

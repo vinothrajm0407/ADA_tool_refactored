@@ -47,3 +47,14 @@ def test_fix_unknown_group_or_no_repo(client, db_mock, authed_headers):
     db_mock.get_repo_link_for_url.return_value = None
     assert client.post(f"/api/crawl/c1/root-causes/{GID}/fix", headers=authed_headers).status_code == 404
     db_mock.save_fix.assert_not_called()
+
+
+def test_merged_fix_still_found_by_a_later_crawl_is_flagged(client, db_mock, authed_headers):
+    db_mock.get_crawl_page_payloads.return_value = PAGES
+    db_mock.get_repo_link_for_url.return_value = LINK
+    db_mock.get_crawl_job.return_value = {"created_at": "2026-11-23T13:00:00+00:00"}
+    sig = node_signature(BTN)
+    for merged_at, expected in (("2026-11-23T09:38:36Z", True), ("2026-11-23T14:00:00Z", False)):
+        db_mock.get_fix_states.return_value = {("button-name", sig): {"pr_state": "merged", "merged_at": merged_at}}
+        fix = client.get("/api/crawl/c1/root-causes", headers=authed_headers).get_json()["root_causes"][0]["fix"]
+        assert fix["still_live"] is expected

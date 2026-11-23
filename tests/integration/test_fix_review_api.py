@@ -126,7 +126,10 @@ def test_resubmit_refuses_someone_elses_or_pending_fix(client, db_mock, authed_h
 
 def test_roles_are_approver_only_and_cannot_change_own(client, db_mock, authed_headers):
     from tests.conftest import TEST_USER_ID
-    assert client.get("/api/users", headers=authed_headers).status_code == 403
+    dev = client.get("/api/users", headers=authed_headers).get_json()
+    assert dev["role"] == "developer" and dev["users"] == []          # a developer never gets the account list
+    db_mock.list_users.assert_not_called()
+    assert client.put("/api/users/19/role", json={"role": "approver"}, headers=authed_headers).status_code == 403
     db_mock.get_user_role.return_value = "approver"
     db_mock.list_users.return_value = [{"id": 19, "email": "dev@test.local", "role": "developer"}]
     db_mock.set_user_role_by_id.return_value = True
