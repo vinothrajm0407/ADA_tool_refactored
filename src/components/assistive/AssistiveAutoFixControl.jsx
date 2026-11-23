@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Wand2, Loader2, CheckCircle2, XCircle, GitBranch } from 'lucide-react';
+import { Wand2, Loader2, CheckCircle2, XCircle, GitBranch, Info } from 'lucide-react';
 import { apiFetch } from '../../utils/api';
+import FixProof from '../ui/FixProof';
+import { useAutoFixSupport, autoFixUnavailableReason } from '../../utils/autoFixSupport';
 
-const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch', 'Open PR', 'Auto-merge'];
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Proof', 'Push branch', 'Open PR', 'Auto-merge'];
 
 // Same POST /api/auto-fix flow as the regular-scan AutoFixControl
 // (src/components/newscan/ViolationList.jsx), trimmed to local state — this
@@ -10,6 +12,7 @@ const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 
 // off, so a fix in progress won't survive navigating away and back here.
 export default function AssistiveAutoFixControl({ pageUrl, rule, node }) {
   const [fix, setFix] = useState({ status: 'idle', result: null });
+  const unavailable = autoFixUnavailableReason(useAutoFixSupport(), rule.id, Boolean(node?.html));
 
   if (!pageUrl) return null;
 
@@ -28,6 +31,14 @@ export default function AssistiveAutoFixControl({ pageUrl, rule, node }) {
       result = { status: 'failed', error: 'Could not reach the server', steps: [] };
     }
     setFix({ status: 'done', result });
+  }
+
+  if (fix.status === 'idle' && unavailable) {
+    return (
+      <p className="m-0 shrink-0 max-w-[220px] inline-flex items-start gap-1.5 text-[11.5px] text-body bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+        <Info size={13} className="text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" /> {unavailable}
+      </p>
+    );
   }
 
   if (fix.status === 'idle') {
@@ -94,6 +105,7 @@ export default function AssistiveAutoFixControl({ pageUrl, rule, node }) {
           <GitBranch size={12} /> View branch
         </a>
       )}
+      {result.status === 'verified' && <FixProof proof={result.proof} />}
       {result.status !== 'verified' && result.error && (
         <p className="text-[11.5px] text-coral m-0 break-words">{result.error}</p>
       )}

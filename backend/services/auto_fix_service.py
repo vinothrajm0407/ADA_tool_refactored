@@ -29,6 +29,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 from config import Config
+from backend.services.fix_proof import MAX_BATCH_PROOFS, capture_proof, pr_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,8 @@ RULES_WITH_FALLBACK = {
     "document-title", "page-has-heading-one",
     "aria-command-name", "aria-hidden-focus", "aria-roles", "aria-required-parent",
     "aria-required-attr", "aria-valid-attr-value", "aria-allowed-attr",
-    "frame-title", "meta-viewport", "select-name", "autocomplete-valid",
+    "frame-title", "meta-viewport", "select-name", "autocomplete-valid", "list",
+    "definition-list", "object-alt",
 }
 
 # Falsy (so existing `if not patch:` callers keep working unchanged) but
@@ -376,6 +378,14 @@ def _ancestor_scoped_attr_pattern(ancestor: dict, tag: str, attr: str, value: st
 _ATTR_ORDER = ("aria-label", "name", "href", "src", "alt", "placeholder", "role")
 
 
+def _ws_flexible(snippet: str) -> re.Pattern:
+    """Literal match that ignores whitespace differences: axe reports the
+    DOM's \n, a Windows checkout has \r\n, and formatters re-indent —
+    exact-whitespace needles silently missed every multi-line element."""
+    pattern = r"\s+".join(re.escape(part) for part in snippet.split())
+    return re.compile(pattern.replace(r">\s+<", r">\s*<").replace("><", r">\s*<"))
+
+
 def _generate_fallback_candidates(html: str, tag: str | None, chain: list[dict]) -> list[tuple[re.Pattern, tuple, float, str]]:
     """
     Ordered, scored needles tried only once the violating element has NEITHER
@@ -423,7 +433,7 @@ def _generate_fallback_candidates(html: str, tag: str | None, chain: list[dict])
     # too short to be a safe signal on its own.
     text = re.sub(r"<[^>]+>", "", html).strip()
     if len(text) >= 3:
-        candidates.append((re.compile(re.escape(text)), SOURCE_EXTENSIONS, 0.65, f'text="{text[:40]}"'))
+        candidates.append((_ws_flexible(text), SOURCE_EXTENSIONS, 0.65, f'text="{text[:40]}"'))
 
     if tag and tag not in ("div", "span"):
         candidates.append((re.compile(r"<" + re.escape(tag) + r"[\s/>]"), SOURCE_EXTENSIONS, 0.3, f"<{tag}>"))
@@ -720,6 +730,18 @@ def locate_source(repo_dir: Path, node_html: str, rule_id: str | None = None,
         return (page_hint, 1)
 
     chain = _parse_target_chain(target)
+
+    # axe's html is the element's full outerHTML when it's short — for a
+    # container like <ul>…</ul> with no id/class, its content is the one
+    # signal that is unique ("<ul>" alone matches every list on the page).
+    # Elements with their own id/class keep the stage-1 rule below instead.
+    open_tag = re.match(r"<[^>]*>", html)
+    if "</" in html and len(html) >= 20 and open_tag and not re.search(r'\b(id|class)="', open_tag.group(0)):
+        result, _ = _try_candidate(repo_dir, _ws_flexible(html), SOURCE_EXTENSIONS, 0.99,
+                                   "exact element HTML", chain, page_hint)
+        if result:
+            return result
+
     tag_match = re.match(r"<(\w+)", html)
     tag = tag_match.group(1).lower() if tag_match else None
 
@@ -1439,6 +1461,48 @@ def _infer_accessible_name(html: str, last_resort: str) -> tuple[str, str]:
     return last_resort, "last-resort default"
 
 
+_TAG_RE = re.compile(r"<(/?)([a-zA-Z][\w-]*)\b[^>]*?(/?)>")
+_VOID_TAGS = {"br", "hr", "img", "input", "meta", "link", "source", "wbr"}
+
+
+def _fix_list_children(file_content: str, line_no: int | None, containers=("ul", "ol"),
+                       allowed=("li", "script", "template"), new_tag="li") -> dict | None:
+    """`list` rule: a <ul>/<ol> may only directly contain <li>, <script>,
+    <template>. Turn every other direct child element into an <li> (keeping
+    its attributes and content) — e.g. <div>note</div> → <li>note</li>.
+    `definition-list` is the same shape for <dl> (stray children → <dd>)."""
+    target = _locate_patch_target(file_content, line_no, containers)
+    if not target or target["self_closing"]:
+        return None
+    name, depth, renames, close_end = target["tag"].lower(), 0, [], None
+    child_open = None  # (start, end) of the current disallowed direct child's open-tag name
+    for m in _TAG_RE.finditer(file_content, target["end"]):
+        closing, tag, self_close = m.group(1) == "/", m.group(2).lower(), m.group(3) == "/"
+        if depth == 0 and closing and tag == name:
+            close_end = m.end()
+            break
+        if self_close or tag in _VOID_TAGS:
+            continue
+        if not closing:
+            if depth == 0 and tag not in allowed:
+                child_open = m.start(2), m.end(2)
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0 and child_open:
+                renames += [child_open, (m.start(2), m.end(2))]
+                child_open = None
+    if close_end is None:
+        return None
+    if not renames:
+        return ALREADY_FIXED
+    before = file_content[target["start"]:close_end]
+    after = before
+    for start, end in sorted(renames, reverse=True):
+        after = after[:start - target["start"]] + new_tag + after[end - target["start"]:]
+    return _finalize_patch(file_content, target["start"], before, after)
+
+
 def _fallback_patch(rule: dict, node: dict, file_content: str, line_no: int | None = None) -> dict | None:
     """
     Deterministic placeholder fixes used only when GEMINI_API_KEY isn't configured.
@@ -1779,6 +1843,27 @@ def _fallback_patch(rule: dict, node: dict, file_content: str, line_no: int | No
         after = f"<img{new_attrs}{m.group(2)}>"
         return _finalize_patch(file_content, m.start(), before, after)
 
+    if rule_id == "list":
+        return _fix_list_children(file_content, line_no)
+
+    if rule_id == "definition-list":
+        return _fix_list_children(file_content, line_no, ("dl",),
+                                  ("dt", "dd", "div", "script", "template"), "dd")
+
+    if rule_id == "object-alt":
+        # Same idea as image-alt: name the <object> after the file it embeds.
+        data_match = re.search(r'data="([^"]+)"', html)
+        label = "Embedded content"
+        if data_match:
+            label = _humanize_slug(re.sub(r"\.\w+$", "", data_match.group(1).rsplit("/", 1)[-1])) or label
+        pattern = re.compile(r"<object([^>]*?)>")
+        matches = [m for m in pattern.finditer(file_content)
+                   if not re.search(r"\b(aria-label|aria-labelledby|title)=", m.group(1))]
+        m = _pick_match_by_line(matches, file_content, line_no)
+        if not m:
+            return ALREADY_FIXED if _pick_match_by_line(list(pattern.finditer(file_content)), file_content, line_no) else None
+        return _finalize_patch(file_content, m.start(), m.group(0), f'<object{m.group(1).rstrip()} aria-label="{label}">')
+
     if rule_id == "frame-title":
         # An <iframe> with no accessible name for what it embeds. The src's
         # own host is a real, non-fabricated signal for what's inside it —
@@ -2102,7 +2187,9 @@ def build_and_preview(repo_dir: Path):
         with _serve_and_wait(
             [sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1"],
             cwd=static_root,
-            url_pattern=re.compile(r"(https?://127\.0\.0\.1:\d+\S*)"),
+            # Not \S*: http.server prints "(http://127.0.0.1:PORT/) ..." and a trailing
+            # ")" made every static-site re-scan hit a 404 page (and "pass").
+            url_pattern=re.compile(r"(https?://127\.0\.0\.1:\d+/?)"),
             timeout=_PREVIEW_START_TIMEOUT,
         ) as preview_url:
             yield preview_url
@@ -2119,11 +2206,75 @@ def build_and_preview(repo_dir: Path):
         yield preview_url
 
 
+def preview_page_url(preview_url: str, page_url: str, path_prefix: str | None = None) -> str:
+    """The preview URL serving the same page that was scanned. GitHub Pages
+    sites live under /<repo>/ but a static preview serves docs/ at /, while
+    vite preview keeps its base — so try the page's path as-is, then without
+    the link's path prefix, then the root. Raises if none of them serves a
+    page, so a 404 can never be re-scanned and counted as "fixed"."""
+    path = urllib.parse.urlsplit(page_url).path or "/"
+    prefix = "/" + (path_prefix or "").strip("/") + "/"
+    candidates = [path]
+    if prefix != "//" and path.startswith(prefix):
+        candidates.append("/" + path[len(prefix):])
+    candidates.append("/")
+    base = preview_url.rstrip("/")
+    for c in dict.fromkeys(candidates):
+        url = base + c
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                if r.status == 200:
+                    return url
+        except (urllib.error.URLError, OSError):
+            continue
+    raise RuntimeError(f"The preview build does not serve {path} (tried {', '.join(dict.fromkeys(candidates))})")
+
+
 def rescan_and_verify(preview_url: str, rule_id: str) -> bool:
     from services.url_processor import process_url
     result = process_url(preview_url, write_output=False)
     violations = result.get("axeResult", {}).get("violations", [])
     return not any(v.get("id") == rule_id for v in violations)
+
+
+def markup_still_flagged(preview_url: str, rule_id: str, key: str) -> bool:
+    """Re-scan one page of the patched build: is the root-cause markup still
+    reported for this rule? Other elements of the same rule on that page (not
+    from this component) don't count against this fix."""
+    from services.url_processor import process_url
+    from backend.services.root_causes import markup_key
+    result = process_url(preview_url, write_output=False)
+    for v in result.get("axeResult", {}).get("violations", []):
+        if v.get("id") == rule_id and any(markup_key(n.get("html")) == key for n in v.get("nodes") or []):
+            return True
+    return False
+
+
+def verify_other_pages(preview_url: str, pages: list[str], rule_id: str, key: str, path_prefix: str | None) -> list[dict]:
+    """[{url, fixed: True|False|None, note}] — None when the preview doesn't serve that page."""
+    out = []
+    for url in pages:
+        try:
+            page_preview = preview_page_url(preview_url, url, path_prefix)
+            if page_preview.rstrip("/") == preview_url.rstrip("/") and urllib.parse.urlsplit(url).path.strip("/"):
+                out.append({"url": url, "fixed": None, "note": "page not served by the preview build"})
+                continue
+            out.append({"url": url, "fixed": not markup_still_flagged(page_preview, rule_id, key)})
+        except Exception as e:
+            out.append({"url": url, "fixed": None, "note": str(e)[:160]})
+    return out
+
+
+def pages_verified_markdown(results: list[dict], total_pages: int) -> str:
+    checked = [r for r in results if r["fixed"] is not None]
+    fixed = sum(1 for r in checked if r["fixed"])
+    lines = [f"### Fixed at the source — {total_pages} pages",
+             f"This markup was reported on **{total_pages} pages**. One change to the shared source fixes all of them.",
+             f"Re-scanned **{len(checked)}** other affected pages against the patched build: **{fixed} of {len(checked)} clean**.", ""]
+    for r in results:
+        mark = "✅" if r["fixed"] else ("⚠️ still flagged" if r["fixed"] is False else f"— not checked ({r.get('note', '')})")
+        lines.append(f"- {r['url']} {mark}")
+    return "\n".join(lines) + "\n"
 
 
 def verify_page_wide_fix(preview_url: str, rule: dict) -> bool:
@@ -2227,7 +2378,9 @@ def _parse_repo(provider: str, repo_url: str) -> str | None:
 
 
 def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: str, repo_url: str,
-                 provider: str = "github") -> str:
+                 provider: str = "github", proofs: list[dict] | None = None) -> str:
+    """Pushes the fix branch; with `proofs`, also pushes their screenshots to a
+    side branch and sets each proof's before_img/after_img link (fix_proof)."""
     def git(*args, extra_headers=False):
         base = ["git"]
         if extra_headers:
@@ -2241,6 +2394,13 @@ def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: st
     git("push", "origin", branch_name, extra_headers=True)
 
     path = _parse_repo(provider, repo_url)
+    if proofs:
+        from backend.services.fix_proof import push_proof_branch
+        try:
+            push_proof_branch(repo_dir, git, proofs, branch_name, provider, path)
+        except Exception:
+            # The fix branch is already pushed — missing screenshots must not lose it.
+            logger.exception("Pushing proof screenshots failed for %s", branch_name)
     if path:
         if provider == "gitlab":
             return f"https://gitlab.com/{path}/-/tree/{branch_name}"
@@ -2251,6 +2411,15 @@ def push_branch(repo_dir: Path, branch_name: str, token: str, commit_message: st
             return f"https://dev.azure.com/{org}/{project}/_git/{repo}?version=GB{branch_name}"
         return f"https://github.com/{path}/tree/{branch_name}"
     return branch_name
+
+
+def _with_proof(body: str, proofs: list[dict | None]) -> str:
+    """Insert the before/after proof section above the PR body's '---' footer."""
+    section = pr_markdown(proofs)
+    if not section:
+        return body
+    head, sep, foot = body.rpartition("\n---\n")
+    return f"{head}\n\n{section}{sep}{foot}" if sep else f"{body}\n{section}"
 
 
 def _is_assistive(rule: dict) -> bool:
@@ -2516,6 +2685,28 @@ def merge_pull_request(repo_url: str, token: str, pr_number: int, provider: str 
     return False
 
 
+def _pr_api(repo_url: str, token: str, pr_number: int, provider: str = "github", suffix: str = ""):
+    """GET one PR/MR (or a sub-resource like /reviews) from the provider's API.
+    Raises on any failure — callers decide what a failure means."""
+    path = _parse_repo(provider, repo_url)
+    if not path:
+        raise ValueError(f"Unrecognised repo URL: {repo_url}")
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": "ADA-Accessibility-Intelligence"}
+    if provider == "gitlab":
+        url = f"https://gitlab.com/api/v4/projects/{urllib.parse.quote(path, safe='')}/merge_requests/{pr_number}{suffix}"
+    elif provider == "bitbucket":
+        url = f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}{suffix}"
+    elif provider == "azure":
+        org, project, repo = path.split("/")
+        headers["Authorization"] = "Basic " + base64.b64encode(f":{token}".encode()).decode()
+        url = f"https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullrequests/{pr_number}{suffix}?api-version=7.1"
+    else:
+        headers["Accept"] = "application/vnd.github+json"
+        url = f"https://api.github.com/repos/{path}/pulls/{pr_number}{suffix}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers, method="GET"), timeout=15) as resp:
+        return json.loads(resp.read())
+
+
 def is_pull_request_open(repo_url: str, token: str, pr_number: int, provider: str = "github") -> bool:
     """
     True only if the provider currently reports this PR/MR as open — GitHub uses
@@ -2526,49 +2717,124 @@ def is_pull_request_open(repo_url: str, token: str, pr_number: int, provider: st
     deleted, repo inaccessible) is treated as "not open" so a stale local record
     can never permanently block re-running Auto-Fix on a violation.
     """
-    path = _parse_repo(provider, repo_url)
-    if not path:
-        return False
-    if provider == "gitlab":
-        encoded_path = urllib.parse.quote(path, safe="")
-        req = urllib.request.Request(
-            f"https://gitlab.com/api/v4/projects/{encoded_path}/merge_requests/{pr_number}",
-            headers={"Authorization": f"Bearer {token}", "User-Agent": "ADA-Accessibility-Intelligence"},
-            method="GET",
-        )
-    elif provider == "bitbucket":
-        req = urllib.request.Request(
-            f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}",
-            headers={"Authorization": f"Bearer {token}", "User-Agent": "ADA-Accessibility-Intelligence"},
-            method="GET",
-        )
-    elif provider == "azure":
-        org, project, repo = path.split("/")
-        basic = base64.b64encode(f":{token}".encode()).decode()
-        req = urllib.request.Request(
-            f"https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullrequests/{pr_number}?api-version=7.1",
-            headers={"Authorization": f"Basic {basic}", "User-Agent": "ADA-Accessibility-Intelligence"},
-            method="GET",
-        )
-    else:
-        req = urllib.request.Request(
-            f"https://api.github.com/repos/{path}/pulls/{pr_number}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "ADA-Accessibility-Intelligence",
-            },
-            method="GET",
-        )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
+        result = _pr_api(repo_url, token, pr_number, provider)
         if provider == "azure":
             return result.get("status") == "active"
         expected = {"gitlab": "opened", "bitbucket": "OPEN"}.get(provider, "open")
         return result.get("state") == expected
     except Exception:
         return False
+
+
+def _pr_call(provider: str, token: str):
+    """(call, gh_headers, azure_headers) for the comment / close helpers below."""
+    auth = {"Authorization": f"Bearer {token}", "User-Agent": "ADA-Accessibility-Intelligence",
+            "Content-Type": "application/json"}
+
+    def call(url, method, payload, headers=auth):
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read() or b"{}")
+
+    gh = {**auth, "Accept": "application/vnd.github+json"}
+    az = {**auth, "Authorization": "Basic " + base64.b64encode(f":{token}".encode()).decode()}
+    return call, gh, az
+
+
+def comment_on_pull_request(repo_url: str, token: str, pr_number: int, provider: str = "github",
+                            note: str = "") -> bool:
+    """Post a comment on a PR/MR (an Approver's "changes requested" or reject reason)."""
+    path = _parse_repo(provider, repo_url)
+    if not path or not note:
+        return False
+    call, gh, az = _pr_call(provider, token)
+    try:
+        if provider == "gitlab":
+            call(f"https://gitlab.com/api/v4/projects/{urllib.parse.quote(path, safe='')}/merge_requests/{pr_number}/notes",
+                 "POST", {"body": note})
+        elif provider == "bitbucket":
+            call(f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}/comments",
+                 "POST", {"content": {"raw": note}})
+        elif provider == "azure":
+            org, project, repo = path.split("/")
+            call(f"https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullrequests/{pr_number}"
+                 "/threads?api-version=7.1", "POST", {"comments": [{"content": note}], "status": "active"}, az)
+        else:
+            call(f"https://api.github.com/repos/{path}/issues/{pr_number}/comments", "POST", {"body": note}, gh)
+        return True
+    except Exception as e:
+        logger.warning("comment_on_pull_request failed for %s #%s: %s", repo_url, pr_number, e)
+        return False
+
+
+def close_pull_request(repo_url: str, token: str, pr_number: int, provider: str = "github",
+                       comment: str | None = None) -> bool:
+    """Close (decline) a PR/MR after an Approver rejects the fix, leaving the
+    reason as a comment. True only when the provider confirms the close."""
+    path = _parse_repo(provider, repo_url)
+    if not path:
+        return False
+    note = f"Rejected in ADA Auto-Fix review: {comment}" if comment else "Rejected in ADA Auto-Fix review."
+    comment_on_pull_request(repo_url, token, pr_number, provider, note)
+    call, gh, az = _pr_call(provider, token)
+    try:
+        if provider == "gitlab":
+            base = f"https://gitlab.com/api/v4/projects/{urllib.parse.quote(path, safe='')}/merge_requests/{pr_number}"
+            return call(base, "PUT", {"state_event": "close"}).get("state") == "closed"
+        if provider == "bitbucket":
+            base = f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}"
+            return call(base + "/decline", "POST", {}).get("state") == "DECLINED"
+        if provider == "azure":
+            org, project, repo = path.split("/")
+            base = f"https://dev.azure.com/{org}/{project}/_apis/git/repositories/{repo}/pullrequests/{pr_number}"
+            return call(base + "?api-version=7.1", "PATCH", {"status": "abandoned"}, az).get("status") == "abandoned"
+        return call(f"https://api.github.com/repos/{path}/pulls/{pr_number}", "PATCH", {"state": "closed"}, gh).get("state") == "closed"
+    except Exception as e:
+        logger.warning("close_pull_request failed for %s #%s: %s", repo_url, pr_number, e)
+        return False
+
+
+def get_pull_request_review(repo_url: str, token: str, pr_number: int, provider: str = "github") -> dict | None:
+    """Who approved / merged a PR and when, for the compliance audit trail.
+    Returns {state: open|merged|closed, merged_by, merged_at, approved_by: [names],
+    approved_at} or None if the provider can't be reached (token expired, PR
+    deleted). approved_at is the latest approval time where the provider gives
+    one (GitHub, Bitbucket); GitLab / Azure don't expose it, so it is None."""
+    approved_at = None
+    try:
+        pr = _pr_api(repo_url, token, pr_number, provider)
+        if provider == "gitlab":
+            state = {"opened": "open"}.get(pr.get("state"), pr.get("state") or "open")
+            merged_by = (pr.get("merged_by") or {}).get("username")
+            merged_at = pr.get("merged_at")
+            approvals = _pr_api(repo_url, token, pr_number, provider, "/approvals")
+            approved = [(a.get("user") or {}).get("username") for a in approvals.get("approved_by") or []]
+        elif provider == "bitbucket":
+            state = {"OPEN": "open", "MERGED": "merged"}.get(pr.get("state"), "closed")
+            merged_by = (pr.get("closed_by") or {}).get("display_name") if state == "merged" else None
+            merged_at = pr.get("updated_on") if state == "merged" else None
+            approvers = [p for p in pr.get("participants") or [] if p.get("approved")]
+            approved = [(p.get("user") or {}).get("display_name") for p in approvers]
+            approved_at = max((p.get("participated_on") or "" for p in approvers), default="") or None
+        elif provider == "azure":
+            state = {"active": "open", "completed": "merged"}.get(pr.get("status"), "closed")
+            merged_by = (pr.get("closedBy") or {}).get("displayName") if state == "merged" else None
+            merged_at = pr.get("closedDate") if state == "merged" else None
+            approved = [r.get("displayName") for r in pr.get("reviewers") or [] if (r.get("vote") or 0) >= 5]
+        else:
+            state = "merged" if pr.get("merged_at") else pr.get("state") or "open"
+            merged_by = (pr.get("merged_by") or {}).get("login")
+            merged_at = pr.get("merged_at")
+            reviews = _pr_api(repo_url, token, pr_number, provider, "/reviews")
+            approvals = [r for r in reviews if r.get("state") == "APPROVED"]
+            approved = [(r.get("user") or {}).get("login") for r in approvals]
+            approved_at = max((r.get("submitted_at") or "" for r in approvals), default="") or None
+        return {"state": state, "merged_by": merged_by, "merged_at": merged_at,
+                "approved_by": list(dict.fromkeys(a for a in approved if a)), "approved_at": approved_at}
+    except Exception as e:
+        logger.warning("PR review lookup failed for %s #%s: %s", repo_url, pr_number, e)
+        return None
 
 
 def _resolve_provider_and_token(link: dict) -> tuple[str, str | None, str | None]:
@@ -2704,11 +2970,15 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict, find_duplica
         else:
             step("Run tests", True, "no tests defined" if not test_result.get("ran") else "passed")
 
+        proof = None
         try:
             with build_and_preview(repo_dir) as preview_url:
                 step("Build", True)
-                verified = (verify_page_wide_fix(preview_url, rule) if is_page_wide
-                            else rescan_and_verify(preview_url, rule.get("id", "")))
+                page_preview = preview_page_url(preview_url, page_url, link.get("path_prefix"))
+                verified = (verify_page_wide_fix(page_preview, rule) if is_page_wide
+                            else rescan_and_verify(page_preview, rule.get("id", "")))
+                if verified:
+                    proof = capture_proof(page_url, page_preview, rule, node)
         except subprocess.CalledProcessError as e:
             step("Build", False, (e.stderr or str(e))[-500:])
             return {"status": "failed", "steps": steps, "error": "Build failed"}
@@ -2720,24 +2990,33 @@ def run_auto_fix(link: dict, page_url: str, rule: dict, node: dict, find_duplica
             step("Re-scan", False, "Violation still present after the fix")
             return {"status": "failed", "steps": steps, "error": steps[-1]["detail"]}
         step("Re-scan", True, "violation resolved")
+        if proof:  # where + what changed, for the developer table in reports
+            proof.update(file=f"{file_path}:{line_no}" if not is_page_wide else file_path,
+                         code_before=None if is_page_wide else patch["before"],
+                         code_after=None if is_page_wide else patch["after"])
+        step("Proof", bool(proof), "before/after screenshots and screen-reader text captured" if proof
+             else "Could not capture screenshots — the fix itself is verified")
 
         rule_id = rule.get("id", "fix")
         branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
         branch_url = push_branch(
             repo_dir, branch_name, access_token,
             f"{_fix_label(rule)}: {rule.get('help', rule_id)}", link["repo_url"], provider,
+            proofs=[proof] if proof else None,
         )
         step("Push branch", True, branch_url)
 
         pr_body = (_pr_body_insertion(rule, file_path, file_content, new_content) if is_page_wide
                    else _pr_body(rule, node, patch, file_path, line_no))
+        pr_body = _with_proof(pr_body, [proof])
         pr = create_pull_request(
             link["repo_url"], access_token, branch_name, link["default_branch"],
             f"{_fix_label(rule)}: {rule.get('help', rule_id)}", pr_body, provider,
         )
         step("Open PR", bool(pr), (pr["url"] if pr else "Branch pushed, but opening the PR failed — open it manually"))
 
-        result = {"status": "verified", "steps": steps, "branch_url": branch_url, "patch_signature": patch_signature}
+        result = {"status": "verified", "steps": steps, "branch_url": branch_url, "patch_signature": patch_signature,
+                  "proof": proof}
         if pr:
             result["pr_url"] = pr["url"]
             if not is_page_wide and is_auto_merge_eligible(rule_id):
@@ -2779,7 +3058,57 @@ Generated and verified by ADA Auto-Fix: each patch was applied in the same isola
 """
 
 
-def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict], find_duplicate=None) -> dict:
+def _pr_body_page(page_url: str, applied: list[dict], skipped: list[dict]) -> str:
+    """Whole-page fix: one section per rule, then what was left for a person."""
+    by_rule: dict[str, list[dict]] = {}
+    for a in applied:
+        by_rule.setdefault(a["rule"].get("id", ""), []).append(a)
+    sections = []
+    for i, (rule_id, entries) in enumerate(by_rule.items(), 1):
+        rule = entries[0]["rule"]
+        changes = "\n\n".join(
+            f"`{a['file_path']}:{a['line_no']}`\n```jsx\n{a['patch']['before']}\n```\n→\n```jsx\n{a['patch']['after']}\n```"
+            for a in entries)
+        sections.append(f"#### {i}. {rule.get('help', rule_id)} — `{rule_id}` ({len(entries)} element{'s' if len(entries) != 1 else ''})\n\n{changes}")
+    left = ""
+    if skipped:
+        left = "\n\n### Not fixed automatically\n" + "\n".join(
+            f"- `{x['rule_id']}`: {x['error']}" for x in skipped)
+    return (f"### Accessibility fixes for {page_url}\n\n"
+            f"{len(by_rule)} issue{'s' if len(by_rule) != 1 else ''} fixed in one pull request.\n\n"
+            + "\n\n".join(sections) + left +
+            "\n\n---\nGenerated and verified by ADA Auto-Fix: every patch was applied in one isolated sandbox, built "
+            "once, and the page re-scanned before this branch was pushed. Review before merging.\n")
+
+
+def rules_remaining(preview_url: str, rule_ids: set[str]) -> set[str]:
+    """One re-scan: which of these rules are still reported on the page."""
+    from services.url_processor import process_url
+    result = process_url(preview_url, write_output=False)
+    return {v.get("id") for v in result.get("axeResult", {}).get("violations", [])} & set(rule_ids)
+
+
+MAX_PAGE_PROOFS = 8  # ponytail: proof for the first element of up to 8 rules per whole-page PR
+
+
+def _first_per_rule(applied: list[dict]) -> list[dict]:
+    seen, out = set(), []
+    for e in applied:
+        rid = e["rule"].get("id")
+        if rid not in seen:
+            seen.add(rid)
+            out.append(e)
+    return out
+
+
+def run_auto_fix_page(link: dict, page_url: str, items: list[tuple[dict, list[dict]]], find_duplicate=None) -> dict:
+    """Fix all: every element of every given rule on one page in a single
+    clone/build/re-scan, opening ONE pull request. items: [(rule, nodes)]."""
+    return _run_batch(link, page_url, [(rule, node) for rule, nodes in items for node in nodes], find_duplicate)
+
+
+def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict], find_duplicate=None,
+                       root_cause: dict | None = None) -> dict:
     """Same pipeline as run_auto_fix, but for every element flagged by one
     rule on one page in a single pass — one clone, one build, one re-scan,
     one PR, instead of N of each. Two things make this different from just
@@ -2795,7 +3124,20 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
     Elements that can't be located/patched are skipped (not fatal) and
     reported individually in `results` — the batch still proceeds with
     whatever did succeed.
+
+    root_cause (Fix at the source): {"key", "pages": [other page urls to
+    re-check], "page_count"} — after the build, those pages are re-scanned too
+    and the PR says on how many of them the shared markup is gone.
     """
+    return _run_batch(link, page_url, [(rule, node) for node in nodes], find_duplicate, root_cause)
+
+
+def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_duplicate=None,
+               root_cause: dict | None = None) -> dict:
+    """Shared core of run_auto_fix_batch (one rule) and run_auto_fix_page (every
+    rule on the page): pairs are (rule, element). Each result carries its rule_id."""
+    rules = list({r.get("id", "fix"): r for r, _ in pairs}.values())
+    single = len(rules) == 1
     steps: list[dict] = []
 
     def step(name: str, ok: bool, detail: str = ""):
@@ -2811,20 +3153,20 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
         repo_dir = _clone_repo(link["repo_url"], access_token, link["default_branch"], provider)
         step("Clone repo", True)
 
-        rule_id = rule.get("id", "fix")
         node_results: list[dict] = []
         applied: list[dict] = []
         duplicate_of = None
 
-        for node in nodes:
+        for rule, node in pairs:
+            rule_id = rule.get("id", "fix")
             node_html = (node or {}).get("html", "").strip()
             if not node_html:
-                node_results.append({"status": "failed", "error": "Page-wide violations aren't supported in a batch fix"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Page-wide violations aren't supported in a batch fix"})
                 continue
 
             located = locate_source(repo_dir, node_html, rule_id, (node or {}).get("target"), page_url, node)
             if not located:
-                node_results.append({"status": "failed", "error": "Could not uniquely match this violation to a source file"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Could not uniquely match this violation to a source file"})
                 continue
             file_path, line_no = located
 
@@ -2833,7 +3175,7 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             patch = generate_patch(rule, node, file_content, line_no, file_path)
 
             if patch is ALREADY_FIXED:
-                node_results.append({"status": "already_fixed", "file_path": file_path, "line_no": line_no})
+                node_results.append({"rule_id": rule_id, "status": "already_fixed", "file_path": file_path, "line_no": line_no})
                 continue
             if not patch:
                 if rule_id in RULES_WITH_FALLBACK:
@@ -2842,10 +3184,10 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
                     detail = "No GEMINI_API_KEY configured — this rule has no built-in fallback fix without one"
                 else:
                     detail = "Gemini did not return a usable patch for this violation"
-                node_results.append({"status": "failed", "error": detail})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": detail})
                 continue
             if not validate_patch(file_content, patch["before"], patch["after"]):
-                node_results.append({"status": "failed", "error": "Patch did not validate against the source file"})
+                node_results.append({"rule_id": rule_id, "status": "failed", "error": "Patch did not validate against the source file"})
                 continue
 
             # Different elements can share one root cause (e.g. several links styled by
@@ -2854,14 +3196,14 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             existing = find_duplicate(patch_signature) if find_duplicate else None
             if existing:
                 duplicate_of = existing
-                node_results.append({"status": "already_fixed", "duplicate": True, "file_path": file_path, "line_no": line_no})
+                node_results.append({"rule_id": rule_id, "status": "already_fixed", "duplicate": True, "file_path": file_path, "line_no": line_no})
                 continue
 
             full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
-            node_results.append({"status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
-            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch})
+            node_results.append({"rule_id": rule_id, "status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
+            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch, "node": node, "rule": rule, "result": node_results[-1]})
 
-        step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(nodes)} elements patched")
+        step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(pairs)} elements patched")
         if not applied and duplicate_of:
             return {"status": "verified", "duplicate": True, "merged": False, "steps": steps, "results": node_results,
                     "pr_url": duplicate_of["pr_url"], "branch_url": duplicate_of["branch_url"]}
@@ -2892,7 +3234,27 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
         try:
             with build_and_preview(repo_dir) as preview_url:
                 step("Build", True)
-                verified = rescan_and_verify(preview_url, rule_id)
+                page_preview = preview_page_url(preview_url, page_url, link.get("path_prefix"))
+                rule_id = rules[0].get("id", "fix")
+                remaining: set[str] = set()
+                if single:
+                    verified = rescan_and_verify(page_preview, rule_id)
+                else:
+                    remaining = rules_remaining(page_preview, {e["rule"].get("id") for e in applied})
+                    verified = not remaining
+                pages_checked = (verify_other_pages(preview_url, root_cause["pages"], rule_id, root_cause["key"],
+                                                    link.get("path_prefix")) if root_cause else None)
+                if root_cause:
+                    # the sample page counts as verified when its own copy of the markup is gone
+                    verified = verified or not markup_still_flagged(page_preview, rule_id, root_cause["key"])
+                # proof: first elements for one rule; first element of each rule for a whole page
+                proof_targets = applied[:MAX_BATCH_PROOFS] if single else _first_per_rule(applied)[:MAX_PAGE_PROOFS]
+                for entry in proof_targets:
+                    proof = capture_proof(page_url, page_preview, entry["rule"], entry["node"])
+                    if proof:
+                        proof.update(file=f"{entry['file_path']}:{entry['line_no']}",
+                                     code_before=entry["patch"]["before"], code_after=entry["patch"]["after"])
+                    entry["result"]["proof"] = proof
         except subprocess.CalledProcessError as e:
             step("Build", False, (e.stderr or str(e))[-500:])
             return {"status": "failed", "steps": steps, "error": "Build failed", "results": node_results}
@@ -2900,18 +3262,44 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             step("Build", False, str(e))
             return {"status": "failed", "steps": steps, "error": "Build or re-scan failed", "results": node_results}
 
-        step("Re-scan", verified, "all violations resolved" if verified else "some violations remain (only elements that couldn't be patched)")
+        step("Re-scan", verified, "all violations resolved" if verified else
+             (f"still reported: {', '.join(sorted(remaining))}" if remaining else "some violations remain (only elements that couldn't be patched)"))
+        if pages_checked is not None:
+            checked = [r for r in pages_checked if r["fixed"] is not None]
+            fixed_n = sum(1 for r in checked if r["fixed"])
+            step("Other pages", bool(checked) and fixed_n == len(checked),
+                 f"{fixed_n} of {len(checked)} other affected pages clean" if checked else "no other page could be re-scanned in the preview")
+        proofs = [e["result"].get("proof") for e in proof_targets if e["result"].get("proof")]
+        step("Proof", bool(proofs), f"before/after captured for {len(proofs)} element(s)" if proofs
+             else "Could not capture screenshots — the fix itself is verified")
 
-        branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
+        n = len(applied)
+        if single:
+            rule = rules[0]
+            scope = (f"fixed at the source — {root_cause.get('page_count')} pages" if root_cause
+                     else f"{n} element{'s' if n != 1 else ''}")
+            title = f"{_fix_label(rule)}: {rule.get('help', rule_id)} ({scope})"
+            branch_name = f"ada/fix/{rule_id}-{uuid.uuid4().hex[:8]}"
+            body = _pr_body_batch(rule, applied)
+        else:
+            fixed_rules = {e["rule"].get("id") for e in applied}
+            path = urllib.parse.urlsplit(page_url).path or "/"
+            title = f"ADA Auto-Fix: fix all — {len(fixed_rules)} issues on {path}"
+            branch_name = f"ada/fix/page-{uuid.uuid4().hex[:8]}"
+            skipped = [r for r in node_results if r["status"] == "failed"]
+            body = _pr_body_page(page_url, applied, list({r["rule_id"]: r for r in skipped}.values()))
         branch_url = push_branch(
-            repo_dir, branch_name, access_token,
-            f"{_fix_label(rule)}: {rule.get('help', rule_id)} ({len(applied)} elements)", link["repo_url"], provider,
+            repo_dir, branch_name, access_token, title, link["repo_url"], provider,
+            proofs=proofs,
         )
         step("Push branch", True, branch_url)
 
         pr = create_pull_request(
             link["repo_url"], access_token, branch_name, link["default_branch"],
-            f"{_fix_label(rule)}: {rule.get('help', rule_id)} ({len(applied)} elements)", _pr_body_batch(rule, applied), provider,
+            title,
+            _with_proof(body
+                        + (("\n" + pages_verified_markdown(pages_checked, root_cause.get("page_count") or len(pages_checked) + 1))
+                           if pages_checked is not None else ""), proofs), provider,
         )
         step("Open PR", bool(pr), (pr["url"] if pr else "Branch pushed, but opening the PR failed — open it manually"))
 
@@ -2919,12 +3307,14 @@ def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict],
             "status": "verified" if verified else "partial",
             "steps": steps, "branch_url": branch_url, "results": node_results,
         }
+        if pages_checked is not None:
+            result["pages_checked"] = pages_checked
         if pr:
             result["pr_url"] = pr["url"]
             # Only auto-merge when every targeted element actually got fixed —
             # a partial batch (some elements unlocatable) always needs a human
             # to decide whether the leftovers are worth merging around.
-            if verified and is_auto_merge_eligible(rule_id):
+            if verified and single and is_auto_merge_eligible(rule_id):
                 merged = merge_pull_request(link["repo_url"], access_token, pr["number"], provider)
                 step("Auto-merge", merged, "merged into " + link["default_branch"] if merged else "Merge failed — merge it manually")
                 result["merged"] = merged

@@ -25,6 +25,7 @@ import MetricCard from '../components/ui/MetricCard';
 import { ChartCard } from '../components/ui/ChartCard';
 import DetailsDrawer from '../components/ui/DetailsDrawer';
 import CrawlIntelPanel from '../components/crawl/CrawlIntelPanel';
+import RootCausesPanel from '../components/crawl/RootCausesPanel';
 import CrawlRegressionPanel from '../components/crawl/CrawlRegressionPanel';
 import CrawlAISummaryPanel from '../components/crawl/CrawlAISummaryPanel';
 import PageTrendsPanel from '../components/crawl/PageTrendsPanel';
@@ -749,6 +750,10 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
             />
           </ChartCard>
         )}
+
+        {/* FIX AT THE SOURCE — one fix per shared component, across every page */}
+        {/* a stopped crawl still has scanned pages worth tracing */}
+        <RootCausesPanel crawlId={crawlId} isComplete={!!job && !isActive} />
 
         {/* 5. ACCESSIBILITY INTELLIGENCE — Task 1 */}
         <CrawlIntelPanel crawlId={crawlId} isComplete={isComplete} />

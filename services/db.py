@@ -437,6 +437,7 @@ def _ensure_table() -> None:
             ("ProviderUserId",    "NVARCHAR(256) NULL"),
             ("ResetToken",        "NVARCHAR(128) NULL"),
             ("ResetTokenExpiry",  "DATETIME2(3) NULL"),
+            ("Role",              "NVARCHAR(20) NULL"),  # 'approver' or NULL (developer)
         ]
         for col, defn in _user_columns:
             cur.execute(f"""
@@ -729,6 +730,28 @@ def _ensure_table() -> None:
             )
             ALTER TABLE dbo.Fix ADD PatchSignature NVARCHAR(64) NULL
         """)
+        conn.commit()
+        # Before/after screenshots + screen-reader text (JSON, see fix_proof.py)
+        cur.execute("""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'Proof'
+            )
+            ALTER TABLE dbo.Fix ADD Proof NVARCHAR(MAX) NULL
+        """)
+        conn.commit()
+        # Compliance audit trail: who approved / merged the PR and when,
+        # refreshed from the git provider (see app._refresh_fix_reviews).
+        for col, typ in (("PrState", "NVARCHAR(20)"), ("MergedBy", "NVARCHAR(200)"),
+                         ("MergedAt", "NVARCHAR(40)"), ("ApprovedBy", "NVARCHAR(500)"),
+                         ("ApprovedAt", "NVARCHAR(40)"),
+                         # In-tool approval by an Approver account (pending / approved / rejected).
+                         ("ApprovalStatus", "NVARCHAR(20)"), ("ReviewedBy", "INT"),
+                         ("ReviewedAt", "DATETIME2(3)"), ("ReviewComment", "NVARCHAR(1000)")):
+            cur.execute(f"""
+                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.Fix') AND name = N'{col}')
+                ALTER TABLE dbo.Fix ADD {col} {typ} NULL
+            """)
         conn.commit()
         # ── API keys (machine-to-machine auth, e.g. CI pipelines — a scoped
         # credential that isn't a human's login, unlike a JWT from /auth/login) ──
@@ -2135,20 +2158,11 @@ def _wcag_tag_to_criterion(tag: str):
     return None
 
 
-def get_crawl_violation_intel(crawl_id: str) -> dict:
-    """
-    Aggregate WCAG + severity + top-issue intelligence for a specific crawl.
-    Parses ScanHistory.ResultPayload rows linked via CrawlPage.ScanHistoryId.
-    """
-    empty: dict = {
-        "severity_breakdown": {"critical": 0, "serious": 0, "moderate": 0, "minor": 0},
-        "top_issue_types": [],
-        "wcag_breakdown": [],
-        "wcag_principles": {"Perceivable": 0, "Operable": 0, "Understandable": 0, "Robust": 0},
-    }
+def get_crawl_page_payloads(crawl_id: str) -> list[tuple[str, dict]]:
+    """[(page_url, scan payload)] for every scanned page of a crawl — stored on
+    CrawlPage.ResultPayload, or on the linked ScanHistory row for older crawls."""
     if not is_enabled() or _INIT_ERROR:
-        return empty
-
+        return []
     conn = _conn()
     try:
         with conn.cursor() as cur:
@@ -2174,6 +2188,30 @@ def get_crawl_violation_intel(crawl_id: str) -> dict:
             rows = cur.fetchall()
     finally:
         conn.close()
+    out = []
+    for raw, url in rows:
+        try:
+            payload = json.loads(raw) if raw else None
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(payload, dict):
+            out.append((url or ((payload.get("axeResult") or {}).get("url") or ""), payload))
+    return out
+
+
+def get_crawl_violation_intel(crawl_id: str) -> dict:
+    """
+    Aggregate WCAG + severity + top-issue intelligence for a specific crawl.
+    Parses ScanHistory.ResultPayload rows linked via CrawlPage.ScanHistoryId.
+    """
+    empty: dict = {
+        "severity_breakdown": {"critical": 0, "serious": 0, "moderate": 0, "minor": 0},
+        "top_issue_types": [],
+        "wcag_breakdown": [],
+        "wcag_principles": {"Perceivable": 0, "Operable": 0, "Understandable": 0, "Robust": 0},
+    }
+    if not is_enabled() or _INIT_ERROR:
+        return empty
 
     severity: dict[str, int] = {"critical": 0, "serious": 0, "moderate": 0, "minor": 0}
     rule_counts: dict[str, int] = {}
@@ -2181,15 +2219,8 @@ def get_crawl_violation_intel(crawl_id: str) -> dict:
     criterion_counts: dict[str, int] = {}
     principle_counts: dict[str, int] = {p: 0 for p in _WCAG_PRINCIPLE_MAP.values()}
 
-    for row in rows:
-        try:
-            payload = json.loads(row[0]) if row[0] else None
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+    for page_url, payload in get_crawl_page_payloads(crawl_id):
         axe = payload.get("axeResult") or {}
-        page_url = row[1] or (axe.get("url") or "")
         if not isinstance(axe, dict):
             continue
         for v in (axe.get("violations") or []):
@@ -3661,10 +3692,11 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT Id, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider,
+            SELECT Id, UserId, Domain, PathPrefix, SiteUrl, RepoUrl, DefaultBranch, Framework, Provider,
                    AccessToken, InstallationId, ConnectedAt
             FROM dbo.RepoLink
-            WHERE Domain = ? AND UserId = ? AND Status = 'active'
+            WHERE Domain = ? AND Status = 'active'
+              AND (UserId = ? OR UserId IN (SELECT Id FROM dbo.Users WHERE Role = 'approver'))
         """, domain, user_id)
         rows = cur.fetchall()
     finally:
@@ -3675,7 +3707,8 @@ def get_repo_link_for_url(page_url: str, user_id: int) -> dict | None:
     candidates = [r for r in rows if (path + "/").startswith(r.PathPrefix)]
     if not candidates:
         return None
-    best = max(candidates, key=lambda r: len(r.PathPrefix))
+    # Longest prefix wins; on a tie the user's own link beats an Approver's shared one.
+    best = max(candidates, key=lambda r: (len(r.PathPrefix), r.UserId == user_id))
     ts = _ts(best.ConnectedAt)
     return {
         "id": best.Id,
@@ -3717,7 +3750,7 @@ def delete_repo_link(link_id: int, user_id: int) -> bool:
 def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
              branch_url: str | None, error_message: str | None, pr_url: str | None = None,
              merged: bool = False, node_signature: str | None = None,
-             patch_signature: str | None = None) -> int:
+             patch_signature: str | None = None, proof: dict | None = None) -> int:
     """Record one Auto-Fix attempt. Returns Fix.Id."""
     if not is_enabled() or _INIT_ERROR:
         raise RuntimeError("Database not available")
@@ -3725,10 +3758,12 @@ def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, NodeSignature, Status, BranchUrl, ErrorMessage, PrUrl, Merged, PatchSignature)
+            INSERT INTO dbo.Fix (UserId, PageUrl, RuleId, NodeSignature, Status, BranchUrl, ErrorMessage, PrUrl, Merged,
+                                 PatchSignature, Proof, ApprovalStatus)
             OUTPUT INSERTED.Id
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, user_id, page_url, rule_id, node_signature, status, branch_url, error_message, pr_url, 1 if merged else 0, patch_signature)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, user_id, page_url, rule_id, node_signature, status, branch_url, error_message, pr_url, 1 if merged else 0,
+            patch_signature, json.dumps(proof) if proof else None, "pending" if pr_url and not merged else None)
         row = cur.fetchone()
         conn.commit()
         return int(row[0])
@@ -3736,27 +3771,51 @@ def save_fix(user_id: int, page_url: str, rule_id: str, status: str,
         conn.close()
 
 
-def get_fixes(user_id: int, limit: int = 50) -> list[dict]:
-    """Return recent Auto-Fix attempts for a user, newest first."""
+def get_fixes(user_id: int | None, limit: int = 50) -> list[dict]:
+    """Recent Auto-Fix attempts, newest first — one user's, or everyone's when
+    user_id is None (an Approver reviews every developer's fixes)."""
     if not is_enabled() or _INIT_ERROR:
         return []
     conn = _conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT TOP (?) Id, PageUrl, RuleId, Status, BranchUrl, PrUrl, Merged, ErrorMessage, CreatedAt
-            FROM dbo.Fix
-            WHERE UserId = ?
-            ORDER BY CreatedAt DESC
-        """, limit, user_id)
+            SELECT TOP (?) f.Id, f.UserId, f.PageUrl, f.RuleId, f.Status, f.BranchUrl, f.PrUrl, f.Merged, f.ErrorMessage, f.CreatedAt,
+                   CASE WHEN f.Proof IS NULL THEN 0 ELSE 1 END AS HasProof,
+                   f.PrState, f.MergedBy, f.MergedAt, f.ApprovedBy, f.ApprovedAt,
+                   f.ApprovalStatus, f.ReviewedAt, f.ReviewComment,
+                   LTRIM(CONCAT(u.FirstName, ' ', u.LastName)) AS FixedBy, u.Email AS FixedByEmail,
+                   LTRIM(CONCAT(rv.FirstName, ' ', rv.LastName)) AS Reviewer,
+                   JSON_VALUE(f.Proof, '$.help') AS Help, JSON_VALUE(f.Proof, '$.impact') AS Impact,
+                   JSON_VALUE(f.Proof, '$.selector') AS Selector, JSON_VALUE(f.Proof, '$.file') AS SourceFile,
+                   JSON_QUERY(f.Proof, '$.wcag') AS Wcag,
+                   JSON_VALUE(f.Proof, '$.root_cause.page_count') AS SourcePages,
+                   JSON_VALUE(f.Proof, '$.root_cause.pages_clean') AS SourcePagesClean,
+                   JSON_VALUE(f.Proof, '$.root_cause.pages_checked') AS SourcePagesChecked,
+                   JSON_VALUE(f.Proof, '$.page_fix.issues') AS PageFixIssues
+            FROM dbo.Fix f
+            LEFT JOIN dbo.Users u ON u.Id = f.UserId
+            LEFT JOIN dbo.Users rv ON rv.Id = f.ReviewedBy
+            WHERE (? IS NULL OR f.UserId = ?)
+            ORDER BY f.CreatedAt DESC
+        """, limit, user_id, user_id)
         rows = cur.fetchall()
     finally:
         conn.close()
     out = []
     for r in rows:
         ts = _ts(r.CreatedAt)
+        approvers = [a for a in (r.ApprovedBy or "").split(", ") if a]
+        if r.ApprovalStatus == "approved" and r.Reviewer and r.Reviewer not in approvers:
+            approvers.insert(0, r.Reviewer)  # in-tool approval counts as the approval
         out.append({
             "id": r.Id,
+            "user_id": r.UserId,
+            "fixed_by": r.FixedBy or r.FixedByEmail or "",
+            "approval_status": r.ApprovalStatus,
+            "reviewed_by": r.Reviewer or None,
+            "reviewed_at": _ts(r.ReviewedAt),
+            "review_comment": r.ReviewComment,
             "page_url": r.PageUrl,
             "rule_id": r.RuleId,
             "status": r.Status,
@@ -3765,8 +3824,85 @@ def get_fixes(user_id: int, limit: int = 50) -> list[dict]:
             "merged": bool(r.Merged),
             "error_message": r.ErrorMessage,
             "created_at": ts,
+            "has_proof": bool(r.HasProof),
+            "pr_state": r.PrState or ("merged" if r.Merged else None),
+            "merged_by": r.MergedBy,
+            "merged_at": r.MergedAt,
+            "approved_by": approvers,
+            "approved_at": _ts(r.ReviewedAt) if r.ApprovalStatus == "approved" else r.ApprovedAt,
+            "help": r.Help,
+            "impact": r.Impact,
+            "selector": r.Selector,
+            "file": r.SourceFile,
+            "wcag": json.loads(r.Wcag) if r.Wcag else [],
+            # Fix at the source: one fix for a component shared by many pages
+            "source_pages": int(r.SourcePages) if r.SourcePages else None,
+            "source_pages_clean": int(r.SourcePagesClean) if r.SourcePagesClean else None,
+            "source_pages_checked": int(r.SourcePagesChecked) if r.SourcePagesChecked else None,
+            "page_fix_issues": int(r.PageFixIssues) if r.PageFixIssues else None,  # part of a "Fix all" PR
         })
     return out
+
+
+def update_fix_review(user_id: int | None, fix_id: int, review: dict) -> None:
+    """Store the PR's approval / merge state fetched from the git provider."""
+    if not is_enabled() or _INIT_ERROR:
+        return
+    conn = _conn()
+    try:
+        conn.cursor().execute("""
+            UPDATE dbo.Fix SET PrState = ?, MergedBy = ?, MergedAt = ?, ApprovedBy = ?, ApprovedAt = ?,
+                   Merged = CASE WHEN ? = 'merged' THEN 1 ELSE Merged END
+            WHERE Id = ? AND (? IS NULL OR UserId = ?)
+        """, review.get("state"), review.get("merged_by"), review.get("merged_at"),
+            ", ".join(review.get("approved_by") or [])[:500] or None, review.get("approved_at"),
+            review.get("state"), fix_id, user_id, user_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_page_scans(urls) -> dict:
+    """{url: {"latest_id": newest ScanHistory.Id, "dates": [scan times, oldest first]}}
+    for the evidence pack: when each issue was found, and the page's latest result."""
+    urls = list(dict.fromkeys(u for u in urls if u))
+    if not urls or not is_enabled() or _INIT_ERROR:
+        return {}
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT Id, Url, TimestampUtc FROM dbo.ScanHistory WHERE Url IN (" + ",".join("?" * len(urls)) + ")"
+                    " ORDER BY TimestampUtc", *urls)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for r in rows:
+        page = out.setdefault(r.Url, {"latest_id": None, "dates": []})
+        page["latest_id"] = r.Id
+        page["dates"].append(_ts(r.TimestampUtc))
+    return out
+
+
+def get_fix_proofs(user_id: int | None, fix_id: int | None = None, page_url: str | None = None) -> list[dict]:
+    """Stored proofs (screenshots + screen-reader text) for one fix, or for
+    every verified fix on one page (newest first, for the PDF report)."""
+    if not is_enabled() or _INIT_ERROR:
+        return []
+    where, params = ("Id = ?", [fix_id]) if fix_id is not None else ("PageUrl = ? AND Status = 'verified'", [page_url])
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT TOP 20 Id, RuleId, PrUrl, CreatedAt, Proof FROM dbo.Fix
+            WHERE (? IS NULL OR UserId = ?) AND Proof IS NOT NULL AND {where}
+            ORDER BY CreatedAt DESC
+        """, user_id, user_id, *params)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [{"id": r.Id, "rule_id": r.RuleId, "pr_url": r.PrUrl, "created_at": _ts(r.CreatedAt),
+             **json.loads(r.Proof)} for r in rows]
 
 
 def _skip_clause(skip_pr_urls) -> tuple[str, list]:
@@ -3808,11 +3944,46 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
     return {"pr_url": row.PrUrl, "branch_url": row.BranchUrl}
 
 
-def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str, skip_pr_urls=()) -> dict | None:
-    """Most recent unmerged fix for this page whose actual patch (file + before
-    + after text) is identical — different elements can share one root cause
-    (e.g. five links styled by one CSS class), which get_open_fix's per-element
-    signature can't see."""
+def _repo_prefix(repo_url: str) -> str:
+    """LIKE pattern matching every PR URL of this repo."""
+    base = (repo_url or "").strip().rstrip("/")
+    if base.endswith(".git"):
+        base = base[:-4]
+    return base.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]") + "/%"
+
+
+def get_fix_states(user_id: int | None, signatures: list[str]) -> dict:
+    """{(rule_id, node_signature): latest fix} for these element signatures —
+    which root causes already have a fix. user_id None = every user's (Approver)."""
+    sigs = [x for x in dict.fromkeys(signatures) if x][:2000]
+    if not sigs or not is_enabled() or _INIT_ERROR:
+        return {}
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT Id, RuleId, NodeSignature, Status, PrUrl, PrState, Merged, ApprovalStatus, CreatedAt
+            FROM dbo.Fix
+            WHERE (? IS NULL OR UserId = ?) AND NodeSignature IN ({",".join("?" * len(sigs))})
+            ORDER BY CreatedAt ASC
+        """, user_id, user_id, *sigs)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for r in rows:  # oldest first, so the newest attempt wins
+        out[(r.RuleId, r.NodeSignature)] = {
+            "fix_id": r.Id, "status": r.Status, "pr_url": r.PrUrl, "approval_status": r.ApprovalStatus,
+            "pr_state": r.PrState or ("merged" if r.Merged else ("open" if r.PrUrl else None)),
+        }
+    return out
+
+
+def get_open_fix_by_patch(user_id: int, repo_url: str, patch_signature: str, skip_pr_urls=()) -> dict | None:
+    """Most recent unmerged fix in this repo whose actual patch (file + before
+    + after text) is identical — different elements, even on different pages,
+    can share one root cause (five links styled by one CSS class, one header
+    template on every page), which get_open_fix's per-element signature can't see."""
     if not is_enabled() or _INIT_ERROR:
         return None
     conn = _conn()
@@ -3822,10 +3993,10 @@ def get_open_fix_by_patch(user_id: int, page_url: str, patch_signature: str, ski
         cur.execute("""
             SELECT TOP (1) PrUrl, BranchUrl
             FROM dbo.Fix
-            WHERE UserId = ? AND PageUrl = ? AND PatchSignature = ?
+            WHERE UserId = ? AND PrUrl LIKE ? AND PatchSignature = ?
                 AND Status IN ('verified', 'partial') AND Merged = 0 AND PrUrl IS NOT NULL""" + skip_sql + """
             ORDER BY CreatedAt DESC
-        """, user_id, page_url, patch_signature, *skip_params)
+        """, user_id, _repo_prefix(repo_url), patch_signature, *skip_params)
         row = cur.fetchone()
     finally:
         conn.close()
@@ -3985,3 +4156,252 @@ def get_health_tree(limit: int = 5000) -> dict:
         })
     websites.sort(key=lambda w: w["open_issues"], reverse=True)
     return {"websites": websites}
+
+
+
+# ── Activity history: every piece of work, one timeline ────────────────────────
+
+# Report emails have no integration row; they are logged in IntegrationDelivery
+# with IntegrationId 0 and the sender in ChannelId (see log_report_email).
+_EMAIL_INTEGRATION_ID = 0
+
+
+def log_report_email(user_id: int, to_email: str, kind: str, record_id: str, ok: bool) -> None:
+    log_integration_delivery(_EMAIL_INTEGRATION_ID, f"user:{user_id}", to_email, f"email:{kind}",
+                             "sent" if ok else "failed", None if ok else "SMTP send failed", str(record_id))
+
+
+def _iso_or_none(value):
+    """Provider date strings ('...Z') and DB datetimes -> comparable UTC ISO string."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _ts(value)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+    except ValueError:
+        return None
+
+
+def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> list[dict]:
+    """Newest-first timeline of all work: scans, crawls, assistive tests,
+    Auto-Fixes, PR approvals/merges, alerts, Slack/Teams/email report
+    deliveries, repo connections and schedules.
+    Each event: {at, kind, action, target, result, status: ok|fail|info, by, link, ref}.
+    Scans, crawls, assistive tests, alerts and schedules are workspace-wide
+    (those tables carry no user); fixes, repos and deliveries are this user's."""
+    if not is_enabled() or _INIT_ERROR:
+        return []
+    user = get_user_by_id(user_id) or {}
+    me = " ".join(x for x in (user.get("firstName"), user.get("lastName")) if x) or user.get("email") or ""
+    ev = []
+
+    def add(at, kind, action, target, result="", status="info", by="", link=None, ref=None):
+        at = _iso_or_none(at)
+        if at:
+            ev.append({"at": at, "kind": kind, "action": action, "target": target or "", "result": result or "",
+                       "status": status, "by": by or "", "link": link, "ref": ref})
+
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT TOP (?) Id, Url, TimestampUtc, Violations, PassRate FROM dbo.ScanHistory ORDER BY TimestampUtc DESC", limit)
+        for r in cur.fetchall():
+            add(r.TimestampUtc, "scan", "Page scanned", r.Url,
+                f"{r.Violations} failed rule{'s' if r.Violations != 1 else ''} · {r.PassRate}% pass rate",
+                "fail" if r.Violations else "ok", ref=f"SCAN-{r.Id}")
+
+        cur.execute("SELECT TOP (?) CrawlId, RootUrl, Status, TotalScanned, TotalFailed, CreatedAt, FailureReason "
+                    "FROM dbo.CrawlJob ORDER BY CreatedAt DESC", limit)
+        for r in cur.fetchall():
+            ok = (r.Status or "").lower() in ("completed", "complete", "done", "finished")
+            failed = (r.Status or "").lower() in ("failed", "error", "cancelled", "canceled")
+            add(r.CreatedAt, "crawl", "Site crawl", r.RootUrl,
+                f"{r.Status} · {r.TotalScanned} page{'s' if r.TotalScanned != 1 else ''} scanned"
+                + (f", {r.TotalFailed} failed" if r.TotalFailed else "")
+                + (f" — {r.FailureReason[:120]}" if failed and r.FailureReason else ""),
+                "ok" if ok else "fail" if failed else "info", ref=r.CrawlId)
+
+        cur.execute("SELECT TOP (?) Id, ScanType, Url, TimestampUtc, Passed FROM dbo.AssistiveScanHistory "
+                    "ORDER BY TimestampUtc DESC", limit)
+        for r in cur.fetchall():
+            add(r.TimestampUtc, "assistive", f"Assistive test — {(r.ScanType or '').replace('-', ' ')}", r.Url,
+                "Passed" if r.Passed else "Failed", "ok" if r.Passed else "fail", ref=f"ASSISTIVE-{r.Id}")
+
+        # An Approver (all_fixes) sees every developer's fixes, each credited to its developer.
+        cur.execute("""SELECT TOP (?) f.Id, f.PageUrl, f.RuleId, f.Status, f.PrUrl, f.BranchUrl, f.ErrorMessage, f.CreatedAt,
+                              f.PrState, f.MergedBy, f.MergedAt, f.ApprovedBy, f.ApprovedAt,
+                              f.ApprovalStatus, f.ReviewedAt, f.ReviewComment,
+                              LTRIM(CONCAT(u.FirstName, ' ', u.LastName)) AS FixedBy,
+                              LTRIM(CONCAT(rv.FirstName, ' ', rv.LastName)) AS Reviewer
+                       FROM dbo.Fix f
+                       LEFT JOIN dbo.Users u ON u.Id = f.UserId
+                       LEFT JOIN dbo.Users rv ON rv.Id = f.ReviewedBy
+                       WHERE (? = 1 OR f.UserId = ?) ORDER BY f.CreatedAt DESC""", limit, 1 if all_fixes else 0, user_id)
+        for r in cur.fetchall():
+            ok = r.Status in ("verified", "partial")
+            add(r.CreatedAt, "fix", f"Auto-Fix — {r.RuleId}", r.PageUrl,
+                ("Fixed, re-scan verified" + (" · pull request opened" if r.PrUrl else "")) if r.Status == "verified"
+                else ("Partly fixed" if r.Status == "partial" else (r.ErrorMessage or "Failed")[:160]),
+                "ok" if ok else "fail", r.FixedBy or me, r.PrUrl or r.BranchUrl, f"FIX-{r.Id}")
+            if r.ApprovalStatus in ("approved", "rejected", "changes_requested") and r.ReviewedAt:
+                verb = {"approved": "approved", "rejected": "rejected"}.get(r.ApprovalStatus, "changes requested")
+                add(r.ReviewedAt, "review", f"Fix {verb} — {r.RuleId}", r.PageUrl,
+                    f"{verb.capitalize()} by {r.Reviewer}" + (f": “{r.ReviewComment}”" if r.ReviewComment else ""),
+                    {"approved": "ok", "rejected": "fail"}.get(r.ApprovalStatus, "info"), r.Reviewer, r.PrUrl, f"FIX-{r.Id}")
+            if r.ApprovedBy:
+                add(r.ApprovedAt or r.MergedAt, "review", f"PR approved — {r.RuleId}", r.PageUrl,
+                    f"Approved by {r.ApprovedBy}", "ok", r.ApprovedBy, r.PrUrl, f"FIX-{r.Id}")
+            if r.PrState == "merged" and r.MergedAt:
+                add(r.MergedAt, "review", f"PR merged — {r.RuleId}", r.PageUrl,
+                    "Merged" + ("" if r.ApprovedBy else " without a review approval"), "ok", r.MergedBy, r.PrUrl, f"FIX-{r.Id}")
+
+        cur.execute("SELECT TOP (?) Id, CrawlId, RootUrl, AlertType, Severity, Status, CreatedAt "
+                    "FROM dbo.AccessibilityAlert ORDER BY CreatedAt DESC", limit)
+        for r in cur.fetchall():
+            add(r.CreatedAt, "alert", f"Alert — {(r.AlertType or '').replace('_', ' ')}", r.RootUrl,
+                f"{r.Severity} · {r.Status}", "fail" if r.Status == "active" else "info", ref=r.CrawlId)
+
+        cur.execute("""SELECT TOP (?) d.ReportType, d.Status, d.SentAt, d.ChannelName, d.ErrorMessage, d.Reference, i.Platform
+                       FROM dbo.IntegrationDelivery d
+                       LEFT JOIN dbo.Integration i ON i.Id = d.IntegrationId
+                       WHERE i.UserId = ? OR (d.IntegrationId = ? AND d.ChannelId = ?)
+                       ORDER BY d.SentAt DESC""", limit, user_id, _EMAIL_INTEGRATION_ID, f"user:{user_id}")
+        for r in cur.fetchall():
+            ok = (r.Status or "").lower() in ("sent", "success", "ok", "delivered")
+            via = "email" if (r.ReportType or "").startswith("email:") else (r.Platform or "integration").title()
+            what = (r.ReportType or "").removeprefix("email:")
+            add(r.SentAt, "report", f"Report sent by {via}", r.ChannelName,
+                f"{what} report {r.Reference or ''}".strip() + ("" if ok else f" — failed: {r.ErrorMessage or ''}"),
+                "ok" if ok else "fail", me if via == "email" else "", ref=r.Reference)
+
+        cur.execute("SELECT Id, SiteUrl, RepoUrl, Provider, ConnectedAt, Status FROM dbo.RepoLink WHERE UserId = ?", user_id)
+        for r in cur.fetchall():
+            add(r.ConnectedAt, "setup", f"Repo connected ({r.Provider})", r.SiteUrl, r.RepoUrl, "info", me, r.RepoUrl)
+
+        cur.execute("SELECT Id, RootUrl, Frequency, Enabled, LastRunAt, CreatedAt FROM dbo.CrawlSchedule")
+        for r in cur.fetchall():
+            add(r.CreatedAt, "setup", "Schedule created", r.RootUrl,
+                f"{r.Frequency}{'' if r.Enabled else ' (paused)'}", "info", ref=f"SCHEDULE-{r.Id}")
+    finally:
+        conn.close()
+    ev.sort(key=lambda e: e["at"], reverse=True)
+    return ev[:limit]
+
+
+# ── Approval workflow ──────────────────────────────────────────────────────────
+
+def get_user_role(user_id: int) -> str:
+    """'approver' or 'developer' (the default for every account)."""
+    if not is_enabled() or _INIT_ERROR:
+        return "developer"
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT Role FROM dbo.Users WHERE Id = ?", user_id)
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    return "approver" if row and (row[0] or "").lower() == "approver" else "developer"
+
+
+def set_user_role(email: str, role: str | None) -> bool:
+    if not is_enabled() or _INIT_ERROR:
+        return False
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE dbo.Users SET Role = ? WHERE Email = ?", role, email)
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def list_users() -> list[dict]:
+    """Every account with its role — for the Approver's Team & roles screen."""
+    if not is_enabled() or _INIT_ERROR:
+        return []
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT Id, FirstName, LastName, Email, Role, EmailVerified, CreatedAtUtc FROM dbo.Users ORDER BY Email")
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [{"id": r.Id, "name": " ".join(x for x in (r.FirstName, r.LastName) if x) or r.Email, "email": r.Email,
+             "role": "approver" if (r.Role or "").lower() == "approver" else "developer",
+             "verified": bool(r.EmailVerified), "created_at": _ts(r.CreatedAtUtc)} for r in rows]
+
+
+def set_user_role_by_id(user_id: int, role: str) -> bool:
+    """role: 'approver' or 'developer' (stored as NULL, the default)."""
+    if not is_enabled() or _INIT_ERROR:
+        return False
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE dbo.Users SET Role = ? WHERE Id = ?", "approver" if role == "approver" else None, user_id)
+        conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def get_approvers() -> list[dict]:
+    return [u for u in list_users() if u["role"] == "approver"]
+
+
+def resubmit_fix(fix_id: int) -> None:
+    """Developer updated the PR after "changes requested": back to the Approver's queue.
+    Same batch rule as review_fix — every fix on the PR moves together."""
+    if not is_enabled() or _INIT_ERROR:
+        return
+    conn = _conn()
+    try:
+        conn.cursor().execute("""
+            UPDATE dbo.Fix SET ApprovalStatus = 'pending'
+            WHERE Id = ? OR PrUrl = (SELECT PrUrl FROM dbo.Fix WHERE Id = ?)
+        """, fix_id, fix_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_fix(fix_id: int) -> dict | None:
+    """One fix row (any user) — for the Approver's approve / reject actions."""
+    if not is_enabled() or _INIT_ERROR:
+        return None
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT Id, UserId, PageUrl, RuleId, Status, PrUrl, PrState, ApprovalStatus FROM dbo.Fix WHERE Id = ?", fix_id)
+        r = cur.fetchone()
+    finally:
+        conn.close()
+    if not r:
+        return None
+    return {"id": r.Id, "user_id": r.UserId, "page_url": r.PageUrl, "rule_id": r.RuleId, "status": r.Status,
+            "pr_url": r.PrUrl, "pr_state": r.PrState, "approval_status": r.ApprovalStatus}
+
+
+def review_fix(fix_id: int, reviewer_id: int, status: str, comment: str | None,
+               pr_state: str | None = None, merged_by: str | None = None) -> None:
+    """Record an Approver's decision; pr_state/merged_by when it also merged or closed
+    the PR. Applies to every fix on the same PR (a batch fix shares one PR)."""
+    if not is_enabled() or _INIT_ERROR:
+        return
+    conn = _conn()
+    try:
+        conn.cursor().execute("""
+            UPDATE dbo.Fix SET ApprovalStatus = ?, ReviewedBy = ?, ReviewedAt = SYSUTCDATETIME(), ReviewComment = ?,
+                   PrState = COALESCE(?, PrState),
+                   MergedBy = CASE WHEN ? = 'merged' THEN ? ELSE MergedBy END,
+                   MergedAt = CASE WHEN ? = 'merged' THEN CONVERT(NVARCHAR(40), SYSUTCDATETIME(), 127) + 'Z' ELSE MergedAt END,
+                   Merged = CASE WHEN ? = 'merged' THEN 1 ELSE Merged END
+            WHERE Id = ? OR PrUrl = (SELECT PrUrl FROM dbo.Fix WHERE Id = ?)
+        """, status, reviewer_id, (comment or "")[:1000] or None, pr_state, pr_state, merged_by, pr_state, pr_state, fix_id, fix_id)
+        conn.commit()
+    finally:
+        conn.close()

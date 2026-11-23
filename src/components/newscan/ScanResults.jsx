@@ -2,6 +2,7 @@ import { apiFetch } from '../../utils/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { CheckCircle, AlertTriangle, RotateCcw, Monitor, Search, History, Play, Loader2, AlertCircle, X, ChevronDown, ChevronRight } from 'lucide-react';
 import ViolationRow from './ViolationList';
+import FixPageBar from './FixPageBar';
 import IncompleteList from './IncompleteList';
 import ScreenshotModal from './ScreenshotModal';
 import AssistiveTestDropdown from './AssistiveTestDropdown';
@@ -565,6 +566,9 @@ export default function ScanResults({ violations, passes, incomplete = [], scanR
               ?'border-teal/40 ring-1 ring-teal/20'
               :'border-gray-100'
           }`}>
+
+            {/* Fix all: every auto-fixable issue on this page in one PR */}
+            <FixPageBar violations={violations} pageUrl={scanUrl} sessionId={sessionId} />
 
             {/* Header row */}
             <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
