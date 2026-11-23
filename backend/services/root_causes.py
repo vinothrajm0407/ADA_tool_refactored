@@ -10,21 +10,27 @@ import hashlib
 import re
 
 _WS = re.compile(r"\s+")
-# Markup that changes per page but not per component: auto-generated ids
-# (ember123, react-aria-5, :r3:) and cache-busting query strings.
-_VOLATILE = [
-    (re.compile(r'\s(id|for|aria-controls|aria-labelledby|aria-describedby)="[^"]*\d[^"]*"'), ""),
-    (re.compile(r'(\.(?:css|js|png|jpe?g|svg|webp|gif))\?[^"\']*'), r"\1"),
-]
+# Markup that changes per page but not per component: ids a framework
+# generates at render time (ember123, react-aria-5, :r3:, radix-…, mui-12,
+# long hashes) and cache-busting query strings. Hand-written ids like
+# "q1" or "step2" are kept — they name different elements.
+_GENERATED_ID = re.compile(
+    r"^(ember\d+|:r[0-9a-z]+:|react-aria\d*-\d+|radix-[\w:-]+|mui-\d+|headlessui-[\w-]+-\d+|"
+    r"[a-z]+-(?=[0-9a-f]*\d)[0-9a-f]{6,}|(?=[0-9a-f]*\d)[0-9a-f]{8,}|.*\d{4,})$", re.I)
+_ID_ATTR = re.compile(r'\s(id|for|aria-controls|aria-labelledby|aria-describedby)="([^"]*)"')
+_CACHE_BUST = re.compile(r'(\.(?:css|js|png|jpe?g|svg|webp|gif))\?[^"\']*')
+
+
+def _drop_generated_id(m: re.Match) -> str:
+    return "" if all(_GENERATED_ID.match(v) for v in m.group(2).split()) and m.group(2).strip() else m.group(0)
 MAX_PAGES_STORED = 500  # ponytail: per root cause, enough for Fix History rows; raise for very large sites
 
 
 def markup_key(html: str) -> str:
     """Same component, same key — even when the page gave it a different generated id."""
     s = _WS.sub(" ", html or "").strip()
-    for pattern, repl in _VOLATILE:
-        s = pattern.sub(repl, s)
-    return s
+    s = _ID_ATTR.sub(_drop_generated_id, s)
+    return _CACHE_BUST.sub(r"\1", s)
 
 
 def node_signature(html: str) -> str:

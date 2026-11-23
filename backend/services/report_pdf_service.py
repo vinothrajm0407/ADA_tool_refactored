@@ -834,6 +834,8 @@ def evidence_pack_data(fixes: list[dict], user_id: int, all_users: bool = False)
         fixed_at = _parse_dt(f.get("created_at"))
         before = [d for d in dates if fixed_at and _parse_dt(d) and _parse_dt(d) <= fixed_at]
         f["found_at"] = (before or dates or [None])[-1]
+        if not f["found_at"] and f.get("source_crawl_id"):
+            f["found_at"] = (db.get_crawl_job(f["source_crawl_id"]) or {}).get("created_at")
         f["fixed_by"] = f.get("fixed_by") or fixed_by  # the developer who ran it
         f["wcag"] = f.get("wcag") or rule_wcag.get(f.get("rule_id")) or []
         help_, impact = rule_info.get(f.get("rule_id"), (None, None))  # older fixes stored neither
@@ -844,7 +846,17 @@ def evidence_pack_data(fixes: list[dict], user_id: int, all_users: bool = False)
 
 _AUDIT_COLUMNS = ["Fix ID", "Page", "Issue", "Rule", "WCAG", "Severity", "Element", "Source file",
                   "Issue found", "Fixed by", "Fixed on", "Re-scan", "Pull request", "PR state",
-                  "Approved by", "Approved on", "Merged by", "Merged on", "Days found to merged"]
+                  "Approved by", "Approved on", "Merged by", "Merged on", "Days found to merged",
+                  "Fixed at the source (pages)", "Review history"]
+
+
+_REVIEW_LABELS = {"approved": "Approved", "rejected": "Rejected", "changes_requested": "Changes requested",
+                  "resubmitted": "Resubmitted"}
+
+
+def _review_text(r: dict) -> str:
+    return (f"{(r.get('at') or '')[:10]} {_REVIEW_LABELS.get(r.get('kind'), r.get('kind'))} by {r.get('by') or '—'}"
+            + (f": {r['comment']}" if r.get("comment") else ""))
 
 
 def _audit_row(f: dict) -> list:
@@ -854,7 +866,8 @@ def _audit_row(f: dict) -> list:
             f.get("status"), f.get("pr_url"), f.get("pr_state") or "unknown",
             ", ".join(f.get("approved_by") or []), (f.get("approved_at") or "")[:10],
             f.get("merged_by") or "", (f.get("merged_at") or "")[:10],
-            "" if f.get("days_to_merge") is None else f["days_to_merge"]]
+            "" if f.get("days_to_merge") is None else f["days_to_merge"],
+            f.get("source_pages") or "", " | ".join(_review_text(r) for r in f.get("reviews") or [])]
 
 
 def audit_trail_csv(fixes: list[dict]) -> str:
@@ -878,11 +891,26 @@ def _timeline(f: dict) -> str:
     state = f.get("pr_state")
     approvers = ", ".join(f.get("approved_by") or [])
     out = step(bool(f.get("found_at")), "Found", d(f.get("found_at")) or "—")
+    source = ""
+    if f.get("source_pages"):
+        checked = f.get("source_pages_checked")
+        source = (f' · fixed at the source: one change for {f["source_pages"]} pages'
+                  + (f' ({f.get("source_pages_clean") or 0} of {checked} re-checked pages clean)' if checked else ""))
     out += step(True, "Fixed", f'{d(f.get("created_at"))}{(" by " + _esc(f["fixed_by"])) if f.get("fixed_by") else ""}'
-                               f'{" · re-scan verified" if f.get("status") == "verified" else ""}')
+                               f'{" · re-scan verified" if f.get("status") == "verified" else ""}{_esc(source)}')
     pr_no = (f.get("pr_url") or "").rstrip("/").rsplit("/", 1)[-1]
     out += step(True, "PR opened", f'<a href="{_esc(f.get("pr_url"))}">#{_esc(pr_no)}</a>')
-    out += step(bool(approvers), "Approved", (f"by {_esc(approvers)}" + (f" on {d(f.get('approved_at'))}" if f.get("approved_at") else "")) if approvers else
+    for r in f.get("reviews") or []:  # every decision, in order — not just the last one
+        if r.get("kind") == "approved":
+            continue  # shown on the Approved step below
+        label = _REVIEW_LABELS.get(r.get("kind"), r.get("kind"))
+        detail = f"by {_esc(r.get('by') or '—')} on {d(r.get('at'))}" + (f" — “{_esc(r['comment'])}”" if r.get("comment") else "")
+        out += step(True, label, detail)
+    if f.get("approval_status") == "rejected":
+        return out + step(True, "Closed without merging", "the fix was rejected")
+    approved_note = next((r.get("comment") for r in reversed(f.get("reviews") or []) if r.get("kind") == "approved"), None)
+    out += step(bool(approvers), "Approved", (f"by {_esc(approvers)}" + (f" on {d(f.get('approved_at'))}" if f.get("approved_at") else "")
+                                              + (f" — “{_esc(approved_note)}”" if approved_note else "")) if approvers else
                 ("none recorded — merged without a review approval" if state == "merged" else "awaiting review"))
     if state == "merged":
         days = f.get("days_to_merge")
@@ -920,6 +948,8 @@ def _wcag_summary_section(fixes: list[dict], pages: list[dict]) -> str:
             for cid in wcag_criteria(v.get("tags")):
                 bump(cid, "open", len(v.get("nodes") or []))
     for f in fixes:
+        if f.get("approval_status") == "rejected":
+            continue  # rejected by the Approver: not a fix
         for cid in f.get("wcag") or []:
             bump(cid, "fixed")
             if f.get("approved_by"):
@@ -953,6 +983,7 @@ def _build_evidence_pack_html(fixes: list[dict], pages: list[dict] | None = None
     merged = [f for f in fixes if f.get("pr_state") == "merged"]
     approved = sum(1 for f in fixes if f.get("approved_by"))
     waiting = sum(1 for f in fixes if f.get("pr_state") not in ("merged", "closed"))
+    rejected = sum(1 for f in fixes if f.get("approval_status") == "rejected")
     days = [f["days_to_merge"] for f in merged if f.get("days_to_merge") is not None]
     avg = f"{sum(days) / len(days):.1f}" if days else "—"
     def kpi(label, value, color="#111827"):
@@ -967,7 +998,7 @@ def _build_evidence_pack_html(fixes: list[dict], pages: list[dict] | None = None
   {f'<ul style="margin:8px 0 0;padding-left:18px;font-size:10px;color:#6b7280;">{page_list}</ul>' if page_list else ''}
 </div>
 <div class="section">
-  <div class="kpi-grid">{kpi("Fixes with a PR", len(fixes))}{kpi("Approved", approved, "#7c3aed")}{kpi("Merged", len(merged), "#059669")}{kpi("Awaiting review", waiting, "#f59e0b" if waiting else "#059669")}{kpi("Avg days to merge", avg)}</div>
+  <div class="kpi-grid">{kpi("Fixes with a PR", len(fixes))}{kpi("Approved", approved, "#7c3aed")}{kpi("Merged", len(merged), "#059669")}{kpi("Awaiting review", waiting, "#f59e0b" if waiting else "#059669")}{kpi("Avg days to merge", avg)}{kpi("Rejected", rejected, "#dc2626") if rejected else ""}</div>
   <p style="margin:8px 0 0;font-size:10px;color:#6b7280;">Contents: 1. Summary by WCAG criterion · 2. Audit trail (issue → fix → approver → date) ·
   3. Conformance per page · 4. Before / after proof for each fix</p>
 </div>

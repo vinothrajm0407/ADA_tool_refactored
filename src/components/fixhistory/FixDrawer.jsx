@@ -29,6 +29,8 @@ function Code({ label, text, tone }) {
   );
 }
 
+const REVIEW_LABEL = { changes_requested: 'Changes requested', resubmitted: 'Resubmitted', approved: 'Approved', rejected: 'Rejected' };
+
 // Approver only: approve (merges the PR), request changes (PR stays open, back to
 // the developer) or reject (closes it). A comment is required for the last two.
 function ReviewPanel({ fix, onReviewed }) {
@@ -46,7 +48,7 @@ function ReviewPanel({ fix, onReviewed }) {
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Review failed');
-      onReviewed(data.fix);
+      onReviewed(data.fix, data.git_approval);
     } catch (e) { setError(e.message); } finally { setBusy(''); }
   }
   return (
@@ -55,6 +57,8 @@ function ReviewPanel({ fix, onReviewed }) {
         <h3 className="text-[13px] font-semibold text-ink">Your approval is needed</h3>
         <p className="text-[12px] text-body">Check the code change and the before/after proof below.
           {fix.fixed_by && <> Fixed by <b className="text-ink">{fix.fixed_by}</b>.</>}</p>
+        <p className="text-[11px] text-body mt-1">Your decision is made with <b className="text-ink">your own</b> connected git account:
+          approving posts an approval review on the pull request, then merges it.</p>
       </div>
       <label className="block">
         <span className="block text-[11px] font-semibold text-body mb-1">Comment (required to request changes or reject)</span>
@@ -84,10 +88,13 @@ function ReviewPanel({ fix, onReviewed }) {
 function ResubmitPanel({ fix, onReviewed }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [note, setNote] = useState('');
   async function resubmit() {
     setBusy(true); setError('');
     try {
-      const res = await apiFetch(`/api/fixes/${fix.id}/resubmit`, { method: 'POST' });
+      const res = await apiFetch(`/api/fixes/${fix.id}/resubmit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: note.trim() }),
+      });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Resubmit failed');
       onReviewed(data.fix);
@@ -102,6 +109,11 @@ function ResubmitPanel({ fix, onReviewed }) {
           {fix.pr_url && <> (<a href={fix.pr_url} target="_blank" rel="noopener noreferrer" className="text-teal hover:underline">open it</a>)</>},
           then send it back to the Approver.</p>
       </div>
+      <label className="block">
+        <span className="block text-[11px] font-semibold text-body mb-1">What did you change? (optional, goes in the audit trail)</span>
+        <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} maxLength={1000}
+          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" placeholder="e.g. Changed the label to “Open menu”" />
+      </label>
       {error && <p className="text-[12px] text-coral" role="alert">{error}</p>}
       <button type="button" onClick={resubmit} disabled={busy} className="btn-primary text-sm flex items-center gap-1.5 disabled:opacity-50">
         <Send size={14} /> {busy ? 'Sending…' : 'Resubmit for approval'}
@@ -113,6 +125,20 @@ function ResubmitPanel({ fix, onReviewed }) {
 // Side panel for one fix: timeline, approval, code change and before/after proof.
 export default function FixDrawer({ fix, onClose, isApprover = false, currentUserId = null, onReviewed }) {
   const [proof, setProof] = useState(null); // null, 'loading', 'error' or the proof
+  const [notice, setNotice] = useState(null); // what happened on the git provider after Approve
+  useEffect(() => { setNotice(null); }, [fix?.id]);
+
+  function reviewed(updated, gitApproval) {
+    if (gitApproval) {
+      setNotice(gitApproval === 'posted'
+        ? { ok: true, text: 'Approved on the pull request from your account, then merged.' }
+        : gitApproval === 'own_pr'
+          ? { ok: false, text: 'Merged. GitHub did not record an approval review because your account opened this pull request — '
+              + 'ask the developer to connect their own access token so their pull requests come from their account.' }
+          : { ok: false, text: `Merged. The approval review could not be posted (${gitApproval}) — it is recorded here.` });
+    }
+    onReviewed(updated);
+  }
   const closeRef = useRef(null);
 
   useEffect(() => {
@@ -138,6 +164,7 @@ export default function FixDrawer({ fix, onClose, isApprover = false, currentUse
   const days = pr === 'merged' ? daysBetween(fix.created_at, fix.merged_at) : null;
   const approval = approvalOf(fix);
   const canReview = isApprover && pr === 'open' && approval === 'pending';
+  const history = fix.reviews || [];
   // Whoever made the fix resubmits it — a developer, or an Approver who fixed it themselves.
   const canResubmit = pr === 'open' && approval === 'changes_requested'
     && (!isApprover || (currentUserId != null && fix.user_id === currentUserId));
@@ -176,7 +203,11 @@ export default function FixDrawer({ fix, onClose, isApprover = false, currentUse
             )}
           </section>
 
-          {canReview && <ReviewPanel fix={fix} onReviewed={onReviewed} />}
+          {notice && (
+            <p role="status" className={`text-[12px] rounded-xl px-3 py-2 border ${notice.ok
+              ? 'text-sage bg-sage/10 border-sage/20' : 'text-ink bg-amber/10 border-amber/30'}`}>{notice.text}</p>
+          )}
+          {canReview && <ReviewPanel fix={fix} onReviewed={reviewed} />}
           {canResubmit && <ResubmitPanel fix={fix} onReviewed={onReviewed} />}
 
           <section className="bg-white rounded-2xl border border-gray-100 p-4">
@@ -190,12 +221,21 @@ export default function FixDrawer({ fix, onClose, isApprover = false, currentUse
                   <GitBranch size={11} /> #{fix.pr_url.replace(/\/$/, '').split('/').pop()} <ExternalLink size={10} /></a>
                   : fix.branch_url ? <a href={fix.branch_url} target="_blank" rel="noopener noreferrer" className="text-teal hover:underline">Branch only</a> : 'No pull request'}
               </Step>
-              {approval === 'changes_requested' && (
+              {/* every decision in order (changes requested → resubmitted → …); approval itself is the step below */}
+              {history.filter(r => r.kind !== 'approved' && r.kind !== 'rejected').map((r, i) => (
+                <Step key={i} done label={REVIEW_LABEL[r.kind] || r.kind}>
+                  {`by ${r.by || '—'}${r.at ? ` on ${formatDate(r.at)}` : ''}`}
+                  {r.comment && <p className="text-ink mt-0.5">“{r.comment}”</p>}
+                </Step>
+              ))}
+              {approval === 'changes_requested' && !history.length && (
                 <Step warn={false} done label="Changes requested">
                   {`by ${fix.reviewed_by || 'Approver'}${fix.reviewed_at ? ` on ${formatDate(fix.reviewed_at)}` : ''}`}
                   {fix.review_comment && <p className="text-ink mt-0.5">“{fix.review_comment}”</p>}
-                  {pr === 'open' && <p className="mt-0.5">Waiting for the developer to update the pull request.</p>}
                 </Step>
+              )}
+              {approval === 'changes_requested' && pr === 'open' && (
+                <li className="pl-6 pb-3 text-[12px] text-body">Waiting for the developer to update the pull request.</li>
               )}
               {approval === 'rejected' ? (
                 <Step warn label="Rejected">
@@ -207,6 +247,9 @@ export default function FixDrawer({ fix, onClose, isApprover = false, currentUse
                   {approvers ? `by ${approvers}${fix.approved_at ? ` on ${formatDate(fix.approved_at)}` : ''}`
                     : pr === 'merged' ? 'Merged without a review approval' : pr === 'open' ? 'Waiting for an Approver' : '—'}
                   {approval === 'approved' && fix.review_comment && <p className="text-ink mt-0.5">“{fix.review_comment}”</p>}
+                  {approval === 'pending' && history.some(r => r.kind === 'resubmitted') && pr === 'open' && (
+                    <p className="mt-0.5">Resubmitted — waiting for the Approver again.</p>
+                  )}
                 </Step>
               )}
               <Step done={pr === 'merged'} warn={pr === 'closed'} label={pr === 'closed' ? 'Closed without merging' : 'Merged'}>

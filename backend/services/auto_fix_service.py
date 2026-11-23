@@ -2768,6 +2768,39 @@ def comment_on_pull_request(repo_url: str, token: str, pr_number: int, provider:
         return False
 
 
+def approve_pull_request(repo_url: str, token: str, pr_number: int, provider: str = "github",
+                         note: str = "") -> tuple[bool, str]:
+    """Record the Approver's approval on the PR itself, as the account that owns
+    `token` (a GitHub review, a GitLab/Bitbucket approval). Returns (ok, why):
+    why is "own_pr" when the provider refuses because that account opened the
+    PR (GitHub never lets an account approve its own pull request)."""
+    path = _parse_repo(provider, repo_url)
+    if not path:
+        return False, "unknown repo"
+    call, gh, _az = _pr_call(provider, token)
+    try:
+        if provider == "gitlab":
+            call(f"https://gitlab.com/api/v4/projects/{urllib.parse.quote(path, safe='')}/merge_requests/{pr_number}/approve",
+                 "POST", {})
+        elif provider == "bitbucket":
+            call(f"https://api.bitbucket.org/2.0/repositories/{path}/pullrequests/{pr_number}/approve", "POST", {})
+        elif provider == "azure":
+            return False, "Azure DevOps approvals are recorded in the tool only"  # ponytail: needs the reviewer's id lookup
+        else:
+            call(f"https://api.github.com/repos/{path}/pulls/{pr_number}/reviews", "POST",
+                 {"event": "APPROVE", "body": note or "Approved in ADA Auto-Fix review."}, gh)
+        return True, ""
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        if e.code in (400, 401, 403, 422) and any(w in detail.lower() for w in ("own pull request", "your own", "author")):
+            return False, "own_pr"
+        logger.warning("approve_pull_request %s #%s: HTTP %s %s", repo_url, pr_number, e.code, detail[:200])
+        return False, f"HTTP {e.code}"
+    except Exception as e:
+        logger.warning("approve_pull_request failed for %s #%s: %s", repo_url, pr_number, e)
+        return False, str(e)[:120]
+
+
 def close_pull_request(repo_url: str, token: str, pr_number: int, provider: str = "github",
                        comment: str | None = None) -> bool:
     """Close (decline) a PR/MR after an Approver rejects the fix, leaving the
