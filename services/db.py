@@ -509,6 +509,21 @@ def _ensure_table() -> None:
             )
         """)
         conn.commit()
+        # ── Fix review history: every Approver decision and developer resubmit ─
+        # (the Fix row keeps only the latest decision; this keeps all of them).
+        cur.execute("""
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = N'FixReview')
+            CREATE TABLE dbo.FixReview (
+                Id         INT IDENTITY(1,1) PRIMARY KEY,
+                FixId      INT            NOT NULL,
+                PrUrl      NVARCHAR(500)  NULL,
+                Kind       NVARCHAR(30)   NOT NULL,
+                UserId     INT            NULL,
+                Comment    NVARCHAR(1000) NULL,
+                CreatedAt  DATETIME2(3)   NOT NULL DEFAULT SYSUTCDATETIME()
+            )
+        """)
+        conn.commit()
         # ── Repo Links (Auto-Fix source repo) ─────────────────────────────────
         # PathPrefix disambiguates multiple sites sharing one domain (e.g. two
         # GitHub Pages project sites both under the same *.github.io host) —
@@ -3784,15 +3799,16 @@ def get_fixes(user_id: int | None, limit: int = 50) -> list[dict]:
                    CASE WHEN f.Proof IS NULL THEN 0 ELSE 1 END AS HasProof,
                    f.PrState, f.MergedBy, f.MergedAt, f.ApprovedBy, f.ApprovedAt,
                    f.ApprovalStatus, f.ReviewedAt, f.ReviewComment,
-                   LTRIM(CONCAT(u.FirstName, ' ', u.LastName)) AS FixedBy, u.Email AS FixedByEmail,
-                   LTRIM(CONCAT(rv.FirstName, ' ', rv.LastName)) AS Reviewer,
+                   LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))) AS FixedBy, u.Email AS FixedByEmail,
+                   LTRIM(RTRIM(CONCAT(rv.FirstName, ' ', rv.LastName))) AS Reviewer,
                    JSON_VALUE(f.Proof, '$.help') AS Help, JSON_VALUE(f.Proof, '$.impact') AS Impact,
                    JSON_VALUE(f.Proof, '$.selector') AS Selector, JSON_VALUE(f.Proof, '$.file') AS SourceFile,
                    JSON_QUERY(f.Proof, '$.wcag') AS Wcag,
                    JSON_VALUE(f.Proof, '$.root_cause.page_count') AS SourcePages,
                    JSON_VALUE(f.Proof, '$.root_cause.pages_clean') AS SourcePagesClean,
                    JSON_VALUE(f.Proof, '$.root_cause.pages_checked') AS SourcePagesChecked,
-                   JSON_VALUE(f.Proof, '$.page_fix.issues') AS PageFixIssues
+                   JSON_VALUE(f.Proof, '$.page_fix.issues') AS PageFixIssues,
+                   JSON_VALUE(f.Proof, '$.root_cause.crawl_id') AS SourceCrawlId
             FROM dbo.Fix f
             LEFT JOIN dbo.Users u ON u.Id = f.UserId
             LEFT JOIN dbo.Users rv ON rv.Id = f.ReviewedBy
@@ -3840,7 +3856,11 @@ def get_fixes(user_id: int | None, limit: int = 50) -> list[dict]:
             "source_pages_clean": int(r.SourcePagesClean) if r.SourcePagesClean else None,
             "source_pages_checked": int(r.SourcePagesChecked) if r.SourcePagesChecked else None,
             "page_fix_issues": int(r.PageFixIssues) if r.PageFixIssues else None,  # part of a "Fix all" PR
+            "source_crawl_id": r.SourceCrawlId,
         })
+    reviews = get_fix_reviews(f["pr_url"] for f in out)
+    for f in out:  # full decision history: changes requested -> resubmitted -> approved ...
+        f["reviews"] = reviews.get(f["pr_url"], [])
     return out
 
 
@@ -4229,12 +4249,26 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
             add(r.TimestampUtc, "assistive", f"Assistive test — {(r.ScanType or '').replace('-', ' ')}", r.Url,
                 "Passed" if r.Passed else "Failed", "ok" if r.Passed else "fail", ref=f"ASSISTIVE-{r.Id}")
 
+        # Every recorded decision (FixReview): approve, request changes, reject, resubmit.
+        cur.execute("""SELECT TOP (?) r.Kind, r.Comment, r.CreatedAt, r.PrUrl, f.Id, f.RuleId, f.PageUrl,
+                              COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName
+                       FROM dbo.FixReview r JOIN dbo.Fix f ON f.Id = r.FixId LEFT JOIN dbo.Users u ON u.Id = r.UserId
+                       WHERE (? = 1 OR f.UserId = ?) ORDER BY r.CreatedAt DESC""", limit, 1 if all_fixes else 0, user_id)
+        reviewed_prs = set()
+        labels = {"approved": ("approved", "ok"), "rejected": ("rejected", "fail"),
+                  "changes_requested": ("changes requested", "info"), "resubmitted": ("resubmitted", "info")}
+        for r in cur.fetchall():
+            reviewed_prs.add(r.PrUrl)
+            verb, status = labels.get(r.Kind, (r.Kind, "info"))
+            add(r.CreatedAt, "review", f"Fix {verb} — {r.RuleId}", r.PageUrl,
+                f"{verb.capitalize()} by {r.ByName}" + (f": “{r.Comment}”" if r.Comment else ""),
+                status, r.ByName, r.PrUrl, f"FIX-{r.Id}")
         # An Approver (all_fixes) sees every developer's fixes, each credited to its developer.
         cur.execute("""SELECT TOP (?) f.Id, f.PageUrl, f.RuleId, f.Status, f.PrUrl, f.BranchUrl, f.ErrorMessage, f.CreatedAt,
                               f.PrState, f.MergedBy, f.MergedAt, f.ApprovedBy, f.ApprovedAt,
                               f.ApprovalStatus, f.ReviewedAt, f.ReviewComment,
-                              LTRIM(CONCAT(u.FirstName, ' ', u.LastName)) AS FixedBy,
-                              LTRIM(CONCAT(rv.FirstName, ' ', rv.LastName)) AS Reviewer
+                              LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))) AS FixedBy,
+                              LTRIM(RTRIM(CONCAT(rv.FirstName, ' ', rv.LastName))) AS Reviewer
                        FROM dbo.Fix f
                        LEFT JOIN dbo.Users u ON u.Id = f.UserId
                        LEFT JOIN dbo.Users rv ON rv.Id = f.ReviewedBy
@@ -4245,7 +4279,7 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
                 ("Fixed, re-scan verified" + (" · pull request opened" if r.PrUrl else "")) if r.Status == "verified"
                 else ("Partly fixed" if r.Status == "partial" else (r.ErrorMessage or "Failed")[:160]),
                 "ok" if ok else "fail", r.FixedBy or me, r.PrUrl or r.BranchUrl, f"FIX-{r.Id}")
-            if r.ApprovalStatus in ("approved", "rejected", "changes_requested") and r.ReviewedAt:
+            if r.ApprovalStatus in ("approved", "rejected", "changes_requested") and r.ReviewedAt and r.PrUrl not in reviewed_prs:
                 verb = {"approved": "approved", "rejected": "rejected"}.get(r.ApprovalStatus, "changes requested")
                 add(r.ReviewedAt, "review", f"Fix {verb} — {r.RuleId}", r.PageUrl,
                     f"{verb.capitalize()} by {r.Reviewer}" + (f": “{r.ReviewComment}”" if r.ReviewComment else ""),
@@ -4367,6 +4401,51 @@ def resubmit_fix(fix_id: int) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+REVIEW_KINDS = ("approved", "rejected", "changes_requested", "resubmitted")
+
+
+def add_fix_review(fix_id: int, kind: str, user_id: int, comment: str | None = None) -> None:
+    """Append one decision to the audit trail. Stored against the fix's PR, so a
+    batch PR's rows all show it."""
+    if kind not in REVIEW_KINDS or not is_enabled() or _INIT_ERROR:
+        return
+    conn = _conn()
+    try:
+        conn.cursor().execute("""
+            INSERT INTO dbo.FixReview (FixId, PrUrl, Kind, UserId, Comment)
+            SELECT Id, PrUrl, ?, ?, ? FROM dbo.Fix WHERE Id = ?
+        """, kind, user_id, (comment or "")[:1000] or None, fix_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_fix_reviews(pr_urls) -> dict:
+    """{pr_url: [{kind, by, comment, at}]} oldest first — the full decision history per PR."""
+    urls = [u for u in dict.fromkeys(pr_urls) if u][:2000]
+    if not urls or not is_enabled() or _INIT_ERROR:
+        return {}
+    out: dict = {}
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        for i in range(0, len(urls), 500):  # stay under SQL Server's parameter limit
+            chunk = urls[i:i + 500]
+            cur.execute(f"""
+                SELECT r.PrUrl, r.Kind, r.Comment, r.CreatedAt,
+                       COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName
+                FROM dbo.FixReview r LEFT JOIN dbo.Users u ON u.Id = r.UserId
+                WHERE r.PrUrl IN ({",".join("?" * len(chunk))})
+                ORDER BY r.CreatedAt ASC, r.Id ASC
+            """, *chunk)
+            for r in cur.fetchall():
+                out.setdefault(r.PrUrl, []).append({"kind": r.Kind, "by": r.ByName or "", "comment": r.Comment,
+                                                    "at": _ts(r.CreatedAt)})
+    finally:
+        conn.close()
+    return out
 
 
 def get_fix(fix_id: int) -> dict | None:

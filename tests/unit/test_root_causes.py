@@ -32,6 +32,12 @@ def test_generated_ids_and_whitespace_do_not_split_a_component():
     assert rc.markup_key(a) == rc.markup_key(b)
     assert rc.markup_key('<link href="/app.css?v=123">') == rc.markup_key('<link href="/app.css?v=999">')
     assert rc.markup_key('<input id="search">') != rc.markup_key('<input id="email">')  # real ids stay
+    assert rc.markup_key('<input id="q1">') != rc.markup_key('<input id="q2">')        # hand-written, numbered: different fields
+    assert rc.markup_key('<nav id="nav-facade">') != rc.markup_key('<nav id="nav-decade">')  # words, not hashes
+    for a, b in (('<div id=":r3:">', '<div id=":r9:">'), ('<b id="radix-:R1:">', '<b id="radix-:R7:">'),
+                 ('<i aria-labelledby="mui-12 mui-13">', '<i aria-labelledby="mui-40 mui-41">'),
+                 ('<p id="card-9f8e7d6c">', '<p id="card-a1b2c3d4">')):
+        assert rc.markup_key(a) == rc.markup_key(b), a
 
 
 def test_sorted_by_pages_then_severity_and_page_wide_skipped():

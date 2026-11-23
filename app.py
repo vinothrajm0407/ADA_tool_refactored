@@ -1858,11 +1858,12 @@ def api_activity():
 @require_auth
 def api_evidence_pack():
     """Compliance evidence pack: audit trail of every fix that opened a PR
-    (issue -> fix -> approver -> date), excluding PRs closed unmerged. ?format=csv for a spreadsheet, else PDF."""
+    (issue -> fix -> approver -> date, with every review decision). Fixes an
+    Approver rejected stay in, with the reason; PRs closed without any decision
+    (abandoned / test PRs) are left out. ?format=csv for a spreadsheet, else PDF."""
     scope = _fix_scope()
     fixes = _refresh_fix_reviews(scope, db.get_fixes(scope, limit=1000))
-    # A PR closed without merging is a rejected fix, not evidence of one.
-    fixes = [f for f in fixes if f.get("pr_url") and f.get("pr_state") != "closed"]
+    fixes = [f for f in fixes if f.get("pr_url") and (f.get("pr_state") != "closed" or f.get("approval_status") == "rejected")]
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     data = report_pdf_service.evidence_pack_data(fixes, g.current_user_id, all_users=scope is None)  # adds found / WCAG to each fix
     if request.args.get("format") == "csv":
@@ -1883,7 +1884,8 @@ def api_fix_review(fix_id):
     PR open with the comment and sends the fix back to its developer. Every fix
     on the same PR (a batch fix) gets the same decision."""
     from backend.services import fix_notify
-    from backend.services.auto_fix_service import close_pull_request, comment_on_pull_request, merge_pull_request
+    from backend.services.auto_fix_service import (approve_pull_request, close_pull_request,
+                                                   comment_on_pull_request, merge_pull_request)
     if not _is_approver():
         return jsonify({"ok": False, "error": "Only an Approver can approve or reject fixes"}), 403
     body = request.get_json(silent=True) or {}
@@ -1901,15 +1903,27 @@ def api_fix_review(fix_id):
     if not fix["pr_url"] or fix["pr_state"] in ("merged", "closed"):
         return jsonify({"ok": False, "error": f"This fix has no open pull request ({fix['pr_state'] or 'none'})"}), 409
     m = _PR_NUMBER_RE.search(fix["pr_url"])
-    link = db.get_repo_link_for_url(fix["page_url"], fix["user_id"])
-    if not m or not link or not link.get("access_token"):
-        return jsonify({"ok": False, "error": "No connected repo with a token for this page — reconnect it in Connected Repos"}), 409
+    # Every decision acts on the PR as the Approver's OWN git account (their
+    # Connected Repos token) — never the developer's — so the approval review,
+    # merge, comment and close all show who really decided.
+    link = _approver_link(fix)
+    if not m or not link:
+        repo = fix["pr_url"][:m.start()] if m else "this repo"
+        return jsonify({"ok": False, "error": f"Connect {repo} under Connected Repos with your own access token first — "
+                                              "approvals and merges are made with the Approver's own account."}), 409
     provider = link.get("provider") or "github"
     me = db.get_user_by_id(g.current_user_id) or {}
     name = " ".join(x for x in (me.get("firstName"), me.get("lastName")) if x) or me.get("email")
+    git_approval = None
     if decision == "approve":
+        posted, why = approve_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider,
+                                           f"Approved in ADA Auto-Fix review by {name}" + (f": {comment}" if comment else ""))
+        git_approval = "posted" if posted else why
         if not merge_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider):
-            return jsonify({"ok": False, "error": "GitHub refused the merge (conflict, failing checks or branch protection) — nothing was recorded"}), 502
+            hint = (" The branch needs an approving review, and your account opened this PR — the developer must "
+                    "connect their own token so their PRs come from their account." if why == "own_pr" else "")
+            return jsonify({"ok": False, "error": "GitHub refused the merge (conflict, failing checks or branch protection) "
+                                                  f"— nothing was recorded.{hint}"}), 502
         status = "approved"
         db.review_fix(fix_id, g.current_user_id, status, comment, pr_state="merged", merged_by=name)
     elif decision == "changes":
@@ -1921,9 +1935,21 @@ def api_fix_review(fix_id):
         status = "rejected"
         closed = close_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider, comment)
         db.review_fix(fix_id, g.current_user_id, status, comment, pr_state="closed" if closed else None)
+    db.add_fix_review(fix_id, status, g.current_user_id, comment)  # full audit trail, not just the latest decision
     fix_notify.decision(fix, status, g.current_user_id, comment)
     updated = next((f for f in db.get_fixes(None, limit=1000) if f["id"] == fix_id), None)
-    return jsonify({"ok": True, "fix": updated})
+    return jsonify({"ok": True, "fix": updated, "git_approval": git_approval})
+
+
+def _approver_link(fix):
+    """The Approver's own repo connection for the repo this fix's PR is in, or None.
+    Own link first (get_repo_link_for_url prefers it); must have a token and
+    point at the same repo as the PR."""
+    link = db.get_repo_link_for_url(fix["page_url"], g.current_user_id)
+    if not link or not link.get("access_token"):
+        return None
+    base = link["repo_url"].strip().rstrip("/").removesuffix(".git").lower()
+    return link if (fix["pr_url"] or "").lower().startswith(base + "/") else None
 
 
 @app.route("/api/fixes/<int:fix_id>/resubmit", methods=["POST"])
@@ -1937,6 +1963,8 @@ def api_fix_resubmit(fix_id):
     if fix["approval_status"] != "changes_requested" or fix["pr_state"] in ("merged", "closed"):
         return jsonify({"ok": False, "error": "Only a fix with changes requested and an open pull request can be resubmitted"}), 409
     db.resubmit_fix(fix_id)
+    note = ((request.get_json(silent=True) or {}).get("comment") or "").strip()  # optional: what the developer changed
+    db.add_fix_review(fix_id, "resubmitted", g.current_user_id, note)
     fix_notify.resubmitted(fix, g.current_user_id)
     updated = next((f for f in db.get_fixes(_fix_scope(), limit=1000) if f["id"] == fix_id), None)
     return jsonify({"ok": True, "fix": updated})

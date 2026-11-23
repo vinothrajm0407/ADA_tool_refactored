@@ -94,3 +94,27 @@ def test_unmerged_fix_timeline_shows_pending_steps():
     assert fixes[0]["days_to_merge"] is None
     html = _build_evidence_pack_html(fixes, data["pages"], data["proofs"])
     assert "awaiting review" in html and "not yet" in html
+
+
+def test_pack_shows_every_decision_rejections_and_fix_at_the_source():
+    from backend.services.report_pdf_service import _audit_row, _timeline, _wcag_summary_section
+    base = {"id": 90, "rule_id": "button-name", "page_url": "https://s/", "status": "verified", "created_at": "2026-11-23T07:45:00Z",
+            "pr_url": "https://github.com/a/b/pull/7", "fixed_by": "Dev", "wcag": ["4.1.2"]}
+    reviews = [{"kind": "changes_requested", "by": "Vinoth", "comment": "need clear", "at": "2026-11-23T07:46:00Z"},
+               {"kind": "resubmitted", "by": "Dev", "comment": "label now Open menu", "at": "2026-11-23T07:50:00Z"},
+               {"kind": "approved", "by": "Vinoth", "comment": "good", "at": "2026-11-23T07:56:00Z"}]
+    merged = {**base, "pr_state": "merged", "approval_status": "approved", "approved_by": ["Vinoth"], "merged_at": "2026-11-23T07:57:00Z",
+              "reviews": reviews, "source_pages": 3, "source_pages_checked": 2, "source_pages_clean": 2}
+    html = _timeline(merged)
+    assert html.index("Changes requested") < html.index("Resubmitted") < html.index("Approved")
+    assert "need clear" in html and "label now Open menu" in html and "“good”" in html
+    assert "one change for 3 pages (2 of 2 re-checked pages clean)" in html
+    row = _audit_row(merged)
+    assert row[-2] == 3 and "Changes requested by Vinoth: need clear" in row[-1] and "Resubmitted by Dev" in row[-1]
+
+    rejected = {**base, "pr_state": "closed", "approval_status": "rejected",
+                "reviews": [{"kind": "rejected", "by": "Vinoth", "comment": "wrong label", "at": "2026-11-23T08:00:00Z"}]}
+    html = _timeline(rejected)
+    assert "Rejected" in html and "wrong label" in html and "Closed without merging" in html and "Merged" not in html
+    summary = _wcag_summary_section([rejected], [])
+    assert summary == "" or ">1<" not in summary   # a rejected fix is not counted as fixed

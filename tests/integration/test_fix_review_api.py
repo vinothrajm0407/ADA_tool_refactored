@@ -20,22 +20,47 @@ def test_developer_cannot_review(client, db_mock, authed_headers):
     db_mock.review_fix.assert_not_called()
 
 
-def test_approve_merges_pr_and_records_approver(client, db_mock, authed_headers):
+def test_approve_posts_git_review_and_merges_as_the_approver(client, db_mock, authed_headers):
+    from tests.conftest import TEST_USER_ID
     _approver(db_mock)
-    with patch(f"{SVC}.merge_pull_request", return_value=True) as merge:
+    with patch(f"{SVC}.approve_pull_request", return_value=(True, "")) as approve, \
+         patch(f"{SVC}.merge_pull_request", return_value=True) as merge:
         resp = client.post("/api/fixes/7/review", json={"decision": "approve", "comment": "LGTM"}, headers=authed_headers)
-    assert resp.status_code == 200 and resp.get_json()["fix"]["approval_status"] == "approved"
-    assert merge.call_args[0][:3] == ("https://github.com/acme/site", "ghp_x", 5)
-    db_mock.get_repo_link_for_url.assert_called_with("https://example.com/", 2)  # the developer's (shared) repo link
+    data = resp.get_json()
+    assert resp.status_code == 200 and data["fix"]["approval_status"] == "approved" and data["git_approval"] == "posted"
+    # the Approver's own connection (not the developer's, user 2) does both the review and the merge
+    db_mock.get_repo_link_for_url.assert_called_with("https://example.com/", TEST_USER_ID)
+    assert approve.call_args[0][:3] == merge.call_args[0][:3] == ("https://github.com/acme/site", "ghp_x", 5)
+    assert "LGTM" in approve.call_args[0][4]
     args, kwargs = db_mock.review_fix.call_args
     assert args[2:4] == ("approved", "LGTM") and kwargs["pr_state"] == "merged"
 
 
+def test_own_pr_still_merges_but_says_github_could_not_record_the_review(client, db_mock, authed_headers):
+    _approver(db_mock)
+    with patch(f"{SVC}.approve_pull_request", return_value=(False, "own_pr")), \
+         patch(f"{SVC}.merge_pull_request", return_value=True):
+        data = client.post("/api/fixes/7/review", json={"decision": "approve"}, headers=authed_headers).get_json()
+    assert data["ok"] and data["git_approval"] == "own_pr"
+
+
 def test_failed_merge_records_nothing(client, db_mock, authed_headers):
     _approver(db_mock)
-    with patch(f"{SVC}.merge_pull_request", return_value=False):
+    with patch(f"{SVC}.approve_pull_request", return_value=(False, "own_pr")), \
+         patch(f"{SVC}.merge_pull_request", return_value=False):
         resp = client.post("/api/fixes/7/review", json={"decision": "approve"}, headers=authed_headers)
-    assert resp.status_code == 502
+    assert resp.status_code == 502 and "connect their own token" in resp.get_json()["error"]
+    db_mock.review_fix.assert_not_called()
+
+
+def test_approver_needs_their_own_connection_to_that_repo(client, db_mock, authed_headers):
+    _approver(db_mock)
+    for link in (None, {**LINK, "access_token": ""}, {**LINK, "repo_url": "https://github.com/acme/other"}):
+        db_mock.get_repo_link_for_url.return_value = link
+        with patch(f"{SVC}.merge_pull_request") as merge:
+            resp = client.post("/api/fixes/7/review", json={"decision": "approve"}, headers=authed_headers)
+        assert resp.status_code == 409 and "https://github.com/acme/site" in resp.get_json()["error"]
+        merge.assert_not_called()
     db_mock.review_fix.assert_not_called()
 
 
@@ -110,3 +135,14 @@ def test_roles_are_approver_only_and_cannot_change_own(client, db_mock, authed_h
     assert client.put("/api/users/19/role", json={"role": "boss"}, headers=authed_headers).status_code == 400
     assert client.put("/api/users/19/role", json={"role": "approver"}, headers=authed_headers).status_code == 200
     db_mock.set_user_role_by_id.assert_called_once_with(19, "approver")
+
+
+def test_every_decision_and_resubmit_goes_into_the_history(client, db_mock, authed_headers):
+    from tests.conftest import TEST_USER_ID
+    _approver(db_mock)
+    with patch(f"{SVC}.comment_on_pull_request", return_value=True):
+        client.post("/api/fixes/7/review", json={"decision": "changes", "comment": "need clear"}, headers=authed_headers)
+    db_mock.add_fix_review.assert_called_with(7, "changes_requested", TEST_USER_ID, "need clear")
+    db_mock.get_fix.return_value = {**FIX, "user_id": TEST_USER_ID, "approval_status": "changes_requested"}
+    client.post("/api/fixes/7/resubmit", json={"comment": "label is now Open menu"}, headers=authed_headers)
+    db_mock.add_fix_review.assert_called_with(7, "resubmitted", TEST_USER_ID, "label is now Open menu")
