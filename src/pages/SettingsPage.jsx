@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Palette, ShieldCheck, Trash2, Mail, CheckCircle2, KeyRound, Copy } from 'lucide-react';
+import { User, Users, Palette, ShieldCheck, Trash2, Mail, CheckCircle2, KeyRound, Copy } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import PageHeader from '../components/ui/PageHeader';
 import Toggle from '../components/ui/Toggle';
@@ -10,7 +10,113 @@ const TABS = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'security', label: 'Security', icon: ShieldCheck },
   { id: 'api-keys', label: 'API keys', icon: KeyRound },
+  { id: 'team', label: 'Team & roles', icon: Users },
 ];
+
+// Approvers decide on every developer's Auto-Fix PRs (Fix History). Only an
+// Approver can change roles, and never their own (the backend enforces both).
+function TeamTab() {
+  const [state, setState] = useState({ loading: true });
+  const [query, setQuery] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+
+  async function load() {
+    try {
+      const res = await apiFetch('/api/users');
+      const data = await res.json();
+      setState(res.status === 403 ? { denied: true } : { users: data.users || [], me: data.me });
+    } catch { setState({ error: true }); }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function setRole(u, role) {
+    setBusyId(u.id); setError('');
+    try {
+      const res = await apiFetch(`/api/users/${u.id}/role`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Could not change the role');
+      await load();
+    } catch (e) { setError(e.message); } finally { setBusyId(null); }
+  }
+
+  const header = (
+    <div>
+      <h2 className="font-heading font-semibold text-lg text-ink">Team & roles</h2>
+      <p className="text-sm text-body mt-0.5">
+        <b className="text-ink">Developers</b> run Auto Fix; their pull requests wait for approval.{' '}
+        <b className="text-ink">Approvers</b> see everyone’s fixes and approve, request changes or reject them — and can run Auto Fix too.
+      </p>
+    </div>
+  );
+  if (state.loading) return <div className="card p-6 space-y-4">{header}<p className="text-sm text-body">Loading…</p></div>;
+  if (state.denied) {
+    return (
+      <div className="card p-6 space-y-4">{header}
+        <p className="text-sm text-body">You are a <b className="text-ink">Developer</b>. Only an Approver can change roles.</p>
+      </div>
+    );
+  }
+  if (state.error) return <div className="card p-6 space-y-4">{header}<p className="text-sm text-coral">Could not load the team.</p></div>;
+
+  const needle = query.trim().toLowerCase();
+  const users = state.users.filter(u => !needle || `${u.name} ${u.email}`.toLowerCase().includes(needle));
+  const approvers = state.users.filter(u => u.role === 'approver').length;
+  return (
+    <div className="card p-6 space-y-4">
+      {header}
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <label className="flex-1 min-w-[200px]">
+          <span className="block text-xs font-semibold text-body mb-1.5">Search people</span>
+          <input type="search" className="input-base" value={query} onChange={e => setQuery(e.target.value)} placeholder="Name or email" />
+        </label>
+        <p className="text-xs text-body">{state.users.length} people · {approvers} Approver{approvers !== 1 ? 's' : ''}</p>
+      </div>
+      {error && <p className="text-sm text-coral" role="alert">{error}</p>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-body">
+              <th scope="col" className="py-2 pr-3">Person</th>
+              <th scope="col" className="py-2 pr-3">Role</th>
+              <th scope="col" className="py-2"><span className="sr-only">Change role</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => {
+              const isMe = u.id === state.me;
+              const approver = u.role === 'approver';
+              return (
+                <tr key={u.id} className="border-t border-gray-100">
+                  <td className="py-2.5 pr-3">
+                    <p className="font-medium text-ink">{u.name}{isMe && <span className="text-body font-normal"> (you)</span>}</p>
+                    <p className="text-xs text-body">{u.email}{!u.verified && ' · email not verified'}</p>
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full ${approver ? 'text-teal bg-teal-50' : 'text-body bg-gray-100'}`}>
+                      {approver ? 'Approver' : 'Developer'}
+                    </span>
+                  </td>
+                  <td className="py-2.5 text-right">
+                    {isMe ? <span className="text-xs text-body">Another Approver can change your role</span> : (
+                      <button type="button" className="btn-secondary text-xs" disabled={busyId === u.id}
+                        onClick={() => setRole(u, approver ? 'developer' : 'approver')}>
+                        {busyId === u.id ? 'Saving…' : approver ? 'Make Developer' : 'Make Approver'}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {!users.length && <tr><td colSpan={3} className="py-4 text-center text-body">Nobody matches “{query}”.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 const shortDate = (value) => (value ? new Date(value).toLocaleDateString() : 'Never');
 
@@ -333,6 +439,7 @@ export default function SettingsPage() {
             )}
             {activeTab === 'security' && <SecurityTab user={user} />}
             {activeTab === 'api-keys' && <ApiKeysTab />}
+            {activeTab === 'team' && <TeamTab />}
           </div>
         </div>
 

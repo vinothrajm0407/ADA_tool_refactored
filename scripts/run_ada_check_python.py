@@ -73,6 +73,24 @@ def _remove_best_practice_rules(data: dict) -> dict:
     return data
 
 
+def count_needs_review_as_violations(data: dict) -> dict:
+    """axe's "incomplete" (it couldn't decide, e.g. text over an image for
+    color-contrast) is reported as a violation: no manual-review step here.
+    A rule in both lists keeps one entry with all its elements."""
+    if not isinstance(data, dict):
+        return data
+    violations = data.get("violations") or []
+    by_id = {r.get("id"): r for r in violations}
+    for rule in data.get("incomplete") or []:
+        if rule.get("id") in by_id:
+            by_id[rule["id"]]["nodes"] = (by_id[rule["id"]].get("nodes") or []) + (rule.get("nodes") or [])
+        else:
+            violations.append(rule)
+            by_id[rule.get("id")] = rule
+    data["violations"], data["incomplete"] = violations, []
+    return data
+
+
 def scanner_user_agent(browser, headless: bool = True) -> str:
     """The browser's normal user agent (headless or not) plus an identifying tag
     (Config.SCANNER_UA_TOKEN). Sites render as usual, and site owners can see —
@@ -415,6 +433,7 @@ def run_axe_playwright(url: str, include_best_practices: bool = False, assisted:
         data = results.response if hasattr(results, "response") and results.response else {}
         if not include_best_practices:
             data = _remove_best_practice_rules(data)
+        data = count_needs_review_as_violations(data)
         violations = data.get("violations") or []
         for i, violation in enumerate(violations):
             if screenshots_disabled or i >= MAX_VIOLATION_SCREENSHOTS:

@@ -17,7 +17,7 @@ from config import Config
 from services import db
 from services.crawler import get_root_domain, normalize_url, extract_internal_links
 from scripts.run_ada_check_python import (
-    BROWSER_ARGS, bot_challenge_reason, can_ask_person, page_title_and_html, scanner_user_agent, settle,
+    BROWSER_ARGS, bot_challenge_reason, can_ask_person, count_needs_review_as_violations, page_title_and_html, scanner_user_agent, settle,
     wait_for_person_to_verify, watch_requests,
 )
 
@@ -895,7 +895,7 @@ def _scan_one_page(c: _CrawlState, pw_page, axe, PWTimeout, url, parent_url, dep
         except TypeError:
             results = axe.run(pw_page)
 
-        axe_data = (
+        axe_data = count_needs_review_as_violations(
             results.response
             if hasattr(results, "response") and results.response
             else {}

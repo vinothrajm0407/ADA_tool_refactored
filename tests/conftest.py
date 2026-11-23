@@ -79,6 +79,7 @@ def build_db_mock() -> MagicMock:
     m.init_error.return_value     = ""
     m.get_user_by_email.return_value = FAKE_USER
     m.get_user_by_id.return_value    = FAKE_USER
+    m.get_user_role.return_value     = "developer"
     m.get_user_by_verify_token.return_value = None
     m.create_user.return_value    = FAKE_USER
     m.get_scan_history.return_value   = []
@@ -158,6 +159,16 @@ def clear_rate_limit():
     with _app_module._rate_limit_lock:
         _app_module._rate_limit_store.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def no_fix_notifications(monkeypatch):
+    """Approval notifications run on a background thread and use real SMTP/Slack;
+    tests record the calls instead (fix_notify_calls) so nothing is ever sent."""
+    from backend.services import fix_notify
+    calls = []
+    monkeypatch.setattr(fix_notify, "_bg", lambda fn, *args: calls.append((fn.__name__.lstrip("_"), args)))
+    return calls
 
 
 # ── Convenience fixtures ──────────────────────────────────────────────────────

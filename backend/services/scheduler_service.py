@@ -48,6 +48,12 @@ def _tick() -> None:
     from services import db
     from backend.services.crawl_service import create_crawl_job
 
+    try:
+        from backend.services.fix_notify import maybe_send_digest
+        maybe_send_digest()  # daily "fixes waiting for approval" reminder to Approvers
+    except Exception:
+        logger.exception("Scheduler: approval digest failed")
+
     due = db.get_due_schedules()
     if not due:
         return

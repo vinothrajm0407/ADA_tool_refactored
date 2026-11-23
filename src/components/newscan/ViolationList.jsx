@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Shield, Users, Clock, ExternalLink, Sparkles, Wand2, Loader2, CheckCircle2, XCircle, GitBranch } from 'lucide-react';
+import { Shield, Users, Clock, ExternalLink, Sparkles, Wand2, Loader2, CheckCircle2, XCircle, GitBranch, Info } from 'lucide-react';
 import {
   getRuleFixTips, getRuleWhyMatters,
   getRuleEffort, getRuleImpactedUsers, getRuleCodePair, getRuleValidationSteps,
@@ -7,9 +7,11 @@ import {
 import { nsWcagTagToMeta, truncateHtml, P4_EFFORT, nsAutoFixKey } from './scanUtils';
 import ScreenshotModal from './ScreenshotModal';
 import { apiFetch } from '../../utils/api';
+import FixProof from '../ui/FixProof';
+import { useAutoFixSupport, autoFixUnavailableReason } from '../../utils/autoFixSupport';
 import { useApp } from '../../context/AppContext';
 
-const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch', 'Open PR', 'Auto-merge'];
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Proof', 'Push branch', 'Open PR', 'Auto-merge'];
 
 // Self-contained Auto Fix button + progress + result — each instance owns its
 // own run, so a per-violation control and several per-element controls on the
@@ -22,6 +24,7 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
   const fixKey = nsAutoFixKey(rule.id, node?.html);
   const session = scanSessions.find(s => s.id === sessionId);
   const fix = session?.autoFixState?.[fixKey] || { status: 'idle', result: null };
+  const unavailable = autoFixUnavailableReason(useAutoFixSupport(), rule.id, Boolean(node?.html));
 
   if (!pageUrl) return null;
 
@@ -48,6 +51,13 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
   // state as the full control below, so opening the card afterward shows the
   // same in-progress or finished result rather than starting over.
   if (compact) {
+    if (fix.status === 'idle' && unavailable) {
+      return (
+        <span title={unavailable} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium text-gray-500 bg-gray-100 flex-shrink-0">
+          <Info size={11} aria-hidden="true" /> Manual fix
+        </span>
+      );
+    }
     if (fix.status === 'idle') {
       return (
         <button type="button" onClick={(e) => { e.stopPropagation(); handleAutoFix(); }}
@@ -76,6 +86,14 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-coral flex-shrink-0">
         <XCircle size={13} /> Failed
       </span>
+    );
+  }
+
+  if (fix.status === 'idle' && unavailable) {
+    return (
+      <p className="m-0 inline-flex items-start gap-1.5 text-[11.5px] text-body bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+        <Info size={13} className="text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" /> {unavailable}
+      </p>
     );
   }
 
@@ -145,6 +163,7 @@ function AutoFixControl({ pageUrl, rule, node, sessionId, compact }) {
           <GitBranch size={12} /> View branch
         </a>
       )}
+      {result.status === 'verified' && <FixProof proof={result.proof} />}
       {result.status !== 'verified' && result.error && (
         <p className="text-[11.5px] text-coral m-0">{result.error}</p>
       )}
@@ -167,6 +186,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   const session = scanSessions.find(s => s.id === sessionId);
   const fixAll = session?.autoFixState?.[fixAllKey] || { status: 'idle', results: [] };
   const [expandedIdx, setExpandedIdx] = useState(null);
+  const unavailable = autoFixUnavailableReason(useAutoFixSupport(), rule.id, nodes.some(n => n?.html));
 
   if (!pageUrl || nodes.length < 2) return null;
 
@@ -210,7 +230,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
     const shared = { steps: batch.steps, pr_url: batch.pr_url, branch_url: batch.branch_url, merged: batch.merged };
     const next = nodes.map((_, i) => {
       const r = (batch.results || [])[i] || { status: 'failed', error: batch.error || 'Auto-Fix failed' };
-      if (r.status === 'patched') return { ...shared, status: 'verified', file_path: r.file_path, line_no: r.line_no };
+      if (r.status === 'patched') return { ...shared, status: 'verified', file_path: r.file_path, line_no: r.line_no, proof: r.proof };
       if (r.status === 'already_fixed') return { ...shared, status: 'already_fixed', file_path: r.file_path, line_no: r.line_no };
       return { status: 'failed', error: r.error };
     });
@@ -221,6 +241,13 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
   // branch above for why this shares state with the full control instead of
   // tracking its own.
   if (compact) {
+    if (fixAll.status === 'idle' && unavailable) {
+      return (
+        <span title={unavailable} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium text-gray-500 bg-gray-100 flex-shrink-0">
+          <Info size={11} aria-hidden="true" /> Manual fix
+        </span>
+      );
+    }
     if (fixAll.status === 'idle') {
       return (
         <button type="button" onClick={(e) => { e.stopPropagation(); handleFixAll(); }}
@@ -239,6 +266,14 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-sage flex-shrink-0">
         <CheckCircle2 size={13} /> {verifiedCount}/{nodes.length} fixed
       </span>
+    );
+  }
+
+  if (fixAll.status === 'idle' && unavailable) {
+    return (
+      <p className="m-0 inline-flex items-start gap-1.5 text-[11.5px] text-body bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+        <Info size={13} className="text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" /> {unavailable}
+      </p>
     );
   }
 
@@ -287,11 +322,66 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
           );
         })}
       </div>
+      {fixAll.status === 'done' && (() => {
+        // Summary for the whole batch — same PR/steps a single-element fix shows,
+        // without having to click an element first. Retried elements may have
+        // their own PR, hence the de-dupe.
+        const ok = results.filter(r => r.status === 'verified' || r.status === 'already_fixed');
+        const prs = [...new Set(ok.map(r => r.pr_url).filter(Boolean))];
+        const branches = prs.length ? [] : [...new Set(ok.map(r => r.branch_url).filter(Boolean))];
+        const steps = (ok.find(r => (r.steps || []).length) || {}).steps || [];
+        const proofIdx = results.map((r, i) => (r.proof ? `#${i + 1}` : null)).filter(Boolean);
+        const proofCount = proofIdx.length;
+        if (!ok.length) return null;
+        return (
+          <div className="flex flex-col gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2.5">
+            <p className="text-[11.5px] font-semibold text-ink m-0">
+              {ok.some(r => r.merged) ? 'Fix Verified & Merged' : 'Fix Verified'} — {ok.length} element{ok.length === 1 ? '' : 's'} in {prs.length > 1 ? `${prs.length} pull requests` : 'one pull request'}
+            </p>
+            {steps.length > 0 && (
+              <div className="flex flex-col gap-1">
+                {steps.map((s, j) => (
+                  <div key={j} className="flex items-center gap-1.5 text-[11px]">
+                    {s.ok ? <CheckCircle2 size={10} className="text-sage flex-shrink-0" /> : <XCircle size={10} className="text-coral flex-shrink-0" />}
+                    <span className="text-body">{s.name}</span>
+                    {s.detail && <span className="text-gray-400 truncate">— {s.detail}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {prs.map(url => (
+              <a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal hover:underline w-fit">
+                <GitBranch size={11} /> {ok.some(r => r.merged && r.pr_url === url) ? 'View merged Pull Request' : 'View Pull Request'}
+              </a>
+            ))}
+            {branches.map(url => (
+              <a key={url} href={url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-[11.5px] font-medium text-teal hover:underline w-fit">
+                <GitBranch size={11} /> View branch
+              </a>
+            ))}
+            {!prs.length && !branches.length && (
+              <p className="text-[11px] text-body m-0">No new pull request — these elements were already fixed by an open PR or by the source.</p>
+            )}
+            <p className="text-[11px] text-gray-400 m-0">
+              {proofCount
+                ? `Before/after screenshots + screen-reader proof: click ${proofIdx.join(', ')} above.`
+                : 'Click an element # above for its file and line.'}
+            </p>
+          </div>
+        );
+      })()}
       {expandedIdx !== null && results[expandedIdx] && (
         <div className="flex flex-col gap-1.5 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2.5">
           <p className="text-[11.5px] font-semibold text-ink m-0">
             #{expandedIdx + 1} — {results[expandedIdx].status === 'already_fixed' ? 'Already Fixed' : results[expandedIdx].status === 'verified' ? (results[expandedIdx].merged ? 'Fix Verified & Merged' : 'Fix Verified') : 'Failed'}
           </p>
+          {results[expandedIdx].file_path && (
+            <p className="text-[11px] text-body m-0">
+              File: <code className="font-mono bg-white px-1 rounded">{results[expandedIdx].file_path}{results[expandedIdx].line_no ? `:${results[expandedIdx].line_no}` : ''}</code>
+            </p>
+          )}
           {(results[expandedIdx].steps || []).length > 0 && (
             <div className="flex flex-col gap-1">
               {results[expandedIdx].steps.map((s, j) => (
@@ -315,6 +405,7 @@ function FixAllControl({ pageUrl, rule, nodes, sessionId, compact }) {
               <GitBranch size={11} /> View branch
             </a>
           )}
+          {results[expandedIdx].status === 'verified' && <FixProof proof={results[expandedIdx].proof} />}
           {results[expandedIdx].status === 'failed' && results[expandedIdx].error && (
             <p className="text-[11px] text-coral m-0">{results[expandedIdx].error}</p>
           )}

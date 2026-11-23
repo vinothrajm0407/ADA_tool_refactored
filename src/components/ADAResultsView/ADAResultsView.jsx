@@ -1,6 +1,6 @@
 import { apiFetch } from '../../utils/api';
 import React, { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, Shield, Users, Clock, ExternalLink, Sparkles, BookOpen, Wand2, Loader2, CheckCircle2, XCircle, GitBranch } from 'lucide-react'
+import { ChevronRight, ChevronDown, Shield, Users, Clock, ExternalLink, Sparkles, BookOpen, Wand2, Loader2, CheckCircle2, XCircle, GitBranch, Info } from 'lucide-react'
 import { useApp } from '../../context/AppContext'
 import {
   getRuleFixTips, getRuleWhyMatters, splitFailureSummary,
@@ -8,10 +8,12 @@ import {
 } from '../../config/axeFixGuidance'
 import { formatDateTime } from '../../utils/format'
 import IncompleteList from '../newscan/IncompleteList'
+import FixProof from '../ui/FixProof'
+import { useAutoFixSupport, autoFixUnavailableReason } from '../../utils/autoFixSupport'
 
 const IMPACT_ORDER = ['critical', 'serious', 'moderate', 'minor']
 
-const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Push branch', 'Open PR', 'Auto-merge']
+const AUTO_FIX_STEP_NAMES = ['Locate source', 'Generate fix', 'Validate patch', 'Run tests', 'Build', 'Re-scan', 'Proof', 'Push branch', 'Open PR', 'Auto-merge']
 
 const WCAG_AA_CRITERIA = new Set([
   '1.2.4','1.2.5','1.3.4','1.3.5','1.4.3','1.4.4','1.4.5',
@@ -203,6 +205,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
   const whyMatters = getRuleWhyMatters(ruleId, rule.impact)
   const effortInfo = EFFORT_META[effort] || EFFORT_META.quick
   const canAutoFix = Boolean(pageUrl)
+  const unavailable = autoFixUnavailableReason(useAutoFixSupport(), ruleId, Boolean(rule.nodes?.[0]?.html))
 
   const toggleStep = (i) =>
     setCheckedSteps(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
@@ -360,7 +363,12 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
       {/* ── Auto Fix ── */}
       {canAutoFix && (
         <div className="px-4 py-3 border-b border-gray-100">
-          {autoFixState === 'idle' && (
+          {autoFixState === 'idle' && unavailable && (
+            <p className="m-0 inline-flex items-start gap-1.5 text-[11.5px] text-body bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+              <Info size={13} className="text-gray-400 flex-shrink-0 mt-0.5" aria-hidden="true" /> {unavailable}
+            </p>
+          )}
+          {autoFixState === 'idle' && !unavailable && (
             <button type="button" onClick={handleAutoFix}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold bg-teal text-white hover:bg-teal/90 transition-colors">
               <Wand2 size={13} /> Auto Fix
@@ -419,6 +427,7 @@ function RecommendedFixCard({ rule, wcagMeta, copied, copyText, violationKey, pa
                   <GitBranch size={12} /> View branch
                 </a>
               )}
+              {autoFixResult.status === 'verified' && <FixProof proof={autoFixResult.proof} />}
               {autoFixResult.status !== 'verified' && autoFixResult.error && (
                 <p className="text-[11.5px] text-coral m-0">{autoFixResult.error}</p>
               )}

@@ -316,6 +316,7 @@ def api_auth_login():
         "lastName": user["lastName"],
         "email": user["email"],
         "emailVerified": True,
+        "role": db.get_user_role(user["id"]),
     }})
 
 
@@ -340,6 +341,7 @@ def api_auth_verify_email():
         "lastName": user["lastName"],
         "email": user["email"],
         "emailVerified": True,
+        "role": db.get_user_role(user["id"]),
     }})
 
 
@@ -441,6 +443,7 @@ def api_auth_me():
         "firstName": user["firstName"],
         "lastName": user["lastName"],
         "email": user["email"],
+        "role": db.get_user_role(user["id"]),
     }})
 
 
@@ -1282,8 +1285,8 @@ def api_crawl_ai_summary(crawl_id):
 # for: a page scan, an assistive test, or a crawl.
 
 _FULL_REPORT_BUILDERS = {
-    "scan": lambda record_id: report_pdf_service.render_full_scan_report(int(record_id)),
-    "assistive": lambda record_id: report_pdf_service.render_full_assistive_report(int(record_id)),
+    "scan": lambda record_id: report_pdf_service.render_full_scan_report(int(record_id), g.current_user_id, _fix_scope() is None),
+    "assistive": lambda record_id: report_pdf_service.render_full_assistive_report(int(record_id), g.current_user_id, _fix_scope() is None),
     "crawl": lambda record_id: report_pdf_service.render_full_crawl_report(record_id),
 }
 
@@ -1329,6 +1332,7 @@ def api_full_report_email(kind, record_id):
         pdf_bytes=pdf_bytes,
         filename=filename,
     )
+    db.log_report_email(g.current_user_id, to_email, kind, record_id, bool(sent))  # Activity History
     if not sent:
         return jsonify({"ok": False, "error": "Failed to send email. Check SMTP configuration."}), 502
     return jsonify({"ok": True})
@@ -1455,7 +1459,7 @@ def _open_fix(lookup, link):
         row = lookup(skip)
         if not row or row["pr_url"] in skip:
             return None
-        m = re.search(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$", row["pr_url"] or "")
+        m = _PR_NUMBER_RE.search(row["pr_url"] or "")
         if m and is_pull_request_open(link["repo_url"], link["access_token"], int(m.group(1)), link.get("provider") or "github"):
             return row
         skip.append(row["pr_url"])
@@ -1464,10 +1468,100 @@ def _open_fix(lookup, link):
 
 def _patch_dedup(link, page_url):
     """find_duplicate callback for the Auto-Fix pipelines: an identical patch
-    (file + before + after) that already has an open PR — e.g. five links all
-    styled by one CSS class."""
+    (file + before + after) that already has an open PR anywhere in this repo —
+    five links styled by one CSS class, or one header template fixed from a
+    different page. page_url is kept for callers; the match is repo-wide."""
     return lambda patch_signature: _open_fix(
-        lambda skip: db.get_open_fix_by_patch(g.current_user_id, page_url, patch_signature, skip), link)
+        lambda skip: db.get_open_fix_by_patch(g.current_user_id, link["repo_url"], patch_signature, skip), link)
+
+
+# ── Fix at the source ─────────────────────────────────────────────────────
+ROOT_CAUSE_VERIFY_PAGES = 8  # ponytail: other pages re-scanned per fix (~5 s each); raise for stronger proof
+
+
+def _crawl_root_causes(crawl_id):
+    from backend.services.root_causes import group_root_causes
+    return group_root_causes(db.get_crawl_page_payloads(crawl_id))
+
+
+@app.route("/api/crawl/<string:crawl_id>/root-causes", methods=["GET"])
+@require_auth
+def api_crawl_root_causes(crawl_id):
+    """Problems shared by several crawled pages, traced to one piece of markup —
+    one Auto Fix of that markup's source fixes every page. Each carries the
+    current fix (PR and approval) when there is one."""
+    if not db.is_ready():
+        return jsonify({"ok": False, "error": "Database not configured"}), 503
+    groups = _crawl_root_causes(crawl_id)
+    states = db.get_fix_states(_fix_scope(), [p["signature"] for grp in groups for p in grp["pages"]])
+    total_pages = len({u for u, _ in db.get_crawl_page_payloads(crawl_id)}) if groups else 0
+    out = []
+    for grp in groups:
+        fix = next((states[(grp["rule_id"], p["signature"])] for p in grp["pages"] if (grp["rule_id"], p["signature"]) in states), None)
+        out.append({k: v for k, v in grp.items() if k not in ("pages", "sample")} | {
+            "sample_page": grp["sample"]["page_url"], "pages": [p["url"] for p in grp["pages"][:50]], "fix": fix})
+    return jsonify({"ok": True, "root_causes": out, "scanned_pages": total_pages,
+                    "repo_connected": bool(groups) and bool(db.get_repo_link_for_url(groups[0]["sample"]["page_url"], g.current_user_id))})
+
+
+@app.route("/api/crawl/<string:crawl_id>/root-causes/<string:group_id>/fix", methods=["POST"])
+@require_auth
+def api_crawl_root_cause_fix(crawl_id, group_id):
+    """Auto-Fix one root cause: locate its markup's source once, patch it, build,
+    re-scan the sample page plus a spread of other affected pages, open one PR."""
+    from backend.services import fix_notify
+    from backend.services.auto_fix_service import run_auto_fix_batch
+    from backend.services.root_causes import rule_for_fix, verification_sample
+    group = next((g for g in _crawl_root_causes(crawl_id) if g["id"] == group_id), None)
+    if not group:
+        return jsonify({"ok": False, "error": "This root cause is no longer in the crawl results"}), 404
+    page_url = group["sample"]["page_url"]
+    link = db.get_repo_link_for_url(page_url, g.current_user_id)
+    if not link:
+        return jsonify({"ok": False, "error": "No repo connected for this site — connect one under Connected Repos"}), 404
+    states = db.get_fix_states(g.current_user_id, [p["signature"] for p in group["pages"]])
+    existing = next((states[(group["rule_id"], p["signature"])] for p in group["pages"]
+                     if (group["rule_id"], p["signature"]) in states), None)
+    if existing and existing.get("pr_url") and existing.get("pr_state") == "open" and _open_fix(
+            lambda skip: None if existing["pr_url"] in skip else existing, link):
+        return jsonify({"ok": True, "status": "verified", "duplicate": True, "pr_url": existing["pr_url"],
+                        "steps": [{"name": "Existing fix", "ok": True, "detail": "A PR for this root cause is already open"}]})
+
+    rule = rule_for_fix(group)
+    result = run_auto_fix_batch(
+        link, page_url, rule, [group["sample"]["node"]], find_duplicate=_patch_dedup(link, page_url),
+        root_cause={"key": group["html"], "page_count": group["page_count"],
+                    "pages": verification_sample(group, ROOT_CAUSE_VERIFY_PAGES)},
+    )
+    node_result = (result.get("results") or [{}])[0]
+    if not result.get("duplicate"):
+        checked = [r for r in result.get("pages_checked") or [] if r["fixed"] is not None]
+        proof = dict(node_result.get("proof") or {})
+        proof["root_cause"] = {"page_count": group["page_count"], "pages_checked": len(checked),
+                               "pages_clean": sum(1 for r in checked if r["fixed"]), "crawl_id": crawl_id}
+        sample_signature = next(p["signature"] for p in group["pages"] if p["url"] == page_url)
+        db.save_fix(
+            g.current_user_id, page_url, group["rule_id"], result.get("status", "failed"),
+            result.get("branch_url"), result.get("error") or node_result.get("error"), result.get("pr_url"),
+            result.get("merged", False), sample_signature, node_result.get("patch_signature"), proof,
+        )
+        if result.get("pr_url") and not result.get("merged"):
+            fix_notify.new_fix(g.current_user_id, page_url, group["rule_id"], 1, result["pr_url"])
+    return jsonify({"ok": True, "page_count": group["page_count"], **result})
+
+
+@app.route("/api/auto-fix/support", methods=["GET"])
+@require_auth
+def api_auto_fix_support():
+    """Which rules Auto-Fix can handle, so the UI can say so before a run:
+    rules with a built-in fix always; every rule (and page-wide fixes) only
+    when the AI key is configured."""
+    from backend.services.auto_fix_service import RULES_WITH_FALLBACK
+    return jsonify({"ok": True, "ai": bool(Config.GEMINI_API_KEY), "rules": sorted(RULES_WITH_FALLBACK)})
+
+
+def _is_approver():
+    return db.get_user_role(g.current_user_id) == "approver"
 
 
 @app.route("/api/auto-fix", methods=["POST"])
@@ -1511,8 +1605,11 @@ def api_auto_fix():
         db.save_fix(
             g.current_user_id, page_url, rule.get("id", ""), result.get("status", "failed"),
             result.get("branch_url"), result.get("error"), result.get("pr_url"),
-            result.get("merged", False), node_signature, result.get("patch_signature"),
+            result.get("merged", False), node_signature, result.get("patch_signature"), result.get("proof"),
         )
+        if result.get("pr_url") and not result.get("merged"):
+            from backend.services import fix_notify
+            fix_notify.new_fix(g.current_user_id, page_url, rule.get("id", ""), 1, result["pr_url"])
     return jsonify({"ok": True, **result})
 
 
@@ -1582,18 +1679,214 @@ def api_auto_fix_batch():
             node_result.get("error"),
             result.get("pr_url") if was_patched else None,
             result.get("merged", False) if was_patched else False,
-            node_signature, node_result.get("patch_signature"),
+            node_signature, node_result.get("patch_signature"), node_result.get("proof"),
         )
 
+    patched = sum(1 for r in node_results if r.get("status") == "patched")
+    if result.get("pr_url") and not result.get("merged") and not result.get("duplicate") and patched:
+        from backend.services import fix_notify
+        fix_notify.new_fix(g.current_user_id, page_url, rule_id, patched, result["pr_url"])
     return jsonify({"ok": True, **result})
+
+
+_PR_NUMBER_RE = re.compile(r"/(?:pull|merge_requests|pull-requests|pullrequest)/(\d+)$")
+
+
+def _fix_scope():
+    """Whose fixes this user sees: an Approver reviews everyone's (None),
+    a developer only their own."""
+    return None if _is_approver() else g.current_user_id
+
+
+def _refresh_fix_reviews(scope, fixes):
+    """Ask the git provider who approved / merged each still-open PR and store
+    it (compliance audit trail). Merged and closed PRs never change, so they
+    are skipped. Returns the fixes list re-read from the DB."""
+    from concurrent.futures import ThreadPoolExecutor
+    from backend.services.auto_fix_service import get_pull_request_review
+    todo = [f for f in fixes if f.get("pr_url") and f.get("pr_state") not in ("merged", "closed")]
+    links = {}
+
+    def one(fix):
+        m = _PR_NUMBER_RE.search(fix["pr_url"])
+        link = links.get(fix["page_url"]) or db.get_repo_link_for_url(fix["page_url"], fix.get("user_id") or g.current_user_id)
+        if not m or not link or not link.get("access_token"):
+            return
+        links[fix["page_url"]] = link
+        review = get_pull_request_review(link["repo_url"], link["access_token"], int(m.group(1)),
+                                         link.get("provider") or "github")
+        if review:
+            db.update_fix_review(scope, fix["id"], review)
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(one, todo))
+    return db.get_fixes(scope, limit=len(fixes) or 50) if todo else fixes
 
 
 @app.route("/api/fixes", methods=["GET"])
 @require_auth
 def api_fixes_list():
     limit = request.args.get("limit", type=int) or 50
-    fixes = db.get_fixes(g.current_user_id, limit=limit)
-    return jsonify({"ok": True, "fixes": fixes})
+    scope = _fix_scope()
+    fixes = db.get_fixes(scope, limit=limit)
+    if request.args.get("refresh"):
+        fixes = _refresh_fix_reviews(scope, fixes)
+    return jsonify({"ok": True, "fixes": fixes, "role": "approver" if scope is None else "developer",
+                    "me": g.current_user_id})
+
+
+@app.route("/api/activity", methods=["GET"])
+@require_auth
+def api_activity():
+    """Activity History: every scan, crawl, test, fix, PR review, alert, report
+    and setup change as one timeline. Filters: kind, q (text), from / to
+    (YYYY-MM-DD). ?format=csv or ?format=pdf to export the filtered list."""
+    a = request.args
+    events = db.get_activity(g.current_user_id, limit=min(a.get("limit", type=int) or 2000, 5000),
+                             all_fixes=_fix_scope() is None)
+    kinds = {k for k in (a.get("kind") or "").split(",") if k}
+    q = (a.get("q") or "").strip().lower()
+    start, end = a.get("from") or "", a.get("to") or ""
+    events = [e for e in events
+              if (not kinds or e["kind"] in kinds)
+              and (not start or e["at"][:10] >= start) and (not end or e["at"][:10] <= end)
+              and (not q or q in " ".join(str(e[k] or "") for k in ("action", "target", "result", "by", "ref")).lower())]
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if a.get("format") == "csv":
+        return Response(report_pdf_service.activity_csv(events), mimetype="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="activity-history-{stamp}.csv"'})
+    if a.get("format") == "pdf":
+        pdf = report_pdf_service.render_activity_report(events, {"kind": sorted(kinds), "q": q, "from": start, "to": end})
+        if not pdf:
+            return jsonify({"ok": False, "error": "Could not build the activity report"}), 500
+        return Response(pdf, mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="activity-history-{stamp}.pdf"'})
+    return jsonify({"ok": True, "events": events})
+
+
+@app.route("/api/compliance/evidence-pack", methods=["GET"])
+@require_auth
+def api_evidence_pack():
+    """Compliance evidence pack: audit trail of every fix that opened a PR
+    (issue -> fix -> approver -> date), excluding PRs closed unmerged. ?format=csv for a spreadsheet, else PDF."""
+    scope = _fix_scope()
+    fixes = _refresh_fix_reviews(scope, db.get_fixes(scope, limit=1000))
+    # A PR closed without merging is a rejected fix, not evidence of one.
+    fixes = [f for f in fixes if f.get("pr_url") and f.get("pr_state") != "closed"]
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    data = report_pdf_service.evidence_pack_data(fixes, g.current_user_id, all_users=scope is None)  # adds found / WCAG to each fix
+    if request.args.get("format") == "csv":
+        return Response(report_pdf_service.audit_trail_csv(fixes), mimetype="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="audit-trail-{stamp}.csv"'})
+    pdf = report_pdf_service.render_evidence_pack(fixes, data)
+    if not pdf:
+        return jsonify({"ok": False, "error": "Could not build the evidence pack"}), 500
+    return Response(pdf, mimetype="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="evidence-pack-{stamp}.pdf"'})
+
+
+@app.route("/api/fixes/<int:fix_id>/review", methods=["POST"])
+@require_auth
+def api_fix_review(fix_id):
+    """Approver decision on a fix: {"decision": "approve"|"reject"|"changes", "comment": "..."}.
+    Approve merges the PR; reject closes it with the comment; changes leaves the
+    PR open with the comment and sends the fix back to its developer. Every fix
+    on the same PR (a batch fix) gets the same decision."""
+    from backend.services import fix_notify
+    from backend.services.auto_fix_service import close_pull_request, comment_on_pull_request, merge_pull_request
+    if not _is_approver():
+        return jsonify({"ok": False, "error": "Only an Approver can approve or reject fixes"}), 403
+    body = request.get_json(silent=True) or {}
+    decision = body.get("decision")
+    comment = (body.get("comment") or "").strip()
+    if decision not in ("approve", "reject", "changes"):
+        return jsonify({"ok": False, "error": "decision must be approve, reject or changes"}), 400
+    if decision == "reject" and not comment:
+        return jsonify({"ok": False, "error": "Give a reason when rejecting a fix"}), 400
+    if decision == "changes" and not comment:
+        return jsonify({"ok": False, "error": "Say what needs to change"}), 400
+    fix = db.get_fix(fix_id)
+    if not fix:
+        return jsonify({"ok": False, "error": "Fix not found"}), 404
+    if not fix["pr_url"] or fix["pr_state"] in ("merged", "closed"):
+        return jsonify({"ok": False, "error": f"This fix has no open pull request ({fix['pr_state'] or 'none'})"}), 409
+    m = _PR_NUMBER_RE.search(fix["pr_url"])
+    link = db.get_repo_link_for_url(fix["page_url"], fix["user_id"])
+    if not m or not link or not link.get("access_token"):
+        return jsonify({"ok": False, "error": "No connected repo with a token for this page — reconnect it in Connected Repos"}), 409
+    provider = link.get("provider") or "github"
+    me = db.get_user_by_id(g.current_user_id) or {}
+    name = " ".join(x for x in (me.get("firstName"), me.get("lastName")) if x) or me.get("email")
+    if decision == "approve":
+        if not merge_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider):
+            return jsonify({"ok": False, "error": "GitHub refused the merge (conflict, failing checks or branch protection) — nothing was recorded"}), 502
+        status = "approved"
+        db.review_fix(fix_id, g.current_user_id, status, comment, pr_state="merged", merged_by=name)
+    elif decision == "changes":
+        status = "changes_requested"
+        comment_on_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider,
+                                f"Changes requested in ADA Auto-Fix review by {name}: {comment}")
+        db.review_fix(fix_id, g.current_user_id, status, comment)
+    else:
+        status = "rejected"
+        closed = close_pull_request(link["repo_url"], link["access_token"], int(m.group(1)), provider, comment)
+        db.review_fix(fix_id, g.current_user_id, status, comment, pr_state="closed" if closed else None)
+    fix_notify.decision(fix, status, g.current_user_id, comment)
+    updated = next((f for f in db.get_fixes(None, limit=1000) if f["id"] == fix_id), None)
+    return jsonify({"ok": True, "fix": updated})
+
+
+@app.route("/api/fixes/<int:fix_id>/resubmit", methods=["POST"])
+@require_auth
+def api_fix_resubmit(fix_id):
+    """The developer updated the PR after "changes requested" — back to the Approver's queue."""
+    from backend.services import fix_notify
+    fix = db.get_fix(fix_id)
+    if not fix or (fix["user_id"] != g.current_user_id and not _is_approver()):
+        return jsonify({"ok": False, "error": "Fix not found"}), 404
+    if fix["approval_status"] != "changes_requested" or fix["pr_state"] in ("merged", "closed"):
+        return jsonify({"ok": False, "error": "Only a fix with changes requested and an open pull request can be resubmitted"}), 409
+    db.resubmit_fix(fix_id)
+    fix_notify.resubmitted(fix, g.current_user_id)
+    updated = next((f for f in db.get_fixes(_fix_scope(), limit=1000) if f["id"] == fix_id), None)
+    return jsonify({"ok": True, "fix": updated})
+
+
+@app.route("/api/users", methods=["GET"])
+@require_auth
+def api_users_list():
+    """Team & roles (Approver only): every account and whether it is an Approver."""
+    if not _is_approver():
+        return jsonify({"ok": False, "error": "Only an Approver can manage roles"}), 403
+    return jsonify({"ok": True, "users": db.list_users(), "me": g.current_user_id})
+
+
+@app.route("/api/users/<int:user_id>/role", methods=["PUT"])
+@require_auth
+def api_user_role(user_id):
+    """{"role": "approver"|"developer"}. An Approver can't change their own role,
+    so the team can never be left without one by accident."""
+    if not _is_approver():
+        return jsonify({"ok": False, "error": "Only an Approver can manage roles"}), 403
+    role = (request.get_json(silent=True) or {}).get("role")
+    if role not in ("approver", "developer"):
+        return jsonify({"ok": False, "error": "role must be approver or developer"}), 400
+    if user_id == g.current_user_id:
+        return jsonify({"ok": False, "error": "You can't change your own role — ask another Approver"}), 409
+    if not db.set_user_role_by_id(user_id, role):
+        return jsonify({"ok": False, "error": "User not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/fixes/<int:fix_id>/proof", methods=["GET"])
+@require_auth
+def api_fix_proof(fix_id):
+    """Before/after screenshots + screen-reader text for one fix (Fix History)."""
+    proofs = db.get_fix_proofs(_fix_scope(), fix_id=fix_id)
+    if not proofs:
+        return jsonify({"ok": False, "error": "No proof recorded for this fix"}), 404
+    return jsonify({"ok": True, "proof": proofs[0]})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
