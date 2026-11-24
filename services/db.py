@@ -3952,10 +3952,14 @@ def get_open_fix(user_id: int, page_url: str, rule_id: str, node_signature: str 
         cur.execute("""
             SELECT TOP (1) PrUrl, BranchUrl
             FROM dbo.Fix
-            WHERE UserId = ? AND PageUrl = ? AND RuleId = ? AND NodeSignature = ?
+            WHERE UserId = ? AND PageUrl = ? AND RuleId = ?
+                AND (NodeSignature = ? OR Proof LIKE ?)
                 AND Status IN ('verified', 'partial') AND Merged = 0 AND PrUrl IS NOT NULL""" + skip_sql + """
             ORDER BY CreatedAt DESC
-        """, user_id, page_url, rule_id, node_signature, *skip_params)
+        """, user_id, page_url, rule_id, node_signature,
+            # a page-wide Fix all saves one row per rule; every element it fixed
+            # is listed in Proof.page_fix.signatures (hex, so LIKE is exact enough)
+            f'%"{node_signature}"%' if node_signature else "", *skip_params)
         row = cur.fetchone()
     finally:
         conn.close()
@@ -3970,6 +3974,36 @@ def _repo_prefix(repo_url: str) -> str:
     if base.endswith(".git"):
         base = base[:-4]
     return base.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]") + "/%"
+
+
+def get_page_fixes(user_id: int | None, page_urls: list[str]) -> dict:
+    """{page_url: {rule_id: latest fix}} — what Auto Fix already did on these
+    pages, so the crawl page can show it after a reload. user_id None = every
+    user's (Approver)."""
+    urls = [u for u in dict.fromkeys(page_urls) if u][:2000]
+    if not urls or not is_enabled() or _INIT_ERROR:
+        return {}
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(f"""
+            SELECT Id, PageUrl, RuleId, Status, PrUrl, PrState, Merged, ApprovalStatus, ErrorMessage, CreatedAt
+            FROM dbo.Fix
+            WHERE (? IS NULL OR UserId = ?) AND PageUrl IN ({",".join("?" * len(urls))})
+            ORDER BY CreatedAt ASC
+        """, user_id, user_id, *urls)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    out: dict = {}
+    for r in rows:  # oldest first, so the newest attempt per rule wins
+        out.setdefault(r.PageUrl, {})[r.RuleId] = {
+            "fix_id": r.Id, "status": r.Status, "pr_url": r.PrUrl, "error": r.ErrorMessage,
+            "approval_status": r.ApprovalStatus,
+            "pr_state": r.PrState or ("merged" if r.Merged else ("open" if r.PrUrl else None)),
+            "created_at": _ts(r.CreatedAt),
+        }
+    return out
 
 
 def get_fix_states(user_id: int | None, signatures: list[str]) -> dict:

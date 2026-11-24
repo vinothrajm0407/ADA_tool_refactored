@@ -1011,8 +1011,13 @@ def api_crawl_page_summary(crawl_id):
     from backend.services.auto_fix_service import RULES_WITH_FALLBACK
     from backend.services.crawl_service import page_summary
     ai = bool(Config.GEMINI_API_KEY)
+    payloads = db.get_crawl_page_payloads(crawl_id)
+    # what Auto Fix already did on each page — survives leaving the page, so
+    # Fix all isn't offered again for issues that already have an open PR
+    fixes = db.get_page_fixes(_fix_scope(), [u for u, _ in payloads])
     return jsonify({"ok": True, "pages": {
-        url: page_summary(payload, ai, RULES_WITH_FALLBACK) for url, payload in db.get_crawl_page_payloads(crawl_id)}})
+        url: page_summary(payload, ai, RULES_WITH_FALLBACK) | {"fixes": fixes.get(url, {})}
+        for url, payload in payloads}})
 
 
 @app.route("/api/crawl/<string:crawl_id>/pages/<int:page_id>/result", methods=["GET"])
@@ -1779,7 +1784,10 @@ def api_auto_fix_page():
                 continue  # every element was already fixed / covered by another PR
             first = patched[0] if patched else {}
             proof = dict(next((r["proof"] for r in patched if r.get("proof")), None) or {})
-            proof["page_fix"] = {"issues": len(items)}
+            # every element this PR fixed, so a second Fix all finds them all
+            # (get_open_fix), not just the first one saved as NodeSignature
+            proof["page_fix"] = {"issues": len(items), "signatures": [
+                sig(n) for n, r in zip(nodes, rows) if r.get("status") == "patched"]}
             failed = next((r.get("error") for r in rows if r.get("status") == "failed"), None)
             db.save_fix(
                 g.current_user_id, page_url, rule["id"],

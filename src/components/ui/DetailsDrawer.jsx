@@ -61,6 +61,23 @@ function mapViolationToCard(v) {
   };
 }
 
+// What Auto Fix already did for one issue (row.fixes[rule_id], from the DB).
+function FixStatusLine({ fix }) {
+  if (!fix) return null;
+  const pr = fix.pr_url && (
+    <a href={fix.pr_url} target="_blank" rel="noopener noreferrer" className="text-teal font-semibold hover:underline">
+      PR #{fix.pr_url.split('/').pop()} ↗
+    </a>
+  );
+  const [tone, text] =
+    fix.pr_state === 'merged' ? ['text-sage', <>Fixed — {pr} merged</>]
+    : fix.approval_status === 'rejected' ? ['text-coral', <>Fix {pr} rejected by the Approver</>]
+    : fix.pr_state === 'closed' ? ['text-body', <>Fix {pr} closed without merging</>]
+    : fix.pr_url ? ['text-ink', <>Fix in {pr} · waiting for an Approver</>]
+    : ['text-coral', <>Auto Fix failed{fix.error ? `: ${fix.error}` : ''}</>];
+  return <p className={`text-[11.5px] m-0 mt-1.5 px-1 ${tone}`}>{text}</p>;
+}
+
 export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
   const [copied, setCopied] = useState(false);
 
@@ -187,9 +204,12 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
           {/* Violation list */}
           {(violationCount ?? 0) > 0 && (
             <div>
-              <p className="text-xs font-body font-medium text-body uppercase tracking-wide mb-2">
-                Violations
-              </p>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-body font-medium text-body uppercase tracking-wide m-0">
+                  Violations
+                </p>
+                {row.fixSlot}
+              </div>
 
               {violationsLoading && (
                 <div className="flex items-center gap-2 text-body text-sm py-4 justify-center">
@@ -217,6 +237,7 @@ export default function DetailsDrawer({ row, onClose, onOpenFullReport }) {
                           severity={card.severity}
                           wcag={card.wcag}
                         />
+                        <FixStatusLine fix={row.fixes?.[v.id]} />
                         <NodeGroups nodes={v.nodes} />
                       </div>
                     );

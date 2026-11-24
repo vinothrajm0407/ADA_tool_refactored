@@ -34,7 +34,12 @@ def test_one_run_one_pr_and_a_row_per_issue(client, db_mock, authed_headers, no_
     rows = [c[0] for c in db_mock.save_fix.call_args_list]
     assert {r[2] for r in rows} == {"button-name", "image-alt"}
     assert all(r[6] == result["pr_url"] for r in rows)              # every row on the one PR
-    assert rows[0][10]["page_fix"] == {"issues": 2}
+    assert rows[0][10]["page_fix"]["issues"] == 2
+    # image-alt: 2 elements sent, 1 patched -> only the patched one is recorded,
+    # so a second Fix all finds it (and retries the failed one)
+    image_alt = next(r for r in rows if r[2] == "image-alt")
+    assert len(image_alt[10]["page_fix"]["signatures"]) == 1
+    assert image_alt[10]["page_fix"]["signatures"][0] == image_alt[8]
     assert [c[0] for c in no_fix_notifications] == ["new_fix"]      # one notification, not one per issue
 
 
