@@ -11,6 +11,8 @@ class Config:
     MSSQL_CONN_STR = os.getenv("MSSQL_CONN_STR", "")
     SCAN_QUEUE_NAME = os.getenv("SCAN_QUEUE_NAME", "ada_scan_queue")
     SCAN_WORKER_MAX_WORKERS = int(os.getenv("SCAN_WORKER_MAX_WORKERS", "2"))
+    # in-memory queue: crawls get their own slots, so a long crawl can't hold up single-page scans
+    CRAWL_WORKER_MAX_WORKERS = int(os.getenv("CRAWL_WORKER_MAX_WORKERS", "2"))
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     APP_ENV = os.getenv("APP_ENV", os.getenv("FLASK_ENV", "development"))
     IS_PRODUCTION = APP_ENV.lower() == "production"

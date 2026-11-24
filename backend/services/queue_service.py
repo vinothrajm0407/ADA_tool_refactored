@@ -40,6 +40,7 @@ class QueueService:
         self._client = None
         self._queue = None
         self._executor = None
+        self._crawl_executor = None
         self._inmemory_jobs: dict = {}
         self._inmemory_lock = threading.Lock()
         self._backend = None
@@ -74,12 +75,20 @@ class QueueService:
 
         if Config.ALLOW_LOCAL_QUEUE_FALLBACK:
             self._executor = ThreadPoolExecutor(max_workers=Config.SCAN_WORKER_MAX_WORKERS)
+            # Separate slots for crawls: two crawls of a big site (10,000 pages,
+            # hours) held both shared slots and every single-page scan — the app's
+            # and the PR check's — waited behind them (2026-11-24).
+            self._crawl_executor = ThreadPoolExecutor(max_workers=Config.CRAWL_WORKER_MAX_WORKERS)
             self._backend = "inmemory"
             self._connected = True
             logger.warning(
-                "Queue backend: in-memory fallback active (dev only) | workers=%d",
-                Config.SCAN_WORKER_MAX_WORKERS,
+                "Queue backend: in-memory fallback active (dev only) | scan workers=%d crawl workers=%d",
+                Config.SCAN_WORKER_MAX_WORKERS, Config.CRAWL_WORKER_MAX_WORKERS,
             )
+            # In-memory jobs die with the process: a crawl still 'running' in the
+            # DB was cut off by a restart and would show as running forever.
+            from services import db
+            db.reset_interrupted_crawls()
             return
 
         raise RuntimeError("REDIS_URL is required; in-memory fallback is disabled")
@@ -275,7 +284,7 @@ class QueueService:
 
         job_id = uuid.uuid4().hex
         created_at = datetime.utcnow().isoformat() + "Z"
-        fut = self._executor.submit(task_func, crawl_id=crawl_id, root_url=root_url, max_depth=max_depth, max_pages=max_pages, notify_email=notify_email, user_id=user_id, assisted=assisted, login=login, paired=paired, extra_urls=extra_urls)
+        fut = self._crawl_executor.submit(task_func, crawl_id=crawl_id, root_url=root_url, max_depth=max_depth, max_pages=max_pages, notify_email=notify_email, user_id=user_id, assisted=assisted, login=login, paired=paired, extra_urls=extra_urls)
         with self._inmemory_lock:
             self._inmemory_jobs[job_id] = {
                 "future": fut,
