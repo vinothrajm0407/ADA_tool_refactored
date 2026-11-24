@@ -110,7 +110,16 @@ jobs:
             https://staging.example.com/
             https://staging.example.com/login
           fail-on: serious   # critical | serious | moderate | minor | none
+          # Stop new problems: compare with the live site, fail only on issues this PR adds
+          baseline-urls: https://www.example.com
 ```
+
+**Stop new problems (`baseline-urls`).** A site with old issues would fail every pull request,
+so teams switch the check off. With `baseline-urls` each page is also scanned on the live site,
+and only issues the pull request *adds* (same rule on an element the live page doesn't have)
+fail the check. Old issues are listed under "already on the live site (not blocking)" and get
+fixed over time with Auto Fix. Give one site (the same paths are used) or one page per `urls`
+line. If the live page can't be scanned, every issue on that page counts, as without a baseline.
 
 The ADA server must be reachable from GitHub, and the pages from the ADA server. Create the
 API key in **Settings → API keys** (shown once) and save it as the repository secret `ADA_API_KEY`.

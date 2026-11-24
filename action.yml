@@ -1,5 +1,5 @@
 name: ADA Accessibility Check
-description: Scan pages with the ADA Tool, comment the issues on the pull request, and fail on serious ones.
+description: Scan pages with the ADA Tool, comment the issues on the pull request, and fail on serious ones — or only on new ones.
 branding:
   icon: eye
   color: blue
@@ -14,6 +14,12 @@ inputs:
   urls:
     description: Pages to scan, one per line (or comma separated). Must be reachable from the ADA server.
     required: true
+  baseline-urls:
+    description: >
+      Stop new problems: the same pages on the live site — one site (same paths are used) or one page per url.
+      Only issues the pull request adds then fail the check; ones already live are listed but don't block.
+      Leave empty to fail on every issue.
+    default: ""
   fail-on:
     description: Fail the check on violations at this impact or above — critical, serious, moderate, minor, or none.
     default: serious
@@ -33,6 +39,7 @@ runs:
         ADA_API_URL: ${{ inputs.api-url }}
         ADA_API_KEY: ${{ inputs.api-key }}
         ADA_URLS: ${{ inputs.urls }}
+        ADA_BASELINE_URLS: ${{ inputs.baseline-urls }}
         ADA_FAIL_ON: ${{ inputs.fail-on }}
         ADA_INCLUDE_BEST_PRACTICES: ${{ inputs.include-best-practices }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
