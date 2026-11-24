@@ -108,48 +108,77 @@ function StatTile({ value, label, sub }) {
   );
 }
 
-// Fix all from the "Fix these first" list: load the page's stored result,
-// send every auto-fixable issue to /api/auto-fix-page, ONE pull request.
-// Same selection as the Fix all bar on a single-page scan (FixPageBar).
-function PageFixButton({ crawlId, page, fixable, support }) {
-  const [state, setState] = useState({ status: 'idle' });
-  async function run() {
-    setState({ status: 'running' });
-    try {
-      const res = await apiFetch(`/api/crawl/${crawlId}/pages/${page.id}/result`);
-      const data = await res.json();
-      const withHtml = v => (v.nodes || []).filter(n => (n?.html || '').trim());
-      const todo = (data.result?.axeResult?.violations || [])
-        .filter(v => withHtml(v).length && !autoFixUnavailableReason(support, v.id, true))
-        .map(v => ({ rule: v, nodes: withHtml(v) }));
-      if (!todo.length) return setState({ status: 'failed', error: 'Nothing on this page can be auto-fixed' });
-      const fix = await (await apiFetch('/api/auto-fix-page', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ page_url: page.url, violations: todo }),
-      })).json();
-      setState(fix.pr_url ? { status: 'done', pr_url: fix.pr_url, duplicate: fix.duplicate }
-        : { status: 'failed', error: fix.error || 'Fix all failed' });
-    } catch {
-      setState({ status: 'failed', error: 'Could not reach the server' });
-    }
+// Page fixes still running, by page URL. Module-level, so leaving the crawl
+// page and coming back mid-run shows "Fixing…" instead of a fresh button
+// that would start a second run (and a second PR).
+const runningPageFixes = new Map();
+
+// An issue already being handled: PR open and not rejected, or merged.
+const coveredFix = (f) => f?.pr_url && f.approval_status !== 'rejected' && (f.pr_state === 'open' || f.pr_state === 'merged');
+
+// Fix all from the crawl page: load the page's stored result, send every
+// auto-fixable issue to /api/auto-fix-page, ONE pull request. Same selection
+// as the Fix all bar on a single-page scan (FixPageBar). What's already been
+// done comes from the DB (summary.fixes), so it survives a reload.
+function PageFixButton({ crawlId, page, summary, support, onDone }) {
+  const [running, setRunning] = useState(runningPageFixes.has(page.url));
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const p = runningPageFixes.get(page.url);
+    if (!p) return;
+    let live = true;
+    p.then((err) => { if (live) { setRunning(false); setError(err || ''); onDone?.(); } });
+    return () => { live = false; };
+  }, [page.url]);
+
+  const fixes = summary?.fixes || {};
+  // listed: PRs still waiting (merged ones count as handled, see Page Details)
+  const prs = [...new Set(Object.values(fixes).filter((f) => coveredFix(f) && f.pr_state === 'open').map((f) => f.pr_url))];
+  const remaining = Math.max(0, (summary?.fixable || 0) - Object.values(fixes).filter(coveredFix).length);
+
+  function run() {
+    const p = (async () => {
+      try {
+        const data = await (await apiFetch(`/api/crawl/${crawlId}/pages/${page.id}/result`)).json();
+        const withHtml = (v) => (v.nodes || []).filter((n) => (n?.html || '').trim());
+        const todo = (data.result?.axeResult?.violations || [])
+          .filter((v) => withHtml(v).length && !autoFixUnavailableReason(support, v.id, true) && !coveredFix(fixes[v.id]))
+          .map((v) => ({ rule: v, nodes: withHtml(v) }));
+        if (!todo.length) return 'Nothing left on this page that Auto Fix can take on';
+        const fix = await (await apiFetch('/api/auto-fix-page', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ page_url: page.url, violations: todo }),
+        })).json();
+        return fix.pr_url || fix.duplicate ? '' : (fix.error || 'Fix all failed');
+      } catch {
+        return 'Could not reach the server';
+      } finally {
+        runningPageFixes.delete(page.url);
+      }
+    })();
+    runningPageFixes.set(page.url, p);
+    setRunning(true);
+    setError('');
+    p.then((err) => { setRunning(false); setError(err); onDone?.(); });
   }
-  if (state.status === 'done') {
-    return (
-      <a href={state.pr_url} target="_blank" rel="noopener noreferrer"
-        className="text-[11.5px] font-semibold text-sage hover:underline inline-flex items-center gap-1 whitespace-nowrap">
-        <CheckCircle size={12} /> {state.duplicate ? 'PR already open' : 'PR opened'} <ExternalLink size={10} />
-      </a>
-    );
-  }
+
   return (
-    <span className="flex flex-col items-end gap-0.5">
-      <button type="button" onClick={run} disabled={state.status === 'running'}
-        title="Fix every auto-fixable issue on this page in one pull request (takes a few minutes)"
-        className="text-[11.5px] font-semibold text-teal border border-solid border-teal/40 rounded-md px-2 py-1 bg-white hover:bg-teal/5 inline-flex items-center gap-1 whitespace-nowrap disabled:opacity-60 cursor-pointer">
-        {state.status === 'running' ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-        {state.status === 'running' ? 'Fixing…' : `Fix ${fixable} — one PR`}
-      </button>
-      {state.status === 'failed' && <span role="alert" className="text-[10.5px] text-coral max-w-[200px] text-right">{state.error}</span>}
+    <span className="flex flex-col items-end gap-0.5 shrink-0">
+      {prs.map((u) => (
+        <a key={u} href={u} target="_blank" rel="noopener noreferrer" title="Waiting for an Approver in Fix History"
+          className="text-[11.5px] font-semibold text-sage hover:underline inline-flex items-center gap-1 whitespace-nowrap">
+          <CheckCircle size={12} /> PR #{u.split('/').pop()} open <ExternalLink size={10} />
+        </a>
+      ))}
+      {(running || remaining > 0) && (
+        <button type="button" onClick={run} disabled={running}
+          title="Fix every auto-fixable issue on this page in one pull request (takes a few minutes)"
+          className="text-[11.5px] font-semibold text-teal border border-solid border-teal/40 rounded-md px-2 py-1 bg-white hover:bg-teal/5 inline-flex items-center gap-1 whitespace-nowrap disabled:opacity-60 cursor-pointer">
+          {running ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+          {running ? 'Fixing… (a few minutes)' : `Fix ${remaining}${prs.length ? ' more' : ''} — one PR`}
+        </button>
+      )}
+      {error && <span role="alert" className="text-[10.5px] text-coral max-w-[220px] text-right">{error}</span>}
     </span>
   );
 }
@@ -278,7 +307,7 @@ function FilterPill({ label, active, onClick }) {
 }
 
 // Task 5: Top Violating Pages — clickable ranked table replacing the old bar chart
-function TopViolatingTable({ pages, onRowClick, crawlId, support }) {
+function TopViolatingTable({ pages, onRowClick, crawlId, support, onFixed }) {
   if (pages.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-body text-sm">
@@ -329,8 +358,8 @@ function TopViolatingTable({ pages, onRowClick, crawlId, support }) {
             </span>
             <ChevronRight size={14} className="text-body flex-shrink-0"/>
           </button>
-          {s?.fixable > 0 && p._page?.id != null && (
-            <PageFixButton crawlId={crawlId} page={p._page} fixable={s.fixable} support={support} />
+          {s && (s.fixable > 0 || Object.keys(s.fixes || {}).length > 0) && p._page?.id != null && (
+            <PageFixButton crawlId={crawlId} page={p._page} summary={s} support={support} onDone={onFixed} />
           )}
           </div>
         );
@@ -442,16 +471,17 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
 
   // ---- per-page severity summary: once the crawl has stopped -------------
   const crawlDone = !!job && job.status !== 'running' && job.status !== 'pending';
-  useEffect(() => {
-    setSummary({});
-    if (!crawlId || !crawlDone) return;
-    let cancelled = false;
+  const loadSummary = useCallback(() => {
+    if (!crawlId) return;
     apiFetch(`/api/crawl/${crawlId}/page-summary`)
       .then(r => r.json())
-      .then(d => { if (!cancelled && d.ok) setSummary(d.pages || {}); })
+      .then(d => { if (d.ok) setSummary(d.pages || {}); })
       .catch(() => {});
-    return () => { cancelled = true; };
-  }, [crawlId, crawlDone]);
+  }, [crawlId]);
+  useEffect(() => {
+    setSummary({});
+    if (crawlDone) loadSummary();
+  }, [crawlId, crawlDone, loadSummary]);
 
   // ---- row click + violation fetch ----------------------------------------
   async function handleRowClick(page) {
@@ -840,6 +870,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
               pages={topViolationPages}
               crawlId={crawlId}
               support={support}
+              onFixed={loadSummary}
               onRowClick={(p) => p._page && handleRowClick(p._page)}
             />
           </ChartCard>
@@ -1026,6 +1057,11 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
             violationsLoading: drawerLoading,
             status: selectedRow._status,
             scanHistoryId: selectedRow.scan_history_id,
+            fixes: summary[selectedRow.url]?.fixes,
+            fixSlot: summary[selectedRow.url] && selectedRow.id != null && (
+              <PageFixButton crawlId={crawlId} page={selectedRow} summary={summary[selectedRow.url]}
+                support={support} onDone={loadSummary} />
+            ),
           }}
           onClose={handleCloseDrawer}
           onOpenFullReport={
