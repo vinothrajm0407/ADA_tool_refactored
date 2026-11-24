@@ -191,3 +191,19 @@ def get_crawl_pages(crawl_id: str) -> list[dict]:
     if not pages:
         return inmemory_get_pages(crawl_id)
     return pages
+
+
+def page_summary(payload: dict, ai: bool, fallback_rules: set[str]) -> dict:
+    """One crawled page at a glance: issues (rules) by impact, elements affected,
+    and how many issues Auto Fix can take on (same test as the Fix all bar: an
+    element with markup, and a built-in fix or AI fixes on)."""
+    violations = (payload.get("axeResult") or payload).get("violations") or []
+    out = {"critical": 0, "serious": 0, "moderate": 0, "minor": 0, "elements": 0, "fixable": 0}
+    for v in violations:
+        if v.get("impact") in out:
+            out[v["impact"]] += 1
+        nodes = v.get("nodes") or []
+        out["elements"] += len(nodes)
+        if any((n.get("html") or "").strip() for n in nodes) and (ai or v.get("id") in fallback_rules):
+            out["fixable"] += 1
+    return out

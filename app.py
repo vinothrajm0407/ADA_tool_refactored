@@ -1000,6 +1000,21 @@ def api_crawl_pages(crawl_id):
     return jsonify({"ok": True, "crawl_id": crawl_id, "pages": pages, "count": len(pages)})
 
 
+@app.route("/api/crawl/<string:crawl_id>/page-summary", methods=["GET"])
+@require_auth
+def api_crawl_page_summary(crawl_id):
+    """Per page: issues by impact, elements affected, auto-fixable issues.
+    Separate from /pages, which is polled during a crawl and stays light;
+    this one reads every stored result, so the UI asks once the crawl is done."""
+    if not db.is_ready():
+        return jsonify({"ok": False, "error": "Database not configured"}), 503
+    from backend.services.auto_fix_service import RULES_WITH_FALLBACK
+    from backend.services.crawl_service import page_summary
+    ai = bool(Config.GEMINI_API_KEY)
+    return jsonify({"ok": True, "pages": {
+        url: page_summary(payload, ai, RULES_WITH_FALLBACK) for url, payload in db.get_crawl_page_payloads(crawl_id)}})
+
+
 @app.route("/api/crawl/<string:crawl_id>/pages/<int:page_id>/result", methods=["GET"])
 @require_auth
 def api_crawl_page_result(crawl_id, page_id):
