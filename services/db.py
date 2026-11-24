@@ -1059,6 +1059,40 @@ def get_reset_token_issued_at(user_id: int):
         conn.close()
 
 
+# Rows created after this are this process's own (a new crawl writes its
+# 'pending' row before the queue starts), so the restart reset leaves them alone.
+_PROCESS_STARTED_UTC = datetime.utcnow()
+
+
+def reset_interrupted_crawls() -> int:
+    """Crawls still 'running'/'pending' when an in-memory queue starts were cut
+    off by a restart (their threads died with the old process): mark them
+    cancelled, keeping the pages already scanned. Only call it with the
+    in-memory queue; with Redis, workers in other processes may still run them."""
+    if not is_enabled() or _INIT_ERROR:
+        return 0
+    try:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE dbo.CrawlJob
+                    SET    Status = 'cancelled', EndedAt = GETUTCDATE(),
+                           FailureReason = 'Stopped: the server restarted while this crawl was running'
+                    WHERE  Status IN ('running', 'pending') AND CreatedAt < ?
+                """, _PROCESS_STARTED_UTC)
+                count = cur.rowcount
+            conn.commit()
+            if count:
+                logger.warning("Marked %d crawl(s) cut off by a restart as cancelled", count)
+            return count
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("Failed to reset interrupted crawls")
+        return 0
+
+
 def reset_orphaned_jobs(stale_seconds: int = 600) -> int:
     """
     Mark ScanJobs rows stuck in 'running' for longer than stale_seconds as 'failed'.
