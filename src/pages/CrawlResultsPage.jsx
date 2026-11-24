@@ -21,6 +21,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useAutoFixSupport, autoFixUnavailableReason } from '../utils/autoFixSupport';
+import { coveredFix, remainingFixable } from '../utils/fixState';
 import SendReportModal from '../components/integrations/SendReportModal';
 import { useApp } from '../context/AppContext';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -113,8 +114,6 @@ function StatTile({ value, label, sub }) {
 // that would start a second run (and a second PR).
 const runningPageFixes = new Map();
 
-// An issue already being handled: PR open and not rejected, or merged.
-const coveredFix = (f) => f?.pr_url && f.approval_status !== 'rejected' && (f.pr_state === 'open' || f.pr_state === 'merged');
 
 // Fix all from the crawl page: load the page's stored result, send every
 // auto-fixable issue to /api/auto-fix-page, ONE pull request. Same selection
@@ -134,7 +133,7 @@ function PageFixButton({ crawlId, page, summary, support, onDone }) {
   const fixes = summary?.fixes || {};
   // listed: PRs still waiting (merged ones count as handled, see Page Details)
   const prs = [...new Set(Object.values(fixes).filter((f) => coveredFix(f) && f.pr_state === 'open').map((f) => f.pr_url))];
-  const remaining = Math.max(0, (summary?.fixable || 0) - Object.values(fixes).filter(coveredFix).length);
+  const remaining = remainingFixable(summary);
 
   function run() {
     const p = (async () => {
@@ -878,7 +877,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
 
         {/* FIX AT THE SOURCE — one fix per shared component, across every page */}
         {/* a stopped crawl still has scanned pages worth tracing */}
-        <RootCausesPanel crawlId={crawlId} isComplete={!!job && !isActive} />
+        <RootCausesPanel crawlId={crawlId} isComplete={!!job && !isActive} summary={summary} onSiteFixed={loadSummary} />
 
         {/* 5. ACCESSIBILITY INTELLIGENCE — Task 1 */}
         <CrawlIntelPanel crawlId={crawlId} isComplete={isComplete} />

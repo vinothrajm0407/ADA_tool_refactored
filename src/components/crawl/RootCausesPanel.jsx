@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Layers, Wrench, ExternalLink, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Layers, Wrench, Wand2, ExternalLink, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiFetch } from '../../utils/api';
 import { useAutoFixSupport, autoFixUnavailableReason } from '../../utils/autoFixSupport';
+import { coveredFix, remainingFixable } from '../../utils/fixState';
 
 const IMPACT = { critical: 'text-coral bg-coral/10', serious: 'text-amber bg-amber/10', moderate: 'text-blue-600 bg-blue-50', minor: 'text-body bg-gray-100' };
 
@@ -110,9 +111,101 @@ function RootCauseRow({ rc, crawlId, repoConnected, support, onFixed }) {
   );
 }
 
+// Site fixes still running, by crawl. Module-level: leaving the crawl page and
+// coming back mid-run shows "Fixing…" instead of starting a second run and PR.
+const runningSiteFixes = new Map();
+
+// One page's fix status, from page-summary: open PRs, merged, failed, left to fix.
+function PageFixStatus({ url, s }) {
+  const fixes = Object.values(s.fixes || {});
+  const open = [...new Set(fixes.filter(f => coveredFix(f) && f.pr_state === 'open').map(f => f.pr_url))];
+  const merged = fixes.filter(f => f.pr_state === 'merged').length;
+  const failed = fixes.filter(f => f.status === 'failed' && !f.pr_url).length;
+  const left = remainingFixable(s);
+  return (
+    <li className="flex items-center justify-between gap-3 py-1.5 border-t border-gray-100 first:border-t-0 text-[12px]">
+      <span className="truncate text-ink min-w-0" title={url}>{pathOf(url)}</span>
+      <span className="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap justify-end shrink-0">
+        {open.map(u => (
+          <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="text-sage font-semibold hover:underline inline-flex items-center gap-0.5">
+            PR #{u.split('/').pop()} open <ExternalLink size={9} />
+          </a>
+        ))}
+        {merged > 0 && <span className="text-sage">{merged} merged</span>}
+        {failed > 0 && <span className="text-coral" title="Open the page in Fix these first to see why">{failed} failed</span>}
+        {left > 0 ? <span className="text-body">{left} left to fix</span>
+          : !open.length && !merged && !failed && <span className="text-body">nothing auto-fixable</span>}
+      </span>
+    </li>
+  );
+}
+
+// Fix everything: every auto-fixable issue on every page, one pull request.
+function SiteFix({ crawlId, summary, onDone }) {
+  const [running, setRunning] = useState(runningSiteFixes.has(crawlId));
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    const p = runningSiteFixes.get(crawlId);
+    if (!p) return;
+    let live = true;
+    p.then(r => { if (live) { setRunning(false); setResult(r); onDone(); } });
+    return () => { live = false; };
+  }, [crawlId]);
+
+  const pages = Object.entries(summary || {}).filter(([, s]) => s.fixable > 0 || Object.keys(s.fixes || {}).length);
+  const left = pages.reduce((n, [, s]) => n + remainingFixable(s), 0);
+  const pagesLeft = pages.filter(([, s]) => remainingFixable(s) > 0).length;
+  if (!pages.length) return null;
+
+  function run() {
+    const p = apiFetch(`/api/crawl/${crawlId}/fix-site`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => (d.ok ? d : { error: d.error || 'Fix all failed' }))
+      .catch(() => ({ error: 'Could not reach the server' }))
+      .finally(() => runningSiteFixes.delete(crawlId));
+    runningSiteFixes.set(crawlId, p);
+    setRunning(true); setResult(null);
+    p.then(r => { setRunning(false); setResult(r); onDone(); });
+  }
+
+  return (
+    <div className="px-5 py-4" aria-live="polite">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[13px] text-ink m-0">
+          {left > 0
+            ? <><b>{left}</b> auto-fixable issue{left !== 1 ? 's' : ''} left on <b>{pagesLeft}</b> page{pagesLeft !== 1 ? 's' : ''} — fix them all in one pull request.</>
+            : <>Every auto-fixable issue already has a pull request.</>}
+        </p>
+        {(running || left > 0) && (
+          <button type="button" onClick={run} disabled={running} className="btn-primary text-sm inline-flex items-center gap-1.5 disabled:opacity-60">
+            {running ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+            {running ? 'Fixing every page…' : `Fix all ${left} — one PR`}
+          </button>
+        )}
+      </div>
+      {running && <p className="text-[11.5px] text-body mt-1.5 mb-0">Patching every page in one copy of the repo, building once and re-scanning each page — this takes a few minutes. You can leave this page; it keeps running.</p>}
+      {result && (result.pr_url
+        ? <p className="text-[12px] mt-1.5 mb-0 text-sage font-semibold flex items-center gap-1.5 flex-wrap"><CheckCircle2 size={13} />
+            {result.duplicate ? 'These issues already have an open pull request.' : `One pull request for ${result.fixed_pages} page${result.fixed_pages !== 1 ? 's' : ''}.`}
+            <a href={result.pr_url} target="_blank" rel="noopener noreferrer" className="text-teal hover:underline inline-flex items-center gap-0.5">Open PR <ExternalLink size={10} /></a>
+            {!result.duplicate && <span className="font-normal text-body">· waits for an Approver in Fix History</span>}</p>
+        : result.duplicate ? <p className="text-[12px] mt-1.5 mb-0 text-sage font-semibold">{result.message || 'Every issue already has an open pull request.'}</p>
+        : <p className="text-[12px] mt-1.5 mb-0 text-coral flex items-start gap-1.5" role="alert"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{result.error || 'Fix all failed'}</p>)}
+      {result?.other_repo?.length > 0 && (
+        <p className="text-[11px] text-body mt-1 mb-0">{result.other_repo.length} page{result.other_repo.length !== 1 ? 's' : ''} belong to another site and {result.other_repo.length !== 1 ? 'were' : 'was'} left out.</p>
+      )}
+      <ul className="list-none m-0 mt-3 p-0">
+        {pages.map(([url, s]) => <PageFixStatus key={url} url={url} s={s} />)}
+      </ul>
+    </div>
+  );
+}
+
 // Fix at the source: problems shared by many crawled pages, each traced to one
 // piece of markup (a shared header, footer or component) and fixed with one PR.
-export default function RootCausesPanel({ crawlId, isComplete }) {
+// Below them: fix every remaining issue on every page in one PR, with each
+// page's fix status.
+export default function RootCausesPanel({ crawlId, isComplete, summary, onSiteFixed }) {
   const [data, setData] = useState(null); // null = loading
   const [showAll, setShowAll] = useState(false);
   const support = useAutoFixSupport();
@@ -142,7 +235,7 @@ export default function RootCausesPanel({ crawlId, isComplete }) {
             {data === null ? 'Tracing problems back to shared components…'
               : data.error ? data.error
               : list.length ? <>{list.length} problem{list.length !== 1 ? 's' : ''} repeat across pages — up to <b className="text-ink">{pagesHit} of {data.scanned_pages}</b> pages from one piece of shared markup. Fix each once and every page is fixed.</>
-              : 'No problem repeats across pages — each issue is unique to its page, so fix them page by page.'}
+              : 'No markup repeats across pages, so each page needs its own change — fix them all at once below.'}
           </p>
         </div>
       </div>
@@ -159,6 +252,11 @@ export default function RootCausesPanel({ crawlId, isComplete }) {
           <button type="button" onClick={() => setShowAll(s => !s)} className="text-[12px] font-medium text-teal hover:underline">
             {showAll ? 'Show top 5' : `Show all ${list.length}`}
           </button>
+        </div>
+      )}
+      {data && !data.error && (list.length === 0 || data.repo_connected) && (
+        <div className={list.length ? 'border-t border-gray-100' : ''}>
+          <SiteFix crawlId={crawlId} summary={summary} onDone={() => { onSiteFixed?.(); load(); }} />
         </div>
       )}
     </section>
