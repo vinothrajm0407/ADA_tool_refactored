@@ -1504,10 +1504,14 @@ def api_crawl_root_causes(crawl_id):
             # This crawl ran after the merge and still found the problem: the fix went to a
             # branch the live site isn't built from yet (e.g. a QA branch), or isn't deployed.
             fix = {**fix, "still_live": bool(fix.get("merged_at")) and crawled_at[:19] > str(fix["merged_at"])[:19]}
+        # Per root cause: a crawl can span pages of more than one connected site,
+        # so the first group's answer must not decide for the rest.
+        connected = bool(db.get_repo_link_for_url(grp["sample"]["page_url"], g.current_user_id))
         out.append({k: v for k, v in grp.items() if k not in ("pages", "sample")} | {
-            "sample_page": grp["sample"]["page_url"], "pages": [p["url"] for p in grp["pages"][:50]], "fix": fix})
+            "sample_page": grp["sample"]["page_url"], "pages": [p["url"] for p in grp["pages"][:50]],
+            "fix": fix, "repo_connected": connected})
     return jsonify({"ok": True, "root_causes": out, "scanned_pages": total_pages,
-                    "repo_connected": bool(groups) and bool(db.get_repo_link_for_url(groups[0]["sample"]["page_url"], g.current_user_id))})
+                    "repo_connected": any(r["repo_connected"] for r in out)})
 
 
 @app.route("/api/crawl/<string:crawl_id>/root-causes/<string:group_id>/fix", methods=["POST"])

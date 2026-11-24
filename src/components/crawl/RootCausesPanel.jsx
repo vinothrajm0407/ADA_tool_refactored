@@ -150,7 +150,7 @@ export default function RootCausesPanel({ crawlId, isComplete }) {
       {list.length > 0 && (
         <ul className="list-none m-0 p-0">
           {shown.map(rc => (
-            <RootCauseRow key={rc.id} rc={rc} crawlId={crawlId} repoConnected={data.repo_connected} support={support} onFixed={load} />
+            <RootCauseRow key={rc.id} rc={rc} crawlId={crawlId} repoConnected={rc.repo_connected ?? data.repo_connected} support={support} onFixed={load} />
           ))}
         </ul>
       )}

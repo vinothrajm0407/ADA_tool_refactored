@@ -56,6 +56,16 @@ def is_internal_link(href: str, root_domain: str) -> bool:
     return parsed.netloc.lower() == root_domain
 
 
+def in_scope(href: str, root_url: str) -> bool:
+    """True if href sits under the start URL's folder. A crawl of
+    https://x.github.io/Project/ must not wander to https://x.github.io/settings:
+    that is another site on the same host, with no connected repo.
+    ponytail: the folder is the start URL's own ("/Project" without a slash
+    scopes to "/"), so a project site should be started with its trailing slash."""
+    scope = urlparse(urljoin(root_url, ".")).path
+    return (urlparse(href).path or "/").startswith(scope) or urlparse(href).path + "/" == scope
+
+
 def should_skip_url(href: str) -> bool:
     """
     Return True if this URL should never be crawled:

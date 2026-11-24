@@ -1743,15 +1743,25 @@ def _fallback_patch(rule: dict, node: dict, file_content: str, line_no: int | No
         # that's intentionally hidden (a closed panel, etc) — the safe,
         # always-correct fix is to take the focusable element itself out of
         # the tab order instead, which is what the rule actually requires.
+        # axe reports the aria-hidden element itself (`<div aria-hidden="true">
+        # <button>…`): the tabindex belongs on the focusable element inside it
+        # (or on the element itself when that is the focusable one).
+        # ponytail: patches the first focusable element only; a container with
+        # several needs one run per element (the re-scan reports what's left).
         tag_match = re.match(r"<(\w+)", html.strip())
-        if not tag_match:
+        focusable = re.search(r"<(button|a|input|select|textarea|summary|iframe)\b", html.strip())
+        if not tag_match or not focusable:
             return None
-        target = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        hidden = _locate_patch_target(file_content, line_no, (tag_match.group(1),))
+        if not hidden:
+            return None
+        target = next((o for o in _find_tag_occurrences(file_content, (focusable.group(1),))
+                       if o["start"] >= hidden["start"]), None)
         if not target:
             return None
-        if re.search(r'tabindex="-?\d+"', target["attrs"]):
+        if 'tabindex="-1"' in target["attrs"]:
             return ALREADY_FIXED
-        patch = _apply_attribute(target, "tabindex", "-1")
+        patch = _replace_or_add_attribute(target, "tabindex", "-1")
         return _finalize_patch(file_content, target["start"], patch["before"], patch["after"])
 
     if rule_id in ("aria-roles", "aria-required-parent"):
