@@ -26,7 +26,8 @@ export function SectionHeading({ eyebrow, title, subtitle, center = false }) {
   );
 }
 
-export function ChartCard({ title, subtitle, children, action }) {
+// fit: size to the content (a list) instead of reserving chart height.
+export function ChartCard({ title, subtitle, children, action, fit = false }) {
   return (
     <div className="card p-6">
       <div className="flex items-start justify-between gap-4 mb-1">
@@ -38,7 +39,7 @@ export function ChartCard({ title, subtitle, children, action }) {
       {subtitle && (
         <p className="text-sm text-body mb-4">{subtitle}</p>
       )}
-      <div className="mt-4 w-full min-h-[200px] sm:min-h-[240px] md:min-h-[280px]">
+      <div className={`mt-4 w-full ${fit ? '' : 'min-h-[200px] sm:min-h-[240px] md:min-h-[280px]'}`}>
         {children}
       </div>
     </div>

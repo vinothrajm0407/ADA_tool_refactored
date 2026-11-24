@@ -260,12 +260,12 @@ function TopViolatingTable({ pages, onRowClick }) {
               </div>
             </div>
             {p._score != null && (
-              <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: scoreColor }}>
-                {p._score}
+              <span className="text-[11px] text-body flex-shrink-0 whitespace-nowrap">
+                Score <strong className="font-semibold" style={{ color: scoreColor }}>{p._score}</strong>
               </span>
             )}
-            <span className="text-sm font-bold text-coral flex-shrink-0 w-8 text-right">
-              {p.violations}
+            <span className="text-[11px] text-body flex-shrink-0 w-20 text-right whitespace-nowrap">
+              <strong className="text-sm font-bold text-coral">{p.violations}</strong> {p.violations === 1 ? 'issue' : 'issues'}
             </span>
             <ChevronRight size={14} className="text-body flex-shrink-0"/>
           </button>
@@ -743,6 +743,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
           <ChartCard
             title="Fix these first"
             subtitle="Pages with the most violations. Click a page to see what's wrong."
+            fit
           >
             <TopViolatingTable
               pages={topViolationPages}
