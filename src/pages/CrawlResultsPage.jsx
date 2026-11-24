@@ -21,6 +21,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useAutoFixSupport, autoFixUnavailableReason } from '../utils/autoFixSupport';
+import { coveredFix, remainingFixable } from '../utils/fixState';
 import SendReportModal from '../components/integrations/SendReportModal';
 import { useApp } from '../context/AppContext';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -29,6 +30,7 @@ import { ChartCard } from '../components/ui/ChartCard';
 import DetailsDrawer from '../components/ui/DetailsDrawer';
 import CrawlIntelPanel from '../components/crawl/CrawlIntelPanel';
 import RootCausesPanel from '../components/crawl/RootCausesPanel';
+import SiteFixButton from '../components/crawl/SiteFixButton';
 import CrawlRegressionPanel from '../components/crawl/CrawlRegressionPanel';
 import CrawlAISummaryPanel from '../components/crawl/CrawlAISummaryPanel';
 import PageTrendsPanel from '../components/crawl/PageTrendsPanel';
@@ -113,8 +115,6 @@ function StatTile({ value, label, sub }) {
 // that would start a second run (and a second PR).
 const runningPageFixes = new Map();
 
-// An issue already being handled: PR open and not rejected, or merged.
-const coveredFix = (f) => f?.pr_url && f.approval_status !== 'rejected' && (f.pr_state === 'open' || f.pr_state === 'merged');
 
 // Fix all from the crawl page: load the page's stored result, send every
 // auto-fixable issue to /api/auto-fix-page, ONE pull request. Same selection
@@ -132,9 +132,8 @@ function PageFixButton({ crawlId, page, summary, support, onDone }) {
   }, [page.url]);
 
   const fixes = summary?.fixes || {};
-  // listed: PRs still waiting (merged ones count as handled, see Page Details)
-  const prs = [...new Set(Object.values(fixes).filter((f) => coveredFix(f) && f.pr_state === 'open').map((f) => f.pr_url))];
-  const remaining = Math.max(0, (summary?.fixable || 0) - Object.values(fixes).filter(coveredFix).length);
+  const prs = Object.values(fixes).filter((f) => coveredFix(f) && f.pr_state === 'open');
+  const remaining = remainingFixable(summary);
 
   function run() {
     const p = (async () => {
@@ -164,23 +163,29 @@ function PageFixButton({ crawlId, page, summary, support, onDone }) {
 
   return (
     <span className="flex flex-col items-end gap-0.5 shrink-0">
-      {prs.map((u) => (
-        <a key={u} href={u} target="_blank" rel="noopener noreferrer" title="Waiting for an Approver in Fix History"
-          className="text-[11.5px] font-semibold text-sage hover:underline inline-flex items-center gap-1 whitespace-nowrap">
-          <CheckCircle size={12} /> PR #{u.split('/').pop()} open <ExternalLink size={10} />
-        </a>
-      ))}
       {(running || remaining > 0) && (
         <button type="button" onClick={run} disabled={running}
           title="Fix every auto-fixable issue on this page in one pull request (takes a few minutes)"
           className="text-[11.5px] font-semibold text-teal border border-solid border-teal/40 rounded-md px-2 py-1 bg-white hover:bg-teal/5 inline-flex items-center gap-1 whitespace-nowrap disabled:opacity-60 cursor-pointer">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-          {running ? 'Fixing… (a few minutes)' : `Fix ${remaining}${prs.length ? ' more' : ''} — one PR`}
+          {running ? 'Fixing… (a few minutes)' : `Fix ${remaining}${prs.length ? ' more' : ''}`}
         </button>
       )}
       {error && <span role="alert" className="text-[10.5px] text-coral max-w-[220px] text-right">{error}</span>}
     </span>
   );
+}
+
+// A page's path under the crawl's start folder: "/profile.html" instead of
+// "/ADA-AutoFix-Test-GitHub-2/profile.html" on every row.
+function shortPath(url = '', rootUrl = '') {
+  try {
+    const path = new URL(url).pathname;
+    const base = new URL(rootUrl).pathname.replace(/[^/]*$/, '');
+    if (base.length > 1 && path.startsWith(base)) return '/' + path.slice(base.length) || '/';
+    if (base.length > 1 && path + '/' === base) return '/';
+    return path || '/';
+  } catch { return url; }
 }
 
 function pathOf(url = '') {
@@ -307,6 +312,50 @@ function FilterPill({ label, active, onClick }) {
 }
 
 // Task 5: Top Violating Pages — clickable ranked table replacing the old bar chart
+// One page's fix status on its row: merged, waiting for approval, failed.
+function RowFixStatus({ fixes }) {
+  const all = Object.values(fixes || {});
+  const merged = all.filter((f) => f.pr_state === 'merged').length;
+  const open = [...new Set(all.filter((f) => coveredFix(f) && f.pr_state === 'open').map((f) => f.pr_url))];
+  const failed = all.filter((f) => f.status === 'failed' && !f.pr_url).length;
+  if (!merged && !open.length && !failed) return null;
+  return (
+    <span className="text-[11px] flex flex-wrap gap-x-2.5 justify-end">
+      {merged > 0 && <span className="text-sage font-semibold">✓ {merged} merged</span>}
+      {open.map((u) => (
+        <a key={u} href={u} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+          className="text-amber font-semibold hover:underline inline-flex items-center gap-0.5" title="Waiting for an Approver in Fix History">
+          ⏳ PR #{u.split('/').pop()} waiting approval <ExternalLink size={9} />
+        </a>
+      ))}
+      {failed > 0 && <span className="text-coral font-semibold" title="Open the page to see why">✗ {failed} failed</span>}
+    </span>
+  );
+}
+
+// Site-wide progress: issues with a merged fix, and fixes waiting for approval.
+function FixProgress({ summary }) {
+  const pages = Object.values(summary || {});
+  if (!pages.length) return null;
+  const total = pages.reduce((n, s) => n + s.critical + s.serious + s.moderate + s.minor, 0);
+  const fixes = pages.flatMap((s) => Object.values(s.fixes || {}));
+  const merged = fixes.filter((f) => f.pr_state === 'merged').length;
+  const waiting = fixes.filter((f) => coveredFix(f) && f.pr_state === 'open').length;
+  const pct = total ? Math.round((merged / total) * 100) : 0;
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between text-[12px] mb-1.5">
+        <span className="text-ink"><b>{merged} of {total}</b> issues fixed</span>
+        <span className="text-body">{waiting} waiting for approval</span>
+      </div>
+      <div className="flex h-2 rounded-full overflow-hidden bg-gray-100" role="img" aria-label={`${merged} of ${total} issues fixed, ${waiting} waiting for approval`}>
+        <div style={{ width: `${pct}%` }} className="bg-sage" />
+        <div style={{ width: `${total ? Math.round((waiting / total) * 100) : 0}%` }} className="bg-amber/60" />
+      </div>
+    </div>
+  );
+}
+
 function TopViolatingTable({ pages, onRowClick, crawlId, support, onFixed }) {
   if (pages.length === 0) {
     return (
@@ -334,7 +383,7 @@ function TopViolatingTable({ pages, onRowClick, crawlId, support, onFixed }) {
             </span>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-ink truncate m-0" title={p.url}>
-                {p.name || p.url}
+                {p.name === '/' ? <>/ <span className="text-body font-normal">(start page)</span></> : (p.name || p.url)}
               </p>
               {s && (
                 <p className="text-[11px] text-body m-0 mt-0.5 flex flex-wrap gap-x-2">
@@ -358,9 +407,13 @@ function TopViolatingTable({ pages, onRowClick, crawlId, support, onFixed }) {
             </span>
             <ChevronRight size={14} className="text-body flex-shrink-0"/>
           </button>
-          {s && (s.fixable > 0 || Object.keys(s.fixes || {}).length > 0) && p._page?.id != null && (
-            <PageFixButton crawlId={crawlId} page={p._page} summary={s} support={support} onDone={onFixed} />
-          )}
+          {/* fixed-width column so status and buttons line up row to row */}
+          <div className="w-[230px] shrink-0 flex flex-col items-end gap-1 py-2">
+            {s && <RowFixStatus fixes={s.fixes} />}
+            {s && p._page?.id != null && (
+              <PageFixButton crawlId={crawlId} page={p._page} summary={s} support={support} onDone={onFixed} />
+            )}
+          </div>
           </div>
         );
       })}
@@ -668,7 +721,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     .sort((a, b) => { const x = sevKey(a), y = sevKey(b); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); })
     .slice(0, 10)
     .map((p) => ({
-      name: (p.url || '').replace(/^https?:\/\/[^/]+/, '') || '/',
+      name: shortPath(p.url, job?.root_url),
       violations: p._violations,
       url: p.url,
       _score: p._score,
@@ -677,6 +730,7 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
       _page: p,
     }));
   const summaries = Object.values(summary);
+  const siteLeft = summaries.reduce((n, s) => n + remainingFixable(s), 0);
   const totalElements = summaries.length ? summaries.reduce((n, s) => n + s.elements, 0) : null;
   // "3/50" read as a crawl that stopped early; 50 is only the limit.
   const hitLimit = job?.max_pages && totalPages >= job.max_pages;
@@ -863,9 +917,11 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         {topViolationPages.length > 0 && (
           <ChartCard
             title="Fix these first"
-            subtitle="Worst pages first: critical issues, then serious. Click a page to see what's wrong, or fix it in one pull request."
+            subtitle="Worst pages first. Fix one page, or every page at once — each in one pull request."
             fit
+            action={crawlDone && <SiteFixButton crawlId={crawlId} left={siteLeft} onDone={loadSummary} />}
           >
+            <FixProgress summary={summary} />
             <TopViolatingTable
               pages={topViolationPages}
               crawlId={crawlId}

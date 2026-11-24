@@ -3135,9 +3135,10 @@ MAX_PAGE_PROOFS = 8  # ponytail: proof for the first element of up to 8 rules pe
 
 
 def _first_per_rule(applied: list[dict]) -> list[dict]:
+    """First element of each rule — per page, for a site-wide fix."""
     seen, out = set(), []
     for e in applied:
-        rid = e["rule"].get("id")
+        rid = (e.get("page_url"), e["rule"].get("id"))
         if rid not in seen:
             seen.add(rid)
             out.append(e)
@@ -3148,6 +3149,14 @@ def run_auto_fix_page(link: dict, page_url: str, items: list[tuple[dict, list[di
     """Fix all: every element of every given rule on one page in a single
     clone/build/re-scan, opening ONE pull request. items: [(rule, nodes)]."""
     return _run_batch(link, page_url, [(rule, node) for rule, nodes in items for node in nodes], find_duplicate)
+
+
+def run_auto_fix_site(link: dict, pages: list[tuple[str, list[tuple[dict, list[dict]]]]], find_duplicate=None) -> dict:
+    """Fix everything: every page's issues in one clone, one build, a re-scan of
+    each page, and ONE pull request. pages: [(page_url, [(rule, nodes)])].
+    Results come back in (page, rule, node) order."""
+    pairs = [(rule, node, url) for url, items in pages for rule, nodes in items for node in nodes]
+    return _run_batch(link, pages[0][0], pairs, find_duplicate)
 
 
 def run_auto_fix_batch(link: dict, page_url: str, rule: dict, nodes: list[dict], find_duplicate=None,
@@ -3179,8 +3188,12 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
                root_cause: dict | None = None) -> dict:
     """Shared core of run_auto_fix_batch (one rule) and run_auto_fix_page (every
     rule on the page): pairs are (rule, element). Each result carries its rule_id."""
-    rules = list({r.get("id", "fix"): r for r, _ in pairs}.values())
-    single = len(rules) == 1
+    # (rule, element[, page_url]): a site-wide fix carries each element's own page
+    pairs = [(p[0], p[1], p[2] if len(p) > 2 else page_url) for p in pairs]
+    pages = list(dict.fromkeys(p[2] for p in pairs))
+    multi_page = len(pages) > 1
+    rules = list({r.get("id", "fix"): r for r, _, _ in pairs}.values())
+    single = len(rules) == 1 and not multi_page
     steps: list[dict] = []
 
     def step(name: str, ok: bool, detail: str = ""):
@@ -3200,14 +3213,14 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
         applied: list[dict] = []
         duplicate_of = None
 
-        for rule, node in pairs:
+        for rule, node, node_page in pairs:
             rule_id = rule.get("id", "fix")
             node_html = (node or {}).get("html", "").strip()
             if not node_html:
                 node_results.append({"rule_id": rule_id, "status": "failed", "error": "Page-wide violations aren't supported in a batch fix"})
                 continue
 
-            located = locate_source(repo_dir, node_html, rule_id, (node or {}).get("target"), page_url, node)
+            located = locate_source(repo_dir, node_html, rule_id, (node or {}).get("target"), node_page, node)
             if not located:
                 node_results.append({"rule_id": rule_id, "status": "failed", "error": "Could not uniquely match this violation to a source file"})
                 continue
@@ -3244,7 +3257,8 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
 
             full_path.write_text(file_content.replace(patch["before"], patch["after"], 1), encoding="utf-8")
             node_results.append({"rule_id": rule_id, "status": "patched", "file_path": file_path, "line_no": line_no, "patch_signature": patch_signature})
-            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch, "node": node, "rule": rule, "result": node_results[-1]})
+            applied.append({"file_path": file_path, "line_no": line_no, "patch": patch, "node": node, "rule": rule,
+                            "page_url": node_page, "result": node_results[-1]})
 
         step("Locate & patch", bool(applied) or bool(duplicate_of), f"{len(applied)}/{len(pairs)} elements patched")
         if not applied and duplicate_of:
@@ -3283,7 +3297,12 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
                 if single:
                     verified = rescan_and_verify(page_preview, rule_id)
                 else:
-                    remaining = rules_remaining(page_preview, {e["rule"].get("id") for e in applied})
+                    # every patched page re-scanned once; site-wide, say which page still has it
+                    for pu in dict.fromkeys(e["page_url"] for e in applied):
+                        left = rules_remaining(preview_page_url(preview_url, pu, link.get("path_prefix")),
+                                               {e["rule"].get("id") for e in applied if e["page_url"] == pu})
+                        path = urllib.parse.urlsplit(pu).path or "/"
+                        remaining |= {f"{r} on {path}" for r in left} if multi_page else left
                     verified = not remaining
                 pages_checked = (verify_other_pages(preview_url, root_cause["pages"], rule_id, root_cause["key"],
                                                     link.get("path_prefix")) if root_cause else None)
@@ -3293,7 +3312,8 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
                 # proof: first elements for one rule; first element of each rule for a whole page
                 proof_targets = applied[:MAX_BATCH_PROOFS] if single else _first_per_rule(applied)[:MAX_PAGE_PROOFS]
                 for entry in proof_targets:
-                    proof = capture_proof(page_url, page_preview, entry["rule"], entry["node"])
+                    proof = capture_proof(entry["page_url"], preview_page_url(preview_url, entry["page_url"], link.get("path_prefix")),
+                                          entry["rule"], entry["node"])
                     if proof:
                         proof.update(file=f"{entry['file_path']}:{entry['line_no']}",
                                      code_before=entry["patch"]["before"], code_after=entry["patch"]["after"])
@@ -3326,11 +3346,14 @@ def _run_batch(link: dict, page_url: str, pairs: list[tuple[dict, dict]], find_d
             body = _pr_body_batch(rule, applied)
         else:
             fixed_rules = {e["rule"].get("id") for e in applied}
+            fixed_pages = list(dict.fromkeys(e["page_url"] for e in applied))
             path = urllib.parse.urlsplit(page_url).path or "/"
-            title = f"ADA Auto-Fix: fix all — {len(fixed_rules)} issues on {path}"
-            branch_name = f"ada/fix/page-{uuid.uuid4().hex[:8]}"
+            where = f"{len(fixed_pages)} pages" if multi_page else path
+            title = f"ADA Auto-Fix: fix all — {len(fixed_rules)} issues on {where}"
+            branch_name = f"ada/fix/{'site' if multi_page else 'page'}-{uuid.uuid4().hex[:8]}"
             skipped = [r for r in node_results if r["status"] == "failed"]
-            body = _pr_body_page(page_url, applied, list({r["rule_id"]: r for r in skipped}.values()))
+            body = _pr_body_page(", ".join(fixed_pages) if multi_page else page_url, applied,
+                                 list({r["rule_id"]: r for r in skipped}.values()))
         branch_url = push_branch(
             repo_dir, branch_name, access_token, title, link["repo_url"], provider,
             proofs=proofs,

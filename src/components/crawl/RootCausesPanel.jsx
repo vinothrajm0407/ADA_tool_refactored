@@ -112,6 +112,8 @@ function RootCauseRow({ rc, crawlId, repoConnected, support, onFixed }) {
 
 // Fix at the source: problems shared by many crawled pages, each traced to one
 // piece of markup (a shared header, footer or component) and fixed with one PR.
+// Shown only when markup really repeats across pages; fixing every page at
+// once lives on "Fix these first".
 export default function RootCausesPanel({ crawlId, isComplete }) {
   const [data, setData] = useState(null); // null = loading
   const [showAll, setShowAll] = useState(false);
@@ -129,6 +131,7 @@ export default function RootCausesPanel({ crawlId, isComplete }) {
 
   if (!isComplete) return null;
   const list = data?.root_causes || [];
+  if (data && !data.error && !list.length) return null; // nothing shared: nothing to fix once
   const shown = showAll ? list : list.slice(0, 5);
   const pagesHit = list.length ? Math.max(...list.map(r => r.page_count)) : 0;
 
@@ -141,8 +144,7 @@ export default function RootCausesPanel({ crawlId, isComplete }) {
           <p className="text-xs text-body mt-0.5">
             {data === null ? 'Tracing problems back to shared components…'
               : data.error ? data.error
-              : list.length ? <>{list.length} problem{list.length !== 1 ? 's' : ''} repeat across pages — up to <b className="text-ink">{pagesHit} of {data.scanned_pages}</b> pages from one piece of shared markup. Fix each once and every page is fixed.</>
-              : 'No problem repeats across pages — each issue is unique to its page, so fix them page by page.'}
+              : <>{list.length} problem{list.length !== 1 ? 's' : ''} repeat across pages — up to <b className="text-ink">{pagesHit} of {data.scanned_pages}</b> pages from one piece of shared markup. Fix each once and every page is fixed.</>}
           </p>
         </div>
       </div>
