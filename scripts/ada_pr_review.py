@@ -4,7 +4,12 @@ check if an issue at or above the severity threshold is found. Stdlib only, so
 it runs on any runner with python3.
 
 Inputs come from env (set by action.yml): ADA_API_URL, ADA_API_KEY, ADA_URLS,
-ADA_FAIL_ON, ADA_INCLUDE_BEST_PRACTICES, GITHUB_TOKEN + the standard GITHUB_* vars.
+ADA_BASELINE_URLS, ADA_FAIL_ON, ADA_INCLUDE_BEST_PRACTICES, GITHUB_TOKEN + the
+standard GITHUB_* vars.
+
+Stop new problems: with ADA_BASELINE_URLS (the same pages on the live site),
+each page is scanned on both and only issues the PR adds can fail the check.
+Old issues are listed as "already on the live site" and fixed over time.
 """
 import json
 import os
@@ -12,6 +17,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 
 MARKER = "<!-- ada-accessibility-review -->"
 SEVERITIES = ["minor", "moderate", "serious", "critical"]
@@ -55,6 +61,43 @@ def violations(result):
     return ((result or {}).get("axeResult") or {}).get("violations") or []
 
 
+def element_key(node):
+    """The same element on two deploys: its CSS path (axe `target`), else its markup.
+    ponytail: a PR that moves elements around (nth-child shifts) can make an old
+    issue look new; key on markup too if that turns out noisy."""
+    target = node.get("target")
+    if target:
+        return " ".join(map(str, target)) if isinstance(target, list) else str(target)
+    return " ".join((node.get("html") or "").split())
+
+
+def split_new(result, baseline):
+    """(new, old): `result` as two scan results, by whether the same rule already
+    flags the same element on `baseline` (the live site)."""
+    seen = {(v.get("id"), element_key(n)) for v in violations(baseline) for n in v.get("nodes") or []}
+    new, old = [], []
+    for v in violations(result):
+        nodes = v.get("nodes") or []
+        for bucket, keep in ((new, False), (old, True)):
+            picked = [n for n in nodes if ((v.get("id"), element_key(n)) in seen) == keep]
+            if picked:
+                bucket.append({**v, "nodes": picked})
+    return {"axeResult": {"violations": new}}, {"axeResult": {"violations": old}}
+
+
+def baseline_urls(urls, baselines):
+    """The live-site page to compare each scanned page with. Same count: pair them
+    in order. One: the same path on that site. None: no comparison."""
+    if not baselines:
+        return [None] * len(urls)
+    if len(baselines) == len(urls):
+        return baselines
+    if len(baselines) == 1:
+        base = urlsplit(baselines[0])
+        return [urlunsplit((base.scheme, base.netloc) + tuple(urlsplit(u))[2:]) for u in urls]
+    raise ValueError(f"baseline-urls: give 1 site or {len(urls)} pages (one per url), not {len(baselines)}")
+
+
 def worst_hit(results, fail_on):
     """True if any violation is at or above the fail_on severity ("none": never)."""
     if fail_on not in SEVERITIES:
@@ -64,30 +107,48 @@ def worst_hit(results, fail_on):
                for _, result, _ in results for v in violations(result))
 
 
-def build_markdown(results, fail_on, failed):
-    """results: [(url, scan_result or None, error or None)] -> markdown comment body."""
+def _table(found):
     rank = lambda v: -SEVERITIES.index(v.get("impact") or "minor")
+    found = sorted(found, key=rank)
+    lines = ["| Impact | Rule | Elements | Help |", "| --- | --- | --- | --- |"]
+    for v in found[:MAX_ROWS]:
+        lines.append(f"| {v.get('impact') or 'minor'} | `{v['id']}` | {len(v.get('nodes') or [])} "
+                     f"| [{v.get('help', '').replace('|', '/')}]({v.get('helpUrl', '')}) |")
+    if len(found) > MAX_ROWS:
+        lines.append(f"\n_{len(found) - MAX_ROWS} more truncated, see the ADA dashboard for the full report._")
+    return lines
+
+
+def build_markdown(results, fail_on, failed, compared=None):
+    """results: [(url, scan_result or None, error or None)] -> markdown comment body.
+    compared: {url: (new, old)} from split_new, for pages checked against the live
+    site; those list the PR's new issues, and the old ones as not blocking."""
+    compared = compared or {}
     lines = [MARKER, "## ADA Accessibility Review", ""]
-    total = sum(len(violations(r)) for _, r, _ in results)
-    lines.append(f"**{total} rule violation(s) across {len(results)} page(s).**" if total
-                 else "**No accessibility violations found.**")
+    if compared:
+        added = sum(len(violations(n)) for n, _ in compared.values())
+        lines.append(f"**{added} new issue(s) in this pull request.** Issues already on the live site don't block it."
+                     if added else "**No new accessibility issues in this pull request.**")
+    else:
+        total = sum(len(violations(r)) for _, r, _ in results)
+        lines.append(f"**{total} rule violation(s) across {len(results)} page(s).**" if total
+                     else "**No accessibility violations found.**")
     if failed:
-        lines.append(f"\n:x: Check fails: violations at **{fail_on}** or above.")
+        lines.append(f"\n:x: Check fails: {'new ' if compared else ''}violations at **{fail_on}** or above.")
     for url, result, error in results:
         lines += ["", f"### {url}", ""]
         if error:
             lines.append(f":warning: Could not scan: {error}")
             continue
-        found = sorted(violations(result), key=rank)
-        if not found:
-            lines.append("No violations.")
+        if url in compared:
+            new, old = (violations(r) for r in compared[url])
+            lines += (["**New in this PR**", ""] + _table(new)) if new else [":white_check_mark: No new issues."]
+            if old:
+                lines += ["", f"<details><summary>{len(old)} issue(s) already on the live site (not blocking)</summary>", ""]
+                lines += _table(old) + ["", "</details>"]
             continue
-        lines += ["| Impact | Rule | Elements | Help |", "| --- | --- | --- | --- |"]
-        for v in found[:MAX_ROWS]:
-            lines.append(f"| {v.get('impact') or 'minor'} | `{v['id']}` | {len(v.get('nodes') or [])} "
-                         f"| [{v.get('help', '').replace('|', '/')}]({v.get('helpUrl', '')}) |")
-        if len(found) > MAX_ROWS:
-            lines.append(f"\n_{len(found) - MAX_ROWS} more truncated, see the ADA dashboard for the full report._")
+        found = violations(result)
+        lines += _table(found) if found else ["No violations."]
     return "\n".join(lines) + "\n"
 
 
@@ -124,18 +185,32 @@ def main():
     best = (os.environ.get("ADA_INCLUDE_BEST_PRACTICES") or "").lower() == "true"
     if not urls:
         sys.exit("::error::No URLs to scan: set the `urls` input")
+    baselines = [u.strip() for u in (os.environ.get("ADA_BASELINE_URLS") or "").replace(",", "\n").splitlines() if u.strip()]
+    try:
+        bases = baseline_urls(urls, baselines)
+    except ValueError as e:
+        sys.exit(f"::error::{e}")
 
-    results = []
-    for url in urls:
+    results, compared = [], {}
+    for url, base in zip(urls, bases):
         print(f"Scanning {url} ...")
         try:
             results.append((url, scan(api_url, api_key, url, best), None))
         except Exception as e:  # report it and keep scanning the rest
             print(f"::error::{url}: {e}")
             results.append((url, None, str(e)))
+            continue
+        if base:
+            print(f"Scanning the live page {base} to tell new issues from old ...")
+            try:
+                compared[url] = split_new(results[-1][1], scan(api_url, api_key, base, best))
+            except Exception as e:  # no comparison: every issue on this page counts, as without a baseline
+                print(f"::warning::{base}: {e} — every issue on {url} counts for the check")
 
-    failed = worst_hit(results, fail_on)
-    body = build_markdown(results, fail_on, failed)
+    # with a live-site comparison only the PR's new issues can fail the check
+    blocking = [(u, compared[u][0] if u in compared else r, e) for u, r, e in results]
+    failed = worst_hit(blocking, fail_on)
+    body = build_markdown(results, fail_on, failed, compared)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(summary, "a", encoding="utf-8") as f:
             f.write(body)

@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.ada_pr_review import MARKER, build_markdown, worst_hit
+from scripts.ada_pr_review import MARKER, baseline_urls, build_markdown, split_new, worst_hit
 
 
 def _result(*impacts):
@@ -39,3 +39,45 @@ class TestBuildMarkdown:
         assert "No accessibility violations found." in body
         assert "Could not scan: timeout" in body
         assert "Check fails" not in body
+
+
+def _page(*violations):
+    """violations: (rule_id, impact, [targets])."""
+    return {"axeResult": {"violations": [
+        {"id": rid, "impact": imp, "help": rid, "helpUrl": "", "nodes": [{"target": [t]} for t in targets]}
+        for rid, imp, targets in violations]}}
+
+
+@pytest.mark.unit
+class TestStopNewProblems:
+    LIVE = _page(("image-alt", "critical", ["#logo", "#hero"]), ("color-contrast", "serious", [".muted"]))
+
+    def test_only_elements_the_pr_adds_are_new(self):
+        pr = _page(("image-alt", "critical", ["#logo", "#hero", "#new-banner"]), ("color-contrast", "serious", [".muted"]))
+        new, old = split_new(pr, self.LIVE)
+        assert [(v["id"], [n["target"] for n in v["nodes"]]) for v in new["axeResult"]["violations"]] == \
+            [("image-alt", [["#new-banner"]])]
+        assert sum(len(v["nodes"]) for v in old["axeResult"]["violations"]) == 3
+
+    def test_old_issues_alone_do_not_fail_the_check(self):
+        new, old = split_new(self.LIVE, self.LIVE)          # PR changed nothing accessibility-wise
+        assert not worst_hit([("u", new, None)], "serious")
+        body = build_markdown([("u", self.LIVE, None)], "serious", False, {"u": (new, old)})
+        assert "No new accessibility issues" in body and "2 issue(s) already on the live site" in body
+
+    def test_a_new_serious_issue_fails_it(self):
+        pr = _page(("button-name", "critical", ["#buy"]), *[(v["id"], v["impact"], [n["target"][0] for n in v["nodes"]])
+                                                           for v in self.LIVE["axeResult"]["violations"]])
+        new, old = split_new(pr, self.LIVE)
+        assert worst_hit([("u", new, None)], "serious")
+        body = build_markdown([("u", pr, None)], "serious", True, {"u": (new, old)})
+        assert "1 new issue(s)" in body and "New in this PR" in body and "`button-name`" in body
+        assert "Check fails: new violations" in body
+
+    def test_baseline_urls_pairing(self):
+        urls = ["https://pr-12.vercel.app/", "https://pr-12.vercel.app/login?next=/"]
+        assert baseline_urls(urls, []) == [None, None]
+        assert baseline_urls(urls, ["https://site.com"]) == ["https://site.com/", "https://site.com/login?next=/"]
+        assert baseline_urls(urls, ["https://a/", "https://b/"]) == ["https://a/", "https://b/"]
+        with pytest.raises(ValueError):
+            baseline_urls(urls + ["https://pr-12.vercel.app/x"], ["https://a/", "https://b/"])
