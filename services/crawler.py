@@ -2,6 +2,7 @@
 URL normalization, link extraction, and domain-safety utilities for the crawler.
 All functions are pure / stateless — no Playwright or DB imports at module level.
 """
+import re
 from pathlib import PurePosixPath
 from urllib.parse import urlparse, urlunparse, urljoin
 
@@ -22,19 +23,24 @@ def get_root_domain(url: str) -> str:
     return urlparse(url.strip()).netloc.lower()
 
 
+_INDEX_PAGE = re.compile(r"/index\.html?$", re.I)
+
+
 def normalize_url(url: str) -> str:
     """
     Normalize a URL for deduplication.
     - Lowercases scheme and host
     - Removes the fragment (#section) — fragments are client-side only
     - Strips trailing slash from path (except bare root path '/')
+    - Drops a trailing index.html / index.htm: /docs/ and /docs/index.html are
+      the same page on static hosts, and counting both doubled the page
     - Preserves query string — ?page=1 and ?page=2 are distinct pages
     """
     url = url.strip()
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
-    path = parsed.path.rstrip("/") or "/"
+    path = _INDEX_PAGE.sub("", parsed.path).rstrip("/") or "/"
     # Reconstruct without fragment
     return urlunparse((scheme, netloc, path, parsed.params, parsed.query, ""))
 
@@ -48,6 +54,16 @@ def is_internal_link(href: str, root_domain: str) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
     return parsed.netloc.lower() == root_domain
+
+
+def in_scope(href: str, root_url: str) -> bool:
+    """True if href sits under the start URL's folder. A crawl of
+    https://x.github.io/Project/ must not wander to https://x.github.io/settings:
+    that is another site on the same host, with no connected repo.
+    ponytail: the folder is the start URL's own ("/Project" without a slash
+    scopes to "/"), so a project site should be started with its trailing slash."""
+    scope = urlparse(urljoin(root_url, ".")).path
+    return (urlparse(href).path or "/").startswith(scope) or urlparse(href).path + "/" == scope
 
 
 def should_skip_url(href: str) -> bool:

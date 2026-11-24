@@ -1000,6 +1000,21 @@ def api_crawl_pages(crawl_id):
     return jsonify({"ok": True, "crawl_id": crawl_id, "pages": pages, "count": len(pages)})
 
 
+@app.route("/api/crawl/<string:crawl_id>/page-summary", methods=["GET"])
+@require_auth
+def api_crawl_page_summary(crawl_id):
+    """Per page: issues by impact, elements affected, auto-fixable issues.
+    Separate from /pages, which is polled during a crawl and stays light;
+    this one reads every stored result, so the UI asks once the crawl is done."""
+    if not db.is_ready():
+        return jsonify({"ok": False, "error": "Database not configured"}), 503
+    from backend.services.auto_fix_service import RULES_WITH_FALLBACK
+    from backend.services.crawl_service import page_summary
+    ai = bool(Config.GEMINI_API_KEY)
+    return jsonify({"ok": True, "pages": {
+        url: page_summary(payload, ai, RULES_WITH_FALLBACK) for url, payload in db.get_crawl_page_payloads(crawl_id)}})
+
+
 @app.route("/api/crawl/<string:crawl_id>/pages/<int:page_id>/result", methods=["GET"])
 @require_auth
 def api_crawl_page_result(crawl_id, page_id):
@@ -1494,14 +1509,24 @@ def api_crawl_root_causes(crawl_id):
         return jsonify({"ok": False, "error": "Database not configured"}), 503
     groups = _crawl_root_causes(crawl_id)
     states = db.get_fix_states(_fix_scope(), [p["signature"] for grp in groups for p in grp["pages"]])
-    total_pages = len({u for u, _ in db.get_crawl_page_payloads(crawl_id)}) if groups else 0
+    from services.crawler import normalize_url
+    total_pages = len({normalize_url(u) for u, _ in db.get_crawl_page_payloads(crawl_id)}) if groups else 0
+    crawled_at = (db.get_crawl_job(crawl_id) or {}).get("created_at") or ""
     out = []
     for grp in groups:
         fix = next((states[(grp["rule_id"], p["signature"])] for p in grp["pages"] if (grp["rule_id"], p["signature"]) in states), None)
+        if fix and fix.get("pr_state") == "merged":
+            # This crawl ran after the merge and still found the problem: the fix went to a
+            # branch the live site isn't built from yet (e.g. a QA branch), or isn't deployed.
+            fix = {**fix, "still_live": bool(fix.get("merged_at")) and crawled_at[:19] > str(fix["merged_at"])[:19]}
+        # Per root cause: a crawl can span pages of more than one connected site,
+        # so the first group's answer must not decide for the rest.
+        connected = bool(db.get_repo_link_for_url(grp["sample"]["page_url"], g.current_user_id))
         out.append({k: v for k, v in grp.items() if k not in ("pages", "sample")} | {
-            "sample_page": grp["sample"]["page_url"], "pages": [p["url"] for p in grp["pages"][:50]], "fix": fix})
+            "sample_page": grp["sample"]["page_url"], "pages": [p["url"] for p in grp["pages"][:50]],
+            "fix": fix, "repo_connected": connected})
     return jsonify({"ok": True, "root_causes": out, "scanned_pages": total_pages,
-                    "repo_connected": bool(groups) and bool(db.get_repo_link_for_url(groups[0]["sample"]["page_url"], g.current_user_id))})
+                    "repo_connected": any(r["repo_connected"] for r in out)})
 
 
 @app.route("/api/crawl/<string:crawl_id>/root-causes/<string:group_id>/fix", methods=["POST"])
@@ -1973,10 +1998,11 @@ def api_fix_resubmit(fix_id):
 @app.route("/api/users", methods=["GET"])
 @require_auth
 def api_users_list():
-    """Team & roles (Approver only): every account and whether it is an Approver."""
+    """Team & roles: an Approver gets every account and its role; a developer
+    gets only their own role (no list) — the screen then explains who can change roles."""
     if not _is_approver():
-        return jsonify({"ok": False, "error": "Only an Approver can manage roles"}), 403
-    return jsonify({"ok": True, "users": db.list_users(), "me": g.current_user_id})
+        return jsonify({"ok": True, "role": "developer", "users": [], "me": g.current_user_id})
+    return jsonify({"ok": True, "role": "approver", "users": db.list_users(), "me": g.current_user_id})
 
 
 @app.route("/api/users/<int:user_id>/role", methods=["PUT"])

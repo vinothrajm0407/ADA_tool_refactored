@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from config import Config
 from services import db
-from services.crawler import get_root_domain, normalize_url, extract_internal_links
+from services.crawler import get_root_domain, normalize_url, extract_internal_links, in_scope
 from scripts.run_ada_check_python import (
     BROWSER_ARGS, bot_challenge_reason, can_ask_person, count_needs_review_as_violations, page_title_and_html, scanner_user_agent, settle,
     wait_for_person_to_verify, watch_requests,
@@ -468,6 +468,10 @@ class _CrawlState:
         with self.lock:
             for link in links:
                 if self.session and _LOGOUT_LINK.search(link):
+                    continue
+                # Found links stay under the start URL's folder; pages queued
+                # on purpose (login landing, "pages to include") come with first=True.
+                if not first and not in_scope(link, self.root_url):
                     continue
                 n = normalize_url(link)
                 if n not in self.visited and len(self.visited) < self.max_pages * 3:

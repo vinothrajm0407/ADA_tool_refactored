@@ -17,7 +17,10 @@ import {
   Printer,
   Lock,
   LockOpen,
+  Wand2,
+  ExternalLink,
 } from 'lucide-react';
+import { useAutoFixSupport, autoFixUnavailableReason } from '../utils/autoFixSupport';
 import SendReportModal from '../components/integrations/SendReportModal';
 import { useApp } from '../context/AppContext';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -95,12 +98,59 @@ function verdictFor(score) {
     : { label: 'Needs work', text: 'Many pages fail. Start with the pages listed under "Fix these first".' };
 }
 
-function StatTile({ value, label }) {
+function StatTile({ value, label, sub }) {
   return (
     <div className="rounded-xl bg-white px-4 py-4 text-center shadow-sm">
       <p className={`font-heading font-bold leading-none m-0 tabular-nums text-ink ${String(value).length > 5 ? 'text-2xl' : 'text-3xl'}`}>{value}</p>
       <p className="text-xs text-body mt-1.5 mb-0 font-medium">{label}</p>
+      {sub && <p className="text-[10.5px] text-body/80 mt-0.5 mb-0">{sub}</p>}
     </div>
+  );
+}
+
+// Fix all from the "Fix these first" list: load the page's stored result,
+// send every auto-fixable issue to /api/auto-fix-page, ONE pull request.
+// Same selection as the Fix all bar on a single-page scan (FixPageBar).
+function PageFixButton({ crawlId, page, fixable, support }) {
+  const [state, setState] = useState({ status: 'idle' });
+  async function run() {
+    setState({ status: 'running' });
+    try {
+      const res = await apiFetch(`/api/crawl/${crawlId}/pages/${page.id}/result`);
+      const data = await res.json();
+      const withHtml = v => (v.nodes || []).filter(n => (n?.html || '').trim());
+      const todo = (data.result?.axeResult?.violations || [])
+        .filter(v => withHtml(v).length && !autoFixUnavailableReason(support, v.id, true))
+        .map(v => ({ rule: v, nodes: withHtml(v) }));
+      if (!todo.length) return setState({ status: 'failed', error: 'Nothing on this page can be auto-fixed' });
+      const fix = await (await apiFetch('/api/auto-fix-page', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_url: page.url, violations: todo }),
+      })).json();
+      setState(fix.pr_url ? { status: 'done', pr_url: fix.pr_url, duplicate: fix.duplicate }
+        : { status: 'failed', error: fix.error || 'Fix all failed' });
+    } catch {
+      setState({ status: 'failed', error: 'Could not reach the server' });
+    }
+  }
+  if (state.status === 'done') {
+    return (
+      <a href={state.pr_url} target="_blank" rel="noopener noreferrer"
+        className="text-[11.5px] font-semibold text-sage hover:underline inline-flex items-center gap-1 whitespace-nowrap">
+        <CheckCircle size={12} /> {state.duplicate ? 'PR already open' : 'PR opened'} <ExternalLink size={10} />
+      </a>
+    );
+  }
+  return (
+    <span className="flex flex-col items-end gap-0.5">
+      <button type="button" onClick={run} disabled={state.status === 'running'}
+        title="Fix every auto-fixable issue on this page in one pull request (takes a few minutes)"
+        className="text-[11.5px] font-semibold text-teal border border-solid border-teal/40 rounded-md px-2 py-1 bg-white hover:bg-teal/5 inline-flex items-center gap-1 whitespace-nowrap disabled:opacity-60 cursor-pointer">
+        {state.status === 'running' ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+        {state.status === 'running' ? 'Fixing…' : `Fix ${fixable} — one PR`}
+      </button>
+      {state.status === 'failed' && <span role="alert" className="text-[10.5px] text-coral max-w-[200px] text-right">{state.error}</span>}
+    </span>
   );
 }
 
@@ -228,7 +278,7 @@ function FilterPill({ label, active, onClick }) {
 }
 
 // Task 5: Top Violating Pages — clickable ranked table replacing the old bar chart
-function TopViolatingTable({ pages, onRowClick }) {
+function TopViolatingTable({ pages, onRowClick, crawlId, support }) {
   if (pages.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-body text-sm">
@@ -242,33 +292,47 @@ function TopViolatingTable({ pages, onRowClick }) {
       {pages.map((p, idx) => {
         const pct = max > 0 ? Math.round((p.violations / max) * 100) : 0;
         const scoreColor = p._score >= 80 ? '#0F766E' : p._score >= 60 ? '#F59E0B' : '#E76F51';
+        const s = p._summary;
         return (
+          <div key={p.url} className="flex items-center gap-3 pr-4 hover:bg-gray-50 transition-colors">
           <button
-            key={p.url}
+            type="button"
             onClick={() => onRowClick && onRowClick(p)}
-            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors text-left"
+            className="flex-1 min-w-0 flex items-center gap-3 pl-4 py-3 text-left bg-transparent border-0 cursor-pointer"
           >
             <span className="text-[11px] font-mono text-body w-5 flex-shrink-0">
               #{idx + 1}
             </span>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-ink truncate"title={p.url}>
+              <p className="text-xs font-medium text-ink truncate m-0" title={p.url}>
                 {p.name || p.url}
               </p>
+              {s && (
+                <p className="text-[11px] text-body m-0 mt-0.5 flex flex-wrap gap-x-2">
+                  {s.critical > 0 && <span className="font-semibold text-coral">{s.critical} critical</span>}
+                  {s.serious > 0 && <span className="font-semibold text-amber">{s.serious} serious</span>}
+                  {s.moderate + s.minor > 0 && <span>{s.moderate + s.minor} moderate/minor</span>}
+                  <span>· {s.elements} element{s.elements === 1 ? '' : 's'}</span>
+                </p>
+              )}
               <div className="mt-1 h-1 rounded-full bg-gray-100 overflow-hidden">
                 <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: '#E76F51', opacity: 0.5 }} />
               </div>
             </div>
             {p._score != null && (
-              <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: scoreColor }}>
-                {p._score}
+              <span className="text-[11px] text-body flex-shrink-0 whitespace-nowrap">
+                Score <strong className="font-semibold" style={{ color: scoreColor }}>{p._score}</strong>
               </span>
             )}
-            <span className="text-sm font-bold text-coral flex-shrink-0 w-8 text-right">
-              {p.violations}
+            <span className="text-[11px] text-body flex-shrink-0 w-20 text-right whitespace-nowrap">
+              <strong className="text-sm font-bold text-coral">{p.violations}</strong> {p.violations === 1 ? 'issue' : 'issues'}
             </span>
             <ChevronRight size={14} className="text-body flex-shrink-0"/>
           </button>
+          {s?.fixable > 0 && p._page?.id != null && (
+            <PageFixButton crawlId={crawlId} page={p._page} fixable={s.fixable} support={support} />
+          )}
+          </div>
         );
       })}
     </div>
@@ -310,6 +374,9 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
   const [reCrawlLoading, setReCrawlLoading] = useState(false);
   const [stopLoading, setStopLoading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  const [summary, setSummary] = useState({}); // url -> {critical, serious, ..., elements, fixable}
+  const support = useAutoFixSupport();
 
   const pollRef = useRef(null);
 
@@ -372,6 +439,19 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     }, 2500);
     return () => clearInterval(pollRef.current);
   }, [polling, fetchJob, fetchPages]);
+
+  // ---- per-page severity summary: once the crawl has stopped -------------
+  const crawlDone = !!job && job.status !== 'running' && job.status !== 'pending';
+  useEffect(() => {
+    setSummary({});
+    if (!crawlId || !crawlDone) return;
+    let cancelled = false;
+    apiFetch(`/api/crawl/${crawlId}/page-summary`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.ok) setSummary(d.pages || {}); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [crawlId, crawlDone]);
 
   // ---- row click + violation fetch ----------------------------------------
   async function handleRowClick(page) {
@@ -550,19 +630,29 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
     errorPages   > 0 && { name: 'Error',      value: errorPages,   color: '#9CA3AF' },
   ].filter(Boolean);
 
-  // Task 5: top violating pages — enriched with _score for the clickable table
+  // Fix these first: worst impact first — critical issues, then serious, then
+  // the plain count (all a page has before the severity summary loads).
+  const sevKey = (p) => { const s = summary[p.url] || {}; return [s.critical || 0, s.serious || 0, p._violations]; };
   const topViolationPages = [...enrichedPages]
     .filter((p) => p._violations > 0)
-    .sort((a, b) => b._violations - a._violations)
+    .sort((a, b) => { const x = sevKey(a), y = sevKey(b); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); })
     .slice(0, 10)
     .map((p) => ({
       name: (p.url || '').replace(/^https?:\/\/[^/]+/, '') || '/',
       violations: p._violations,
       url: p.url,
       _score: p._score,
+      _summary: summary[p.url],
       // keep full page reference for drawer
       _page: p,
     }));
+  const summaries = Object.values(summary);
+  const totalElements = summaries.length ? summaries.reduce((n, s) => n + s.elements, 0) : null;
+  // "3/50" read as a crawl that stopped early; 50 is only the limit.
+  const hitLimit = job?.max_pages && totalPages >= job.max_pages;
+  const pagesTile = !crawlDone && job?.max_pages && job.max_pages <= 500
+    ? { value: `${totalPages}/${job.max_pages}`, label: 'Pages scanned' }
+    : { value: totalPages, label: 'Pages scanned', sub: hitLimit ? `page limit (${job.max_pages}) reached` : crawlDone ? 'every page found' : null };
 
   const maxPagesCount = job?.max_pages ?? job?.total_discovered ?? 1;
   const scanned = job?.total_scanned ?? 0;
@@ -710,8 +800,9 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
                 </div>
                 <div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <StatTile value={job?.max_pages && job.max_pages <= 500 ? `${totalPages}/${job.max_pages}` : totalPages} label="Pages scanned" />
-                    <StatTile value={totalViolations} label="Total violations" />
+                    <StatTile {...pagesTile} />
+                    <StatTile value={totalViolations} label="Issue types"
+                      sub={totalElements != null ? `${totalElements} elements affected` : null} />
                     <StatTile value={failingPages} label="Pages with issues" />
                     <StatTile value={`${passRate}%`} label="Pages passing" />
                   </div>
@@ -742,10 +833,13 @@ export default function CrawlResultsPage({ crawlId: crawlIdProp, onStatusChange,
         {topViolationPages.length > 0 && (
           <ChartCard
             title="Fix these first"
-            subtitle="Pages with the most violations. Click a page to see what's wrong."
+            subtitle="Worst pages first: critical issues, then serious. Click a page to see what's wrong, or fix it in one pull request."
+            fit
           >
             <TopViolatingTable
               pages={topViolationPages}
+              crawlId={crawlId}
+              support={support}
               onRowClick={(p) => p._page && handleRowClick(p._page)}
             />
           </ChartCard>
