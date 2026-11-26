@@ -81,3 +81,30 @@ class TestStopNewProblems:
         assert baseline_urls(urls, ["https://a/", "https://b/"]) == ["https://a/", "https://b/"]
         with pytest.raises(ValueError):
             baseline_urls(urls + ["https://pr-12.vercel.app/x"], ["https://a/", "https://b/"])
+
+
+def test_unreachable_server_is_not_reported_as_clean():
+    from scripts.ada_pr_review import build_markdown
+    md = build_markdown([("https://x.test/", None, "Connection refused")], "serious", True)
+    assert "Could not scan any page" in md and "No accessibility violations" not in md
+
+
+def test_gitlab_ci_updates_its_earlier_note(monkeypatch):
+    from scripts import ada_pr_review as r
+    monkeypatch.setenv("CI_MERGE_REQUEST_IID", "4")
+    monkeypatch.setenv("CI_API_V4_URL", "https://gitlab.com/api/v4")
+    monkeypatch.setenv("CI_PROJECT_ID", "11")
+    calls = []
+    def fake(method, url, token, body=None, accept=None):
+        calls.append((method, url))
+        return [{"id": 1, "body": "hi"}, {"id": 2, "body": "## ADA Accessibility Review\nold"}] if method == "GET" else {}
+    monkeypatch.setattr(r, "_request", fake)
+    r.post_comment(build_markdown([("u", {}, None)], "serious", False))
+    assert calls[-1] == ("PUT", "https://gitlab.com/api/v4/projects/11/merge_requests/4/notes/2")
+
+
+def test_bitbucket_comment_has_no_raw_html():
+    from scripts.ada_pr_review import for_bitbucket
+    old = {"axeResult": {"violations": [{"id": "x", "impact": "serious", "nodes": [{}]}]}}
+    body = for_bitbucket(build_markdown([("u", old, None)], "serious", False, {"u": ({}, old)}))
+    assert "<" not in body and "**1 issue(s) already on the live site (not blocking)**" in body

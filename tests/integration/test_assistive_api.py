@@ -125,9 +125,10 @@ class TestAssistedKeyboard:
             client.post("/api/assisted/keyboard",
                         json={"url": "https://example.com"},
                         headers=authed_headers)
-        db_mock.save_assistive_scan.assert_called_once_with(
-            "keyboard", "https://example.com", True, _keyboard_result()
-        )
+        db_mock.save_assistive_scan.assert_called_once()
+        args, kwargs = db_mock.save_assistive_scan.call_args
+        assert args == ("keyboard", "https://example.com", True, _keyboard_result())
+        assert kwargs["user_id"] is not None   # All activity credits who ran it
 
     def test_failed_test_still_returns_200(self, client, db_mock, authed_headers):
         with patch("app.run_keyboard_assisted_test", return_value=_keyboard_result(passed=False)):
