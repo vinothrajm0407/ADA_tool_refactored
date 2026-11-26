@@ -77,7 +77,7 @@ def run_ada_scan(scan_url: str, metadata: dict | None = None, timeout: int = 300
         scan_history_id = None
         if db.is_ready():
             try:
-                scan_history_id = db.save_scan_history(result)
+                scan_history_id = db.save_scan_history(result, user_id=metadata.get("user_id"))
             except Exception:
                 logger.exception("Failed to save scan history for %s", scan_url)
 

@@ -125,7 +125,9 @@ def build_markdown(results, fail_on, failed, compared=None):
     site; those list the PR's new issues, and the old ones as not blocking."""
     compared = compared or {}
     lines = [MARKER, "## ADA Accessibility Review", ""]
-    if compared:
+    if all(error for _, _, error in results):   # nothing scanned — don't claim "no issues"
+        lines.append(f"**Could not scan any page** — check that `api-url` is reachable from GitHub and the API key is valid.")
+    elif compared:
         added = sum(len(violations(n)) for n, _ in compared.values())
         lines.append(f"**{added} new issue(s) in this pull request.** Issues already on the live site don't block it."
                      if added else "**No new accessibility issues in this pull request.**")
@@ -152,8 +154,47 @@ def build_markdown(results, fail_on, failed, compared=None):
     return "\n".join(lines) + "\n"
 
 
+def for_bitbucket(body):
+    """Bitbucket shows raw HTML as text: drop the marker, flatten <details>."""
+    body = body.replace(MARKER + "\n", "").replace("</details>", "")
+    return body.replace("<details><summary>", "**").replace("</summary>", "**")
+
+
+def _upsert(list_url, item_url, token, payload, text_of, items_of=lambda r: r):
+    """Update our comment from a previous run (found by its heading), else create one."""
+    found = items_of(_request("GET", list_url, token))
+    mine = next((c for c in found if "## ADA Accessibility Review" in (text_of(c) or "")), None)
+    if mine:
+        _request("PUT", item_url.format(mine["id"]), token, payload)
+    else:
+        _request("POST", list_url.split("?")[0], token, payload)
+
+
+def post_other_ci(body):
+    """GitLab merge request / Bitbucket pull request comment, with ADA_REPO_TOKEN. True if this is one."""
+    token = os.environ.get("ADA_REPO_TOKEN")
+    try:
+        if os.environ.get("CI_MERGE_REQUEST_IID"):   # GitLab
+            notes = (f"{os.environ['CI_API_V4_URL']}/projects/{os.environ['CI_PROJECT_ID']}"
+                     f"/merge_requests/{os.environ['CI_MERGE_REQUEST_IID']}/notes")
+            _upsert(notes + "?per_page=100", notes + "/{}", token, {"body": body}, lambda c: c.get("body"))
+        elif os.environ.get("BITBUCKET_PR_ID"):
+            comments = (f"https://api.bitbucket.org/2.0/repositories/{os.environ['BITBUCKET_REPO_FULL_NAME']}"
+                        f"/pullrequests/{os.environ['BITBUCKET_PR_ID']}/comments")
+            _upsert(comments + "?pagelen=100", comments + "/{}", token, {"content": {"raw": for_bitbucket(body)}},
+                    lambda c: (c.get("content") or {}).get("raw"), lambda r: r.get("values", []))
+        else:
+            return False
+        print("Posted ADA review on the pull request")
+    except urllib.error.HTTPError as e:
+        print(f"Could not post the review comment ({e.code}): check the ADA_REPO_TOKEN variable.")
+    return True
+
+
 def post_comment(body):
     """Create the ADA comment on the PR, or update the one from a previous run (no pile-up)."""
+    if post_other_ci(body):
+        return
     token, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
     try:
         with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:

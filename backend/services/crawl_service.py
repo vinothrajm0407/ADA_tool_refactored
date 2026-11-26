@@ -125,6 +125,7 @@ def create_crawl_job(root_url: str, options: dict | None = None) -> dict:
         created_at=created_at,
         notify_email=notify_email,
         metadata=saved_login,
+        user_id=user_id,
     )
 
     # In-memory fallback: seed the record so status polling works immediately

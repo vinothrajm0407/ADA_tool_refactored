@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   GitBranch, CheckCircle2, Trash2, Plus, X, RefreshCw, Settings2,
-  Link2, Lock, ShieldCheck, FolderGit2, Rocket,
+  Link2, Lock, ShieldCheck, FolderGit2, Rocket, Loader2,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api';
 import PageHeader from '../components/ui/PageHeader';
@@ -355,6 +355,54 @@ function ConnectRepoModal({ onClose, onConnected, initial, triggerRef }) {
   );
 }
 
+// ── Turn on PR checks (GitHub / GitLab / Bitbucket) ────────────────────────────
+// One click: API key saved as the repo secret + a PR adding the workflow that
+// fails only on issues a pull request adds ("Stop new problems").
+export function PrCheckButton({ link }) {
+  const [state, setState] = useState({ status: 'idle' });
+
+  async function turnOn() {
+    setState({ status: 'running' });
+    try {
+      const res = await apiFetch(`/api/repo-links/${link.id}/pr-check`, { method: 'POST' });
+      const data = await res.json();
+      setState(data.ok ? { status: 'done', ...data } : { status: 'error', error: data.error || 'Could not turn on PR checks' });
+    } catch {
+      setState({ status: 'error', error: 'Could not reach the server' });
+    }
+  }
+
+  if (state.status === 'done') {
+    return (
+      <div className="w-full text-xs text-body bg-sage/10 rounded-xl px-3 py-2 space-y-1" role="status">
+        <p className="m-0">
+          <CheckCircle2 size={12} className="inline text-sage-700 mr-1" />
+          {state.already_on ? 'PR checks are already on for this repo — every pull request is checked. Only issues a PR adds fail it.' : <>
+            {state.already_open ? 'A setup pull request is already open: ' : 'Setup pull request opened: '}
+            <a href={state.pr_url} target="_blank" rel="noreferrer" className="font-semibold text-teal underline">PR #{state.pr_number}</a>
+            {' '}— merge it to turn on the check. Only issues a PR adds will fail it.
+          </>}
+        </p>
+        {state.warning && <p className="m-0 text-amber-700">⚠ {state.warning}</p>}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <button
+        onClick={turnOn}
+        disabled={state.status === 'running'}
+        className="btn-secondary text-xs py-2 px-3 flex items-center gap-1.5 disabled:opacity-60"
+        title="Save an API key as a repo secret and open a pull request that adds the accessibility check"
+      >
+        {state.status === 'running' ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+        {state.status === 'running' ? 'Setting up…' : 'Turn on PR checks'}
+      </button>
+      {state.status === 'error' && <span className="text-xs text-coral-700" role="alert">{state.error}</span>}
+    </div>
+  );
+}
+
 // ── Repo link card ─────────────────────────────────────────────────────────────
 function RepoLinkCard({ link, onEdit, onDisconnect, disconnecting, editButtonRef }) {
   const { bg, Icon, size = 30, strokeWidth } = repoProviderIconMeta(link.repo_url);
@@ -398,6 +446,11 @@ function RepoLinkCard({ link, onEdit, onDisconnect, disconnecting, editButtonRef
           <Trash2 size={14} /> Disconnect
         </button>
       </div>
+      {['github', 'gitlab', 'bitbucket'].includes(link.provider || 'github') && (
+        <div className="w-full border-t border-gray-100 pt-3">
+          <PrCheckButton link={link} />
+        </div>
+      )}
     </div>
   );
 }

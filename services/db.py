@@ -365,6 +365,13 @@ def _ensure_table() -> None:
                 ON dbo.AssistiveScanHistory(TimestampUtc DESC)
         """)
         conn.commit()
+        # Who ran it — All activity shows a name on scans, crawls and tests, not only fixes.
+        for table in ("ScanHistory", "CrawlJob", "AssistiveScanHistory"):
+            cur.execute(f"""
+                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.{table}') AND name = N'UserId')
+                ALTER TABLE dbo.{table} ADD UserId INT NULL
+            """)
+        conn.commit()
         cur.execute("""
             IF NOT EXISTS (
                 SELECT 1 FROM sys.indexes
@@ -1245,7 +1252,7 @@ def get_scan_job(job_id: str) -> dict | None:
         conn.close()
 
 
-def save_scan_history(result: dict, limit: int = 500) -> int | None:
+def save_scan_history(result: dict, limit: int = 500, user_id: int | None = None) -> int | None:
     """
     Insert one row into dbo.ScanHistory with full result JSON for later retrieval.
     Returns the auto-assigned Id of the inserted row (used by the crawler to link
@@ -1270,12 +1277,12 @@ def save_scan_history(result: dict, limit: int = 500) -> int | None:
             cur.execute(
                 """
                 INSERT INTO dbo.ScanHistory
-                    (Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, ResultPayload, Breakdown)
+                    (Url, TimestampUtc, Passes, Violations, PassRate, UsedFallback, IncludeBestPractices, ResultPayload, Breakdown, UserId)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (url, timestamp, passes, violations, pass_rate,
-                 1 if used_fallback else 0, 1 if include_best_practices else 0, payload_json, breakdown_json),
+                 1 if used_fallback else 0, 1 if include_best_practices else 0, payload_json, breakdown_json, user_id),
             )
             row = cur.fetchone()
             new_id = int(row[0]) if row and row[0] is not None else None
@@ -1636,6 +1643,7 @@ def save_crawl_job(
     created_at: str | None = None,
     notify_email: str | None = None,
     metadata: dict | None = None,
+    user_id: int | None = None,
 ) -> None:
     if not is_enabled() or _INIT_ERROR:
         return
@@ -1646,11 +1654,11 @@ def save_crawl_job(
             cur.execute(
                 """
                 INSERT INTO dbo.CrawlJob
-                    (CrawlId, RQJobId, RootUrl, Status, MaxDepth, MaxPages, CreatedAt, NotifyEmail, Metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (CrawlId, RQJobId, RootUrl, Status, MaxDepth, MaxPages, CreatedAt, NotifyEmail, Metadata, UserId)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (crawl_id, rq_job_id, root_url, status, max_depth, max_pages,
-                 created_at, notify_email, json.dumps(metadata or {})),
+                 created_at, notify_email, json.dumps(metadata or {}), user_id),
             )
         conn.commit()
     finally:
@@ -3205,6 +3213,7 @@ def save_assistive_scan(
     url: str,
     passed: bool,
     result_payload: dict,
+    user_id: int | None = None,
 ) -> int | None:
     """
     Persist one assistive test run (keyboard or contrast).
@@ -3220,11 +3229,11 @@ def save_assistive_scan(
             cur.execute(
                 """
                 INSERT INTO dbo.AssistiveScanHistory
-                    (ScanType, Url, TimestampUtc, Passed, ResultPayload)
+                    (ScanType, Url, TimestampUtc, Passed, ResultPayload, UserId)
                 OUTPUT INSERTED.Id
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (scan_type[:50], url[:2048], timestamp, 1 if passed else 0, payload_json),
+                (scan_type[:50], url[:2048], timestamp, 1 if passed else 0, payload_json, user_id),
             )
             row = cur.fetchone()
             new_id = int(row[0]) if row and row[0] is not None else None
@@ -4278,8 +4287,9 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
     Auto-Fixes, PR approvals/merges, alerts, Slack/Teams/email report
     deliveries, repo connections and schedules.
     Each event: {at, kind, action, target, result, status: ok|fail|info, by, link, ref}.
-    Scans, crawls, assistive tests, alerts and schedules are workspace-wide
-    (those tables carry no user); fixes, repos and deliveries are this user's."""
+    Scans, crawls, assistive tests, alerts and schedules are workspace-wide, each
+    credited to who ran it (older rows from before UserId was stored show no name);
+    fixes, repos and deliveries are this user's."""
     if not is_enabled() or _INIT_ERROR:
         return []
     user = get_user_by_id(user_id) or {}
@@ -4295,14 +4305,15 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
     conn = _conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT TOP (?) Id, Url, TimestampUtc, Violations, PassRate FROM dbo.ScanHistory ORDER BY TimestampUtc DESC", limit)
+        cur.execute("SELECT TOP (?) s.Id, s.Url, s.TimestampUtc, s.Violations, s.PassRate, COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName "
+                    "FROM dbo.ScanHistory s LEFT JOIN dbo.Users u ON u.Id = s.UserId ORDER BY s.TimestampUtc DESC", limit)
         for r in cur.fetchall():
             add(r.TimestampUtc, "scan", "Page scanned", r.Url,
                 f"{r.Violations} failed rule{'s' if r.Violations != 1 else ''} · {r.PassRate}% pass rate",
-                "fail" if r.Violations else "ok", ref=f"SCAN-{r.Id}")
+                "fail" if r.Violations else "ok", r.ByName, ref=f"SCAN-{r.Id}")
 
-        cur.execute("SELECT TOP (?) CrawlId, RootUrl, Status, TotalScanned, TotalFailed, CreatedAt, FailureReason "
-                    "FROM dbo.CrawlJob ORDER BY CreatedAt DESC", limit)
+        cur.execute("SELECT TOP (?) c.CrawlId, c.RootUrl, c.Status, c.TotalScanned, c.TotalFailed, c.CreatedAt, c.FailureReason, COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName "
+                    "FROM dbo.CrawlJob c LEFT JOIN dbo.Users u ON u.Id = c.UserId ORDER BY c.CreatedAt DESC", limit)
         for r in cur.fetchall():
             ok = (r.Status or "").lower() in ("completed", "complete", "done", "finished")
             failed = (r.Status or "").lower() in ("failed", "error", "cancelled", "canceled")
@@ -4310,13 +4321,13 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
                 f"{r.Status} · {r.TotalScanned} page{'s' if r.TotalScanned != 1 else ''} scanned"
                 + (f", {r.TotalFailed} failed" if r.TotalFailed else "")
                 + (f" — {r.FailureReason[:120]}" if failed and r.FailureReason else ""),
-                "ok" if ok else "fail" if failed else "info", ref=r.CrawlId)
+                "ok" if ok else "fail" if failed else "info", r.ByName, ref=r.CrawlId)
 
-        cur.execute("SELECT TOP (?) Id, ScanType, Url, TimestampUtc, Passed FROM dbo.AssistiveScanHistory "
-                    "ORDER BY TimestampUtc DESC", limit)
+        cur.execute("SELECT TOP (?) a.Id, a.ScanType, a.Url, a.TimestampUtc, a.Passed, COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName FROM dbo.AssistiveScanHistory a "
+                    "LEFT JOIN dbo.Users u ON u.Id = a.UserId ORDER BY a.TimestampUtc DESC", limit)
         for r in cur.fetchall():
             add(r.TimestampUtc, "assistive", f"Assistive test — {(r.ScanType or '').replace('-', ' ')}", r.Url,
-                "Passed" if r.Passed else "Failed", "ok" if r.Passed else "fail", ref=f"ASSISTIVE-{r.Id}")
+                "Passed" if r.Passed else "Failed", "ok" if r.Passed else "fail", r.ByName, ref=f"ASSISTIVE-{r.Id}")
 
         # Every recorded decision (FixReview): approve, request changes, reject, resubmit.
         cur.execute("""SELECT TOP (?) r.Kind, r.Comment, r.CreatedAt, r.PrUrl, f.Id, f.RuleId, f.PageUrl,
@@ -4360,11 +4371,12 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
                 add(r.MergedAt, "review", f"PR merged — {r.RuleId}", r.PageUrl,
                     "Merged" + ("" if r.ApprovedBy else " without a review approval"), "ok", r.MergedBy, r.PrUrl, f"FIX-{r.Id}")
 
-        cur.execute("SELECT TOP (?) Id, CrawlId, RootUrl, AlertType, Severity, Status, CreatedAt "
-                    "FROM dbo.AccessibilityAlert ORDER BY CreatedAt DESC", limit)
+        cur.execute("SELECT TOP (?) al.Id, al.CrawlId, al.RootUrl, al.AlertType, al.Severity, al.Status, al.CreatedAt, COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName "
+                    "FROM dbo.AccessibilityAlert al LEFT JOIN dbo.CrawlJob c ON c.CrawlId = al.CrawlId "
+                    "LEFT JOIN dbo.Users u ON u.Id = c.UserId ORDER BY al.CreatedAt DESC", limit)
         for r in cur.fetchall():
             add(r.CreatedAt, "alert", f"Alert — {(r.AlertType or '').replace('_', ' ')}", r.RootUrl,
-                f"{r.Severity} · {r.Status}", "fail" if r.Status == "active" else "info", ref=r.CrawlId)
+                f"{r.Severity} · {r.Status}", "fail" if r.Status == "active" else "info", r.ByName, ref=r.CrawlId)
 
         cur.execute("""SELECT TOP (?) d.ReportType, d.Status, d.SentAt, d.ChannelName, d.ErrorMessage, d.Reference, i.Platform
                        FROM dbo.IntegrationDelivery d
@@ -4383,10 +4395,11 @@ def get_activity(user_id: int, limit: int = 500, all_fixes: bool = False) -> lis
         for r in cur.fetchall():
             add(r.ConnectedAt, "setup", f"Repo connected ({r.Provider})", r.SiteUrl, r.RepoUrl, "info", me, r.RepoUrl)
 
-        cur.execute("SELECT Id, RootUrl, Frequency, Enabled, LastRunAt, CreatedAt FROM dbo.CrawlSchedule")
+        cur.execute("SELECT cs.Id, cs.RootUrl, cs.Frequency, cs.Enabled, cs.LastRunAt, cs.CreatedAt, COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(u.FirstName, ' ', u.LastName))), ''), u.Email) AS ByName "
+                    "FROM dbo.CrawlSchedule cs LEFT JOIN dbo.Users u ON u.Id = cs.UserId")
         for r in cur.fetchall():
             add(r.CreatedAt, "setup", "Schedule created", r.RootUrl,
-                f"{r.Frequency}{'' if r.Enabled else ' (paused)'}", "info", ref=f"SCHEDULE-{r.Id}")
+                f"{r.Frequency}{'' if r.Enabled else ' (paused)'}", "info", r.ByName, ref=f"SCHEDULE-{r.Id}")
     finally:
         conn.close()
     ev.sort(key=lambda e: e["at"], reverse=True)

@@ -586,7 +586,7 @@ def api_scan_import():
     if not db.is_ready():
         return jsonify({"ok": False, "error": "Scan history is unavailable — database not configured"}), 503
     try:
-        scan_id = db.save_scan_history(result)
+        scan_id = db.save_scan_history(result, user_id=g.current_user_id)
     except Exception:
         logging.exception("Failed to save imported scan for %s", url)
         return jsonify({"ok": False, "error": "Could not save the scan"}), 500
@@ -687,7 +687,7 @@ def api_assisted_keyboard():
         result = run_keyboard_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
-                db.save_assistive_scan("keyboard", url, bool(result.get("passed", False)), result)
+                db.save_assistive_scan("keyboard", url, bool(result.get("passed", False)), result, user_id=g.current_user_id)
             except Exception as _e:
                 logging.warning("Failed to persist keyboard scan: %s", _e)
         return jsonify({"ok": True, "result": result})
@@ -714,7 +714,7 @@ def api_assisted_color_contrast():
         result = run_color_contrast_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
-                db.save_assistive_scan("contrast", url, bool(result.get("passed", False)), result)
+                db.save_assistive_scan("contrast", url, bool(result.get("passed", False)), result, user_id=g.current_user_id)
             except Exception as _e:
                 logging.warning("Failed to persist contrast scan: %s", _e)
         return jsonify({"ok": True, "result": result})
@@ -741,7 +741,7 @@ def api_assisted_page_structure():
         result = run_page_structure_assisted_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
-                db.save_assistive_scan("page-structure", url, bool(result.get("passed", False)), result)
+                db.save_assistive_scan("page-structure", url, bool(result.get("passed", False)), result, user_id=g.current_user_id)
             except Exception as _e:
                 logging.warning("Failed to persist page-structure scan: %s", _e)
         return jsonify({"ok": True, "result": result})
@@ -768,7 +768,7 @@ def api_assisted_forms():
         result = run_forms_accessibility_test(url, assisted=bool(data.get("assisted")))
         if db.is_ready():
             try:
-                db.save_assistive_scan("forms", url, bool(result.get("passed", False)), result)
+                db.save_assistive_scan("forms", url, bool(result.get("passed", False)), result, user_id=g.current_user_id)
             except Exception as _e:
                 logging.warning("Failed to persist forms scan: %s", _e)
         return jsonify({"ok": True, "result": result})
@@ -804,7 +804,7 @@ def api_assisted_run():
     if db.is_ready():
         for module, result in results.items():
             try:
-                db.save_assistive_scan(_ASSISTIVE_HISTORY_TYPE[module], url, bool(result.get("passed", False)), result)
+                db.save_assistive_scan(_ASSISTIVE_HISTORY_TYPE[module], url, bool(result.get("passed", False)), result, user_id=g.current_user_id)
             except Exception as _e:
                 logging.warning("Failed to persist %s scan: %s", module, _e)
     return jsonify({"ok": True, "results": results})
@@ -2842,6 +2842,50 @@ def api_repo_links_delete(link_id):
     if not ok:
         return jsonify({"ok": False, "error": "Repo link not found"}), 404
     return jsonify({"ok": True})
+
+
+@app.route("/api/repo-links/<int:link_id>/pr-check", methods=["POST"])
+@require_auth
+def api_repo_link_pr_check(link_id):
+    """Turn on PR checks: API key → repo secret, then a PR adding the workflow."""
+    from backend.services import pr_check_setup as setup
+    if refused := _signed_in_with_api_key():
+        return refused
+    link = db.get_repo_link(link_id, g.current_user_id)
+    if not link:
+        return jsonify({"ok": False, "error": "Repo link not found"}), 404
+    link["provider"] = link.get("provider") or "github"
+    if link["provider"] not in setup.PROVIDER_NAMES or not link.get("access_token"):
+        return jsonify({"ok": False, "error": "PR checks can be turned on for GitHub, GitLab and Bitbucket repos"}), 400
+    name = setup.PROVIDER_NAMES[link["provider"]]
+    api_url = Config.APP_BASE_URL.rstrip("/")
+    host = urllib.parse.urlparse(api_url).hostname or ""
+    warning = (f"{name} can't reach {api_url}. Set APP_BASE_URL to a public address (e.g. an ngrok URL) "
+               "and edit api-url in the PR before merging.") if host in ("localhost", "127.0.0.1") else None
+    try:
+        if existing := setup.open_setup_pr(link):
+            return jsonify({"ok": True, "pr_url": existing["url"], "pr_number": existing["number"],
+                            "already_open": True, "warning": warning})
+        if setup.already_on(link, api_url):
+            return jsonify({"ok": True, "already_on": True, "warning": warning})
+        if link["provider"] == "github" and setup.missing_workflow_scope(link):
+            return jsonify({"ok": False, "error":
+                "This repo's GitHub token is missing the \"workflow\" scope, which GitHub requires to add a "
+                "workflow file. On GitHub: Settings → Developer settings → Personal access tokens → edit this "
+                "token → tick \"workflow\" → Update token. Then click Turn on PR checks again."}), 400
+        key = db.create_api_key(g.current_user_id, f"PR check — {setup._parse_repo(link['provider'], link['repo_url'])}")
+        try:
+            setup.save_secret(link, key["key"])
+            pr = setup.open_workflow_pr(link, api_url)
+        except Exception:
+            db.revoke_api_key(g.current_user_id, key["id"])   # never leave an unused live key
+            raise
+    except setup.SetupError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    except Exception as e:
+        logging.exception("Turn on PR checks failed for link %s: %s", link_id, e)
+        return jsonify({"ok": False, "error": f"Could not reach {name} — try again"}), 502
+    return jsonify({"ok": True, "pr_url": pr["url"], "pr_number": pr["number"], "warning": warning})
 
 
 # ── Send report ───────────────────────────────────────────────────────────────

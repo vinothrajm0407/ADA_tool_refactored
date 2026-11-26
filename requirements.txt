@@ -21,3 +21,6 @@ cryptography>=42.0.0
 
 # Cron expression parsing for Crawl Schedules' "Cron Expression" schedule type
 croniter>=2.0.0
+
+# Encrypts the ADA_API_KEY repo secret for "Turn on PR checks" (GitHub sealed box)
+PyNaCl>=1.5.0
